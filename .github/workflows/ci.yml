@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Lint maintained modules
+        run: python -m ruff check apps/api/integrations tests/unit tests/integration
+      - name: Compile backend
+        run: python -m compileall -q apps/api
+      - name: Test
+        env:
+          DB_TYPE: sqlite
+          SQLITE_PATH: ./ci-test.db
+          RAG_PROVIDER: punditrag
+          RAG_FALLBACK_TO_CHROMA: "false"
+        run: python -m pytest

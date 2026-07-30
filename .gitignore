@@ -1,0 +1,67 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+credentials.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.codegraph/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Runtime data
+*.db
+*.sqlite
+*.sqlite3
+apps/api/uploads/*
+!apps/api/uploads/.gitkeep
+apps/api/logs/
+apps/api/chroma.db/
+apps/api/hf_cache/
+apps/api/st_cache/
+data/
+logs/
+
+# Models and generated assets
+*.bin
+*.onnx
+*.pth
+*.pt
+*.safetensors
+models/
+cache/
+output/
+outputs/
+temp/
+tmp/
+
+# User documents and competition exports
+apps/api/Document/*
+!apps/api/Document/.gitkeep
+!apps/api/Document/demo_showcase/
+!apps/api/Document/demo_showcase/**
+*.docx
+*.pptx
+*.pdf
+
+# IDE and operating system
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini

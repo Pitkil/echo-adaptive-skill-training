@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ECHO 企业技能训练系统</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/web/echo-shell.css?v=0.3.0">
+    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div id="auth-screen" class="auth-screen">
+        <section class="auth-visual" aria-label="ECHO 产品介绍">
+            <img src="/web/assets/images/auth-library.jpg" alt="企业知识库与学习工作场景">
+            <div class="auth-visual-copy">
+                <p class="eyebrow">ENTERPRISE LEARNING INTELLIGENCE</p>
+                <h1>ECHO</h1>
+                <p>证据驱动的 Semantic Kernel 技能训练与多智能体协同决策系统</p>
+            </div>
+        </section>
+        <section class="auth-panel">
+            <div class="auth-box">
+                <div class="brand-mark">E</div>
+                <h2 id="auth-title">登录工作台</h2>
+                <p class="muted">进入培训项目、学习画像和智能体决策流程</p>
+                <form id="auth-form">
+                    <label>账号<input id="auth-username" autocomplete="username" required minlength="2"></label>
+                    <label>密码<input id="auth-password" type="password" autocomplete="current-password" required minlength="6"></label>
+                    <button class="button primary full" type="submit"><i data-lucide="log-in"></i><span id="auth-submit-label">登录</span></button>
+                </form>
+                <button id="auth-mode-toggle" class="text-button" type="button">没有账号？创建学习者账号</button>
+                <p id="auth-error" class="form-error" role="alert"></p>
+            </div>
+        </section>
+    </div>
+
+    <div id="app-shell" class="app-shell hidden">
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="brand-mark">E</div>
+                <div><strong>ECHO</strong><span>企业技能训练</span></div>
+            </div>
+            <nav class="nav-list" aria-label="主导航">
+                <button class="nav-item active" data-view="workspace"><i data-lucide="messages-square"></i><span>导学工作台</span></button>
+                <button class="nav-item" data-view="insight"><i data-lucide="chart-no-axes-combined"></i><span>学习画像与洞察</span></button>
+                <button class="nav-item" data-view="resources"><i data-lucide="library-big"></i><span>个性化资源</span></button>
+                <button class="nav-item" data-view="evidence"><i data-lucide="audio-lines"></i><span>语音证据</span></button>
+                <button class="nav-item manager-only" data-view="content"><i data-lucide="folder-input"></i><span>内容导入</span></button>
+                <button class="nav-item system-admin-only" data-view="members"><i data-lucide="users-round"></i><span>成员管理</span></button>
+                <button class="nav-item manager-only" data-view="demo"><i data-lucide="workflow"></i><span>决策演示</span></button>
+            </nav>
+            <div class="sidebar-foot">
+                <div class="user-summary">
+                    <img src="/web/assets/images/user-profile.jpg" alt="">
+                    <div><strong id="user-name">学习者</strong><span id="user-role">learner</span></div>
+                </div>
+                <button id="logout-button" class="icon-button" title="退出登录"><i data-lucide="log-out"></i></button>
+            </div>
+        </aside>
+
+        <main class="main">
+            <header class="topbar">
+                <div>
+                    <p class="eyebrow">当前培训项目</p>
+                    <h2 id="program-name">Microsoft Semantic Kernel 企业级智能体应用开发</h2>
+                </div>
+                <div class="topbar-actions">
+                    <label class="module-picker"><span>培训模块</span><select id="module-select"></select></label>
+                    <span id="service-status" class="status-pill"><span class="status-dot"></span>系统在线</span>
+                </div>
+            </header>
+
+            <section id="view-workspace" class="view active">
+                <div class="workspace-grid">
+                    <section class="chat-area">
+                        <div class="section-heading">
+                            <div><p class="eyebrow">ECHO GUIDANCE</p><h1>导学会话</h1></div>
+                            <span id="echo-stage" class="stage-badge">E · 唤起</span>
+                        </div>
+                        <div id="chat-messages" class="chat-messages" aria-live="polite">
+                            <div class="empty-state">
+                                <i data-lucide="message-circle-question"></i>
+                                <strong>从一个真实工作问题开始</strong>
+                                <p>系统将按当前模块检索证据，并在每轮只执行一个主要动作。</p>
+                            </div>
+                        </div>
+                        <form id="chat-form" class="composer">
+                            <textarea id="chat-input" rows="2" placeholder="例如：如何设计可追溯的混合检索链路？" required></textarea>
+                            <div class="composer-actions">
+                                <div class="quiz-launcher">
+                                    <select id="quiz-purpose-select" aria-label="选择测验用途">
+                                        <option value="pretest">前测</option>
+                                        <option value="stage_test" selected>阶段测验</option>
+                                        <option value="posttest">后测</option>
+                                    </select>
+                                    <button id="quick-quiz" class="button secondary" type="button"><i data-lucide="list-checks"></i>开始</button>
+                                </div>
+                                <button class="button primary" type="submit"><i data-lucide="send"></i>发送</button>
+                            </div>
+                        </form>
+                    </section>
+                    <aside class="trace-panel">
+                        <div class="panel-heading"><div><p class="eyebrow">AUDIT TRAIL</p><h2>本轮决策轨迹</h2></div><i data-lucide="route"></i></div>
+                        <ol class="agent-loop">
+                            <li data-agent-step="diagnosis"><span>1</span><div><strong>学情诊断</strong><small>能力、证据与盲区</small></div></li>
+                            <li data-agent-step="retrieval"><span>2</span><div><strong>PunditRAG 取证</strong><small>检索、重排与引用</small></div></li>
+                            <li data-agent-step="generation"><span>3</span><div><strong>资源生成</strong><small>按需生成三类资源</small></div></li>
+                            <li data-agent-step="verification"><span>4</span><div><strong>内容校验</strong><small>事实、覆盖与难度</small></div></li>
+                            <li data-agent-step="decision"><span>5</span><div><strong>决策编排</strong><small>单动作执行并记录</small></div></li>
+                        </ol>
+                        <div id="trace-detail" class="trace-detail">等待第一轮交互。</div>
+                    </aside>
+                </div>
+            </section>
+
+            <section id="view-insight" class="view">
+                <div class="section-heading">
+                    <div><p class="eyebrow">LEARNER PROFILE</p><h1>学习画像与洞察</h1><p>能力模型与辅助证据分层展示，不将微表征直接写入 MIRT。</p></div>
+                    <button id="refresh-insight" class="icon-button" title="刷新洞察"><i data-lucide="refresh-cw"></i></button>
+                </div>
+                <div class="segmented" role="tablist">
+                    <button class="active" data-insight-tab="ability">能力与趋势</button>
+                    <button data-insight-tab="evidence">证据与盲区</button>
+                    <button data-insight-tab="path">路径与资源</button>
+                </div>
+                <div id="insight-ability" class="insight-pane active">
+                    <div class="metric-grid">
+                        <article class="metric"><span>U · 理解</span><strong id="metric-u">0.00</strong><div><i id="bar-u"></i></div></article>
+                        <article class="metric"><span>A · 应用</span><strong id="metric-a">0.00</strong><div><i id="bar-a"></i></div></article>
+                        <article class="metric"><span>R · 推理与评估</span><strong id="metric-r">0.00</strong><div><i id="bar-r"></i></div></article>
+                        <article class="metric"><span>近 30 天正确率</span><strong id="metric-accuracy">—</strong><small id="metric-attempts">0 次有效作答</small></article>
+                    </div>
+                    <div class="chart-band"><div class="panel-heading"><h2>答题趋势</h2><span>近 30 天</span></div><canvas id="trend-chart"></canvas></div>
+                </div>
+                <div id="insight-evidence" class="insight-pane">
+                    <div class="evidence-grid">
+                        <section><div class="panel-heading"><h2>知识点状态</h2><span id="diagnosis-confidence">置信度 0%</span></div><h3>已掌握知识点</h3><div id="mastered-list" class="tag-list"></div><h3>知识盲区</h3><div id="blind-list" class="tag-list danger"></div></section>
+                        <section><div class="panel-heading"><h2>诊断证据</h2><span>仅显示已确认事件</span></div><div id="micro-evidence-list" class="record-list"></div><h3>长期记忆摘要</h3><div id="memory-list" class="record-list"></div></section>
+                    </div>
+                </div>
+                <div id="insight-path" class="insight-pane">
+                    <div class="path-grid">
+                        <section><div class="panel-heading"><h2>资源难度匹配</h2><span>预测概率 / 实际结果</span></div><canvas id="difficulty-chart"></canvas></section>
+                        <section><div class="panel-heading"><h2>个性化学习路径</h2><i data-lucide="milestone"></i></div><ol id="learning-path" class="learning-path"></ol><div id="recommendation-reason" class="reason-box"></div></section>
+                    </div>
+                </div>
+            </section>
+
+            <section id="view-resources" class="view">
+                <div class="section-heading">
+                    <div><p class="eyebrow">PERSONALIZED RESOURCES</p><h1>个性化资源</h1><p>根据当前画像生成定制学习资料、实操指南和阶段练习。</p></div>
+                    <div class="inline-controls">
+                        <div class="resource-recommendation"><span>推荐难度</span><strong id="resource-difficulty-label">画像分析后确定</strong></div>
+                        <button id="generate-resources" class="button primary"><i data-lucide="wand-sparkles"></i>生成个性化资源</button>
+                    </div>
+                </div>
+                <div id="resource-plan-reason" class="reason-box hidden"></div>
+                <div id="resource-list" class="resource-list"></div>
+            </section>
+
+            <section id="view-evidence" class="view">
+                <div class="section-heading"><div><p class="eyebrow">MICRO-REPRESENTATION</p><h1>语音证据</h1><p>学习者单轮语音与讲师批量录音采用同一事件协议。</p></div></div>
+                <div class="upload-grid">
+                    <section class="upload-panel">
+                        <div class="panel-heading"><div><h2>学习者单轮录音</h2><span>知识讲解、语音问答、模拟答辩</span></div><i data-lucide="mic"></i></div>
+                        <p>停止录音后才提交分析，避免持续采集。录音前必须明确授权。</p>
+                        <label class="consent"><input id="learner-consent" type="checkbox">已阅读并授权本轮录音用于学习诊断</label>
+                        <button id="record-button" class="button secondary"><i data-lucide="circle"></i><span>开始录音</span></button>
+                        <input id="learner-audio-file" type="file" accept="audio/*">
+                        <button id="upload-learner-audio" class="button primary"><i data-lucide="upload"></i>提交音频</button>
+                        <div id="learner-job-status" class="job-status">尚未提交检测任务。</div>
+                    </section>
+                    <section class="upload-panel manager-only">
+                        <div class="panel-heading"><div><h2>讲师批量录音</h2><span>培训讨论与辅导录音</span></div><i data-lucide="files"></i></div>
+                        <p>未确认说话人时仅进入课次统计，不进入个人画像。</p>
+                        <label class="consent"><input id="mentor-consent" type="checkbox">已确认录音采集与分析授权</label>
+                        <label class="consent"><input id="speaker-confirmed" type="checkbox">说话人与学习者绑定已人工确认</label>
+                        <input id="mentor-audio-files" type="file" accept="audio/*" multiple>
+                        <button id="upload-mentor-audio" class="button primary"><i data-lucide="folder-up"></i>批量提交</button>
+                        <div id="mentor-job-status" class="job-status">尚未提交批量任务。</div>
+                    </section>
+                </div>
+            </section>
+
+            <section id="view-content" class="view">
+                <div class="section-heading">
+                    <div>
+                        <p class="eyebrow">CONTENT OPERATIONS</p>
+                        <h1>课程材料与固定题库</h1>
+                        <p>两个入口独立保存：课程材料进入 PunditRAG，固定题目进入 Quiz 题库。</p>
+                    </div>
+                </div>
+                <div class="segmented import-tabs" role="tablist" aria-label="内容导入类型">
+                    <button class="active" type="button" data-import-tab="materials"><i data-lucide="database"></i>课程材料</button>
+                    <button type="button" data-import-tab="quizzes"><i data-lucide="list-checks"></i>固定题库</button>
+                </div>
+
+                <div id="import-materials" class="import-pane active">
+                    <div class="import-summary">
+                        <div><span>进入位置</span><strong>PunditRAG</strong></div>
+                        <div><span>主要用途</span><strong>检索、回答、动态出题</strong></div>
+                        <div><span>支持格式</span><strong>PDF / DOCX / TXT / MD</strong></div>
+                    </div>
+                    <section class="import-workbench">
+                        <div class="workbench-heading">
+                            <div><p class="eyebrow">COURSE MATERIAL</p><h2>上传课程材料</h2></div>
+                            <span class="step-state">按模块建立索引</span>
+                        </div>
+                        <div class="import-form-grid">
+                            <label>学习模块<select id="material-module-select"></select></label>
+                            <label class="file-field">课程材料<input id="knowledge-file" type="file" accept=".pdf,.docx,.md,.txt"></label>
+                            <button id="upload-knowledge" class="button primary" type="button"><i data-lucide="database-zap"></i>上传并建立索引</button>
+                        </div>
+                        <div id="knowledge-status" class="job-status">等待上传课程材料。</div>
+                    </section>
+                    <div class="list-heading"><h2>已上传材料</h2><span>当前所选模块</span></div>
+                    <div id="knowledge-list" class="record-list wide"></div>
+                </div>
+
+                <div id="import-quizzes" class="import-pane">
+                    <div class="import-summary">
+                        <div><span>进入位置</span><strong>Quiz 题库</strong></div>
+                        <div><span>主要用途</span><strong>前测、后测、阶段测试</strong></div>
+                        <div><span>确认规则</span><strong>答案与出处完整后入库</strong></div>
+                    </div>
+                    <ol class="import-steps" aria-label="题库导入流程">
+                        <li class="active" data-import-step="1"><span>1</span><strong>模块与知识点</strong></li>
+                        <li data-import-step="2"><span>2</span><strong>上传题库</strong></li>
+                        <li data-import-step="3"><span>3</span><strong>预览并检查</strong></li>
+                        <li data-import-step="4"><span>4</span><strong>确认导入</strong></li>
+                    </ol>
+                    <section class="import-workbench">
+                        <div class="workbench-heading">
+                            <div><p class="eyebrow">FIXED QUIZ BANK</p><h2>识别题库文件</h2></div>
+                            <span class="step-state">不会直接写入数据库</span>
+                        </div>
+                        <div class="quiz-scope-grid">
+                            <label>学习模块<select id="quiz-module-select"></select></label>
+                            <label>知识点<select id="quiz-knowledge-select"></select></label>
+                            <label class="file-field">题库文件<input id="quiz-file" type="file" accept=".pdf,.docx,.md,.txt"></label>
+                            <button id="preview-quiz-import" class="button primary" type="button"><i data-lucide="scan-text"></i>识别并预览</button>
+                        </div>
+                        <div id="quiz-import-status" class="job-status">选择模块、知识点和题库文件后开始识别。</div>
+                    </section>
+
+                    <section id="quiz-preview-section" class="quiz-preview-section hidden">
+                        <div class="list-heading">
+                            <div><p class="eyebrow">PREVIEW</p><h2>逐题检查</h2></div>
+                            <div class="preview-actions">
+                                <span id="quiz-preview-count">0 道题</span>
+                                <button id="confirm-quiz-import" class="button primary" type="button" disabled><i data-lucide="badge-check"></i>确认导入</button>
+                            </div>
+                        </div>
+                        <div class="validation-note"><i data-lucide="shield-check"></i><span>题目、答案、评分方法、资料名称、官方链接和出处章节均完整时才允许导入。</span></div>
+                        <div id="quiz-preview-list" class="quiz-preview-list"></div>
+                    </section>
+                </div>
+            </section>
+
+            <section id="view-members" class="view">
+                <div class="section-heading">
+                    <div>
+                        <p class="eyebrow">ACCESS MANAGEMENT</p>
+                        <h1>成员与身份</h1>
+                        <p>学习者自行注册；系统管理员分配讲师或管理员身份。</p>
+                    </div>
+                    <button id="refresh-members" class="icon-button" type="button" title="刷新成员"><i data-lucide="refresh-cw"></i></button>
+                </div>
+                <div class="member-table-wrap">
+                    <table class="member-table">
+                        <thead><tr><th>账号</th><th>当前身份</th><th>状态</th><th>调整身份</th><th></th></tr></thead>
+                        <tbody id="member-list"></tbody>
+                    </table>
+                </div>
+                <div id="member-status" class="job-status">等待加载成员。</div>
+            </section>
+
+            <section id="view-demo" class="view">
+                <div class="section-heading"><div><p class="eyebrow">DEMO MODE</p><h1>分析—生成—校验—决策闭环</h1><p>演示模式位于管理界面内，不作为独立企业角色。</p></div></div>
+                <div class="flow-strip">
+                    <article><i data-lucide="scan-search"></i><strong>学情诊断</strong><span>成员 C</span></article>
+                    <i data-lucide="arrow-right"></i>
+                    <article><i data-lucide="database"></i><strong>PunditRAG 取证</strong><span>成员 A</span></article>
+                    <i data-lucide="arrow-right"></i>
+                    <article><i data-lucide="file-text"></i><strong>资源生成</strong><span>成员 A</span></article>
+                    <i data-lucide="arrow-right"></i>
+                    <article><i data-lucide="badge-check"></i><strong>内容校验</strong><span>成员 A / D 标准</span></article>
+                    <i data-lucide="arrow-right"></i>
+                    <article><i data-lucide="git-branch"></i><strong>决策编排</strong><span>成员 A</span></article>
+                </div>
+                <div class="demo-metrics">
+                    <article><span>幻觉率目标</span><strong>&lt; 5%</strong></article>
+                    <article><span>难度适配率</span><strong>≥ 85%</strong></article>
+                    <article><span>知识覆盖率</span><strong>≥ 90%</strong></article>
+                    <article><span>固定评测集</span><strong>50 组</strong></article>
+                </div>
+            </section>
+        </main>
+    </div>
+    <div id="toast" class="toast" role="status"></div>
+    <script src="/web/echo-app.js?v=0.3.0"></script>
+</body>
+</html>
