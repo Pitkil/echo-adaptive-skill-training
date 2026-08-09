@@ -32,7 +32,6 @@ from catalog import (
 from config import Config
 from database import (
     ChatSession,
-    EvidenceStatus,
     GeneratedResource,
     KnowledgeBase,
     KnowledgePoint,
@@ -79,6 +78,7 @@ from integrations.contracts import (
 )
 from integrations.http_client import IntegrationUnavailable
 from integrations.micro_representation import MicroRepresentationClient
+from integrations.micro_sync import persist_micro_events, synchronize_micro_job
 from integrations.punditrag import PunditRAGClient
 from integrations.simplemem import SimpleMemClient
 from MIRT.analysis_agent import LearnerInsightService
@@ -1474,7 +1474,8 @@ def submit_micro_job(job_id: str) -> None:
                 )
             )
             job.external_job_id = str(response.get("job_id") or "")
-            job.status = "submitted"
+            job.status = response["status"]
+            job.error_message = response.get("error_message")
         except (IntegrationUnavailable, ValueError) as exc:
             job.status = "failed"
             job.error_message = str(exc)
@@ -1604,11 +1605,25 @@ def get_micro_job(
     job = db.query(MicroDetectionJob).filter_by(id=job_id, organization_id=user.organization_id).first()
     if job is None:
         raise HTTPException(status_code=404, detail="检测任务不存在")
+    degradation = None
+    if job.external_job_id and job.status not in {"completed", "failed"}:
+        client = MicroRepresentationClient()
+        if client.configured:
+            try:
+                synchronize_micro_job(db, job, client)
+                db.commit()
+            except IntegrationUnavailable as exc:
+                degradation = f"微表征检测服务同步失败：{exc}"
+                job.error_message = degradation
+                db.commit()
+        else:
+            degradation = "微表征检测服务未配置，暂时无法同步任务状态"
     return {
         "job_id": job.id,
         "status": job.status,
         "external_job_id": job.external_job_id,
         "error_message": job.error_message,
+        "degradation": degradation,
     }
 
 
@@ -1622,37 +1637,15 @@ def ingest_micro_events(
     job = db.query(MicroDetectionJob).filter_by(id=job_id, organization_id=user.organization_id).first()
     if job is None:
         raise HTTPException(status_code=404, detail="检测任务不存在")
-    accepted = 0
-    for item in batch.items:
-        if item.job_id != job_id or item.organization_id != user.organization_id:
-            continue
-        learner_id = item.learner_id
-        confirmed = item.speaker_mapping_confirmed or item.source_type is MicroSource.LEARNER_VOICE
-        if not confirmed:
-            learner_id = None
-        db.merge(
-            MicroRepresentationEvent(
-                id=item.event_id,
-                job_id=job_id,
-                organization_id=item.organization_id,
-                learner_id=learner_id,
-                session_id=item.session_id,
-                module_id=item.module_id,
-                knowledge_point_id=item.knowledge_point_id,
-                source_type=item.source_type.value,
-                event_type=item.event_type,
-                start_ms=item.start_ms,
-                end_ms=item.end_ms,
-                confidence=item.confidence,
-                transcript=item.transcript,
-                evidence_uri=item.evidence_uri,
-                speaker_ref=item.speaker_ref,
-                evidence_status=EvidenceStatus.CONFIRMED.value
-                if confirmed and item.confidence >= 0.75
-                else EvidenceStatus.PENDING.value,
-            )
+    try:
+        accepted = persist_micro_events(
+            db,
+            job,
+            batch.items,
+            expected_event_job_id=job_id,
         )
-        accepted += 1
+    except IntegrationUnavailable as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     job.status = "completed"
     db.commit()
     return {"accepted": accepted, "status": job.status}

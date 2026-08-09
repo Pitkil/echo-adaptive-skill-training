@@ -66,6 +66,29 @@
 
 ## 微表征检测
 
+### ECHO 调用检测服务
+
+检测服务默认地址为 `MICRO_REPRESENTATION_BASE_URL`，提供：
+
+- `POST /v1/detection/jobs`：创建单段音频检测任务。
+- `GET /v1/detection/jobs/{job_id}`：查询任务状态。
+- `GET /v1/detection/jobs/{job_id}/events`：读取标准化事件。
+
+任务状态固定为 `queued`、`processing`、`completed` 或 `failed`。创建任务和状态查询响应
+必须包含非空 `job_id` 和任务状态；失败时同时返回 `error_message`。
+
+ECHO 保存的本地音频通过 `multipart/form-data` 上传，文件字段名为 `file`，其余字段与
+`MicroDetectionRequest` 一致，但不得把 `file:///` 本机绝对路径发送给检测服务。检测服务
+能够访问的 `http` 或 `https` 音频地址可以使用 UTF-8 JSON 请求提交。
+
+检测服务只返回结果，不能直接写 ECHO 业务数据库。每条事件的 `job_id` 必须与查询任务一致。
+ECHO 查询主系统任务时会同步外部状态；外部任务完成后读取事件，并在整批事件通过组织、
+模块、会话、知识点、来源和学习者范围检查后写入业务数据库。相同 `event_id` 重复返回时
+不重复保存；同一批中存在越权或冲突事件时整批拒绝，不允许部分写入。同步超时或服务
+不可用时保留原任务状态和失败原因，后续查询可以重试。
+
+### ECHO 主系统入口
+
 ECHO 主系统对外入口：
 
 - `POST /v1/micro/detection-jobs`：学习者单轮音频

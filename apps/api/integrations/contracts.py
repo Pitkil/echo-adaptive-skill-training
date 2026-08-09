@@ -93,6 +93,12 @@ class MicroDetectionRequest(BaseModel):
         return self
 
 
+class MicroDetectionJobResult(BaseModel):
+    job_id: str = Field(min_length=1, max_length=100)
+    status: Literal["queued", "processing", "completed", "failed"]
+    error_message: str | None = None
+
+
 class MicroRepresentationEvent(BaseModel):
     event_id: str = Field(min_length=1, max_length=64)
     job_id: str = Field(min_length=1, max_length=64)
