@@ -1,0 +1,129 @@
+from __future__ import annotations
+
+import pytest
+from integrations.contracts import (
+    MemoryIntent,
+    MemoryRecord,
+    MemorySearchRequest,
+    MemoryType,
+)
+from integrations.http_client import IntegrationUnavailable
+from integrations.simplemem import SimpleMemClient
+
+
+class FakeHttpClient:
+    configured = True
+
+    def __init__(self, response=None) -> None:
+        self.response = {} if response is None else response
+        self.calls: list[tuple[str, str, dict | None]] = []
+
+    def request(self, method: str, path: str, payload: dict | None = None):
+        self.calls.append((method, path, payload))
+        return self.response
+
+
+def make_record() -> MemoryRecord:
+    return MemoryRecord(
+        organization_id=1,
+        user_id=2,
+        program_id=3,
+        module_id=4,
+        knowledge_point_id=5,
+        content="The learner repeatedly confuses plugins with agents.",
+        memory_type=MemoryType.MISCONCEPTION,
+        confidence=0.9,
+        evidence_refs=["attempt-1", "attempt-2"],
+    )
+
+
+def make_search_request() -> MemorySearchRequest:
+    return MemorySearchRequest(
+        organization_id=1,
+        user_id=2,
+        program_id=3,
+        module_id=4,
+        intent=MemoryIntent.LEARNER_DIAGNOSIS,
+        query="stable misconceptions",
+    )
+
+
+def test_simplemem_uses_patch_and_full_scope_for_mutating_operations() -> None:
+    client = SimpleMemClient("http://simplemem.test")
+    fake_http = FakeHttpClient()
+    client.http = fake_http
+    record = make_record()
+
+    client.update("memory-1", record)
+    client.delete(
+        "memory-1",
+        organization_id=1,
+        user_id=2,
+        program_id=3,
+        module_id=4,
+    )
+    client.consolidate(
+        organization_id=1,
+        user_id=2,
+        program_id=3,
+        module_id=4,
+    )
+
+    assert fake_http.calls[0][:2] == ("PATCH", "/v1/memories/memory-1")
+    assert fake_http.calls[1] == (
+        "DELETE",
+        "/v1/memories/memory-1",
+        {
+            "organization_id": 1,
+            "user_id": 2,
+            "program_id": 3,
+            "module_id": 4,
+        },
+    )
+    assert fake_http.calls[2] == (
+        "POST",
+        "/v1/memories/consolidate",
+        {
+            "organization_id": 1,
+            "user_id": 2,
+            "program_id": 3,
+            "module_id": 4,
+        },
+    )
+
+
+def test_simplemem_search_rejects_items_outside_requested_scope() -> None:
+    client = SimpleMemClient("http://simplemem.test")
+    client.http = FakeHttpClient(
+        {
+            "items": [
+                {
+                    "memory_id": "memory-other-user",
+                    "organization_id": 1,
+                    "user_id": 999,
+                    "program_id": 3,
+                    "module_id": 4,
+                    "content": "Must not leak.",
+                }
+            ]
+        }
+    )
+
+    with pytest.raises(IntegrationUnavailable, match="user_id scope"):
+        client.search(make_search_request())
+
+
+def test_simplemem_search_returns_only_well_scoped_items() -> None:
+    expected = {
+        "memory_id": "memory-1",
+        "organization_id": 1,
+        "user_id": 2,
+        "program_id": 3,
+        "module_id": 4,
+        "memory_type": "misconception",
+        "content": "Stable misconception.",
+    }
+    client = SimpleMemClient("http://simplemem.test")
+    client.http = FakeHttpClient({"items": [expected]})
+
+    assert client.search(make_search_request()) == [expected]

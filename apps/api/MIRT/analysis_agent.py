@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timedelta
+from typing import Any
 
 from database import (
     EvidenceStatus,
@@ -14,10 +15,20 @@ from database import (
     StudentQuestionHistory,
     TrainingModule,
 )
-from sqlalchemy import Integer, cast, func
 from sqlalchemy.orm import Session
 
 from MIRT.mirt_daily_stats import build_daily_series
+
+DIMENSION_LABELS = {
+    "U": "理解与知识掌握",
+    "A": "应用与操作能力",
+    "R": "推理与评估能力",
+}
+CONTENT_FORMAT_BY_DIMENSION = {
+    "U": "custom_note",
+    "A": "practice_guide",
+    "R": "staged_test",
+}
 
 
 class LearnerInsightService:
@@ -50,21 +61,41 @@ class LearnerInsightService:
         blind_spots, mastered = self._knowledge_point_status(user_id, module_id)
         micro = self._micro_evidence(user_id, module_id)
         difficulty = self._difficulty_match(user_id, module_id, ability)
-        path = self._learning_path(module_id, blind_spots)
+        path = self._learning_path(module_id, blind_spots, mastered)
         confidence = self._diagnosis_confidence(
             ability_payload["attempt_count"],
             micro["confirmed_event_count"],
             len(memory_items or []),
         )
         recent = build_daily_series(self.db, user_id, module_id, days=30)
+        average_accuracy = self._average_accuracy(recent)
+        accuracy_trend = self._period_accuracy_trend(recent)
+        recommendation = self._build_recommendation(
+            ability_payload=ability_payload,
+            average_accuracy=average_accuracy,
+            blind_spots=blind_spots,
+            mastered=mastered,
+            learning_path=path,
+            micro=micro,
+            memory_items=memory_items or [],
+        )
+        narrative_report = self._build_fallback_report(
+            ability_payload=ability_payload,
+            accuracy_trend=accuracy_trend,
+            blind_spots=blind_spots,
+            mastered=mastered,
+            recommendation=recommendation,
+        )
 
         return {
             "module": {"id": module.id, "code": module.code, "name": module.name},
             "views": {
                 "ability_and_trend": {
                     "ability": ability_payload,
+                    "ability_trend": self._ability_dimension_trend(ability_payload),
                     "daily_series": recent,
-                    "average_accuracy": self._average_accuracy(recent),
+                    "average_accuracy": average_accuracy,
+                    "accuracy_trend": accuracy_trend,
                 },
                 "evidence_and_blind_spots": {
                     "mastered_knowledge_points": mastered,
@@ -76,13 +107,10 @@ class LearnerInsightService:
                 "path_and_resources": {
                     "difficulty_match_curve": difficulty,
                     "learning_path": path,
-                    "recommendation_reason": self._recommendation_reason(
-                        blind_spots,
-                        micro,
-                        memory_items or [],
-                    ),
+                    **recommendation,
                 },
             },
+            "narrative_report": narrative_report,
         }
 
     def _knowledge_point_status(self, user_id: int, module_id: int) -> tuple[list[dict], list[dict]]:
@@ -92,28 +120,38 @@ class LearnerInsightService:
             .order_by(KnowledgePoint.sequence)
             .all()
         )
-        aggregates = (
-            self.db.query(
-                Quiz.knowledge_point_id,
-                func.count(StudentQuestionHistory.id),
-                func.sum(cast(StudentQuestionHistory.is_correct, Integer)),
-            )
+        attempt_rows = (
+            self.db.query(StudentQuestionHistory, Quiz)
             .join(StudentQuestionHistory, StudentQuestionHistory.question_id == Quiz.id)
             .filter(
                 StudentQuestionHistory.user_id == user_id,
                 Quiz.module_id == module_id,
             )
-            .group_by(Quiz.knowledge_point_id)
+            .order_by(StudentQuestionHistory.created_at)
             .all()
         )
-        by_point = {
-            point_id: (int(total or 0), int(correct or 0))
-            for point_id, total, correct in aggregates
-        }
+        by_point: dict[int, list[dict[str, Any]]] = defaultdict(list)
+        for history, quiz in attempt_rows:
+            by_point[quiz.knowledge_point_id].append(
+                {
+                    "attempt_id": history.attempt_id,
+                    "question_id": quiz.id,
+                    "question": quiz.content,
+                    "score": round(float(history.score), 4),
+                    "is_correct": bool(history.is_correct),
+                    "purpose": quiz.purpose,
+                    "difficulty": quiz.difficulty,
+                    "counts_for_mirt": bool(quiz.counts_for_mirt),
+                    "occurred_at": history.created_at.isoformat(),
+                }
+            )
+
         blind_spots: list[dict] = []
         mastered: list[dict] = []
         for point in points:
-            total, correct = by_point.get(point.id, (0, 0))
+            evidence = by_point.get(point.id, [])
+            total = len(evidence)
+            correct = sum(1 for item in evidence if item["is_correct"])
             accuracy = correct / total if total else None
             payload = {
                 "knowledge_point_id": point.id,
@@ -121,6 +159,8 @@ class LearnerInsightService:
                 "name": point.name,
                 "attempt_count": total,
                 "accuracy": round(accuracy, 4) if accuracy is not None else None,
+                "latest_attempt_at": evidence[-1]["occurred_at"] if evidence else None,
+                "evidence": evidence[-10:],
             }
             if total >= 2 and accuracy is not None and accuracy < 0.6:
                 blind_spots.append(payload)
@@ -201,7 +241,12 @@ class LearnerInsightService:
             )
         return result
 
-    def _learning_path(self, module_id: int, blind_spots: list[dict]) -> list[dict]:
+    def _learning_path(
+        self,
+        module_id: int,
+        blind_spots: list[dict],
+        mastered: list[dict],
+    ) -> list[dict]:
         points = (
             self.db.query(KnowledgePoint)
             .filter(KnowledgePoint.module_id == module_id)
@@ -209,13 +254,20 @@ class LearnerInsightService:
             .all()
         )
         blind_ids = {item["knowledge_point_id"] for item in blind_spots}
+        mastered_ids = {item["knowledge_point_id"] for item in mastered}
         return [
             {
                 "knowledge_point_id": point.id,
                 "code": point.code,
                 "name": point.name,
                 "prerequisites": point.prerequisites or [],
-                "status": "priority_review" if point.id in blind_ids else "planned",
+                "status": (
+                    "priority_review"
+                    if point.id in blind_ids
+                    else "mastered"
+                    if point.id in mastered_ids
+                    else "planned"
+                ),
             }
             for point in points
         ]
@@ -225,6 +277,50 @@ class LearnerInsightService:
         attempts = sum(item["attempt_count"] for item in series)
         correct = sum(item["correct_count"] for item in series)
         return round(correct / attempts, 4) if attempts else None
+
+    @staticmethod
+    def _period_accuracy_trend(series: list[dict], window_days: int = 7) -> dict:
+        def summarize(items: list[dict]) -> dict:
+            attempts = sum(item["attempt_count"] for item in items)
+            correct = sum(item["correct_count"] for item in items)
+            return {
+                "attempt_count": attempts,
+                "correct_count": correct,
+                "accuracy": round(correct / attempts, 4) if attempts else None,
+            }
+
+        current = summarize(series[-window_days:])
+        previous = summarize(series[-2 * window_days : -window_days])
+        if current["accuracy"] is None or previous["accuracy"] is None:
+            change = None
+            direction = "insufficient_evidence"
+        else:
+            change = round(current["accuracy"] - previous["accuracy"], 4)
+            direction = "improved" if change > 0.02 else "declined" if change < -0.02 else "stable"
+        return {
+            "window_days": window_days,
+            "current_period": current,
+            "previous_period": previous,
+            "accuracy_change": change,
+            "direction": direction,
+        }
+
+    @staticmethod
+    def _ability_dimension_trend(ability_payload: dict) -> dict:
+        reason = (
+            "当前没有可更新 MIRT 的作答，能力变化暂不能判断。"
+            if ability_payload["attempt_count"] == 0
+            else "当前数据库未保存历史 U/A/R 快照，不能推断各维度变化。"
+        )
+        return {
+            dimension: {
+                "current": ability_payload[dimension],
+                "change": None,
+                "direction": "insufficient_evidence",
+                "reason": reason,
+            }
+            for dimension in ("U", "A", "R")
+        }
 
     @staticmethod
     def _diagnosis_confidence(attempts: int, micro_events: int, memories: int) -> float:
@@ -246,5 +342,189 @@ class LearnerInsightService:
         if memory_items:
             reasons.append("长期记忆中存在相关误区或有效学习偏好")
         return "；".join(reasons) if reasons else "当前证据较少，先完成模块前测建立基线。"
+
+    def _build_recommendation(
+        self,
+        *,
+        ability_payload: dict,
+        average_accuracy: float | None,
+        blind_spots: list[dict],
+        mastered: list[dict],
+        learning_path: list[dict],
+        micro: dict,
+        memory_items: list[dict],
+    ) -> dict:
+        attempts = int(ability_payload["attempt_count"])
+        ability_values = {
+            dimension: float(ability_payload[dimension])
+            for dimension in ("U", "A", "R")
+        }
+        weakest_dimension = min(ability_values, key=ability_values.get) if attempts else None
+
+        if attempts == 0:
+            recommended_difficulty = "foundation"
+            content_format = "diagnostic_pretest"
+        elif min(ability_values.values()) < -0.5 or (
+            average_accuracy is not None and average_accuracy < 0.6
+        ):
+            recommended_difficulty = "foundation"
+            content_format = CONTENT_FORMAT_BY_DIMENSION[weakest_dimension]
+        elif (
+            min(ability_values.values()) >= 0.8
+            and average_accuracy is not None
+            and average_accuracy >= 0.8
+            and not blind_spots
+        ):
+            recommended_difficulty = "advanced"
+            content_format = CONTENT_FORMAT_BY_DIMENSION[weakest_dimension]
+        else:
+            recommended_difficulty = "standard"
+            content_format = CONTENT_FORMAT_BY_DIMENSION[weakest_dimension]
+
+        next_point = next(
+            (item for item in learning_path if item["status"] == "priority_review"),
+            next((item for item in learning_path if item["status"] == "planned"), None),
+        )
+        learning_preference = next(
+            (
+                item
+                for item in memory_items
+                if str(item.get("memory_type", "")) == "learning_preference"
+            ),
+            None,
+        )
+        if micro["confirmed_event_count"]:
+            tutoring_method = "step_by_step_with_checkpoints"
+        elif learning_preference is not None:
+            tutoring_method = "use_recorded_learning_preference"
+        else:
+            tutoring_method = "guided_explanation_with_self_check"
+
+        evidence_sources = self._recommendation_evidence_sources(
+            blind_spots=blind_spots,
+            mastered=mastered,
+            micro=micro,
+            memory_items=memory_items,
+            next_point=next_point,
+        )
+        reason = self._recommendation_reason(blind_spots, micro, memory_items)
+        if weakest_dimension is not None:
+            reason += (
+                f"；当前最弱维度为{DIMENSION_LABELS[weakest_dimension]}，"
+                f"因此推荐 {content_format}。"
+            )
+
+        return {
+            "recommended_difficulty": recommended_difficulty,
+            "next_knowledge_point": next_point,
+            "recommended_content_format": content_format,
+            "recommended_tutoring_method": tutoring_method,
+            "weakest_dimension": weakest_dimension,
+            "recommendation_reason": reason,
+            "evidence_sources": evidence_sources,
+            "primary_content_decision": {
+                "action": "complete_pretest" if attempts == 0 else "generate_resource",
+                "content_format": content_format,
+                "knowledge_point_id": (
+                    next_point["knowledge_point_id"] if next_point is not None else None
+                ),
+                "difficulty": recommended_difficulty,
+            },
+        }
+
+    @staticmethod
+    def _recommendation_evidence_sources(
+        *,
+        blind_spots: list[dict],
+        mastered: list[dict],
+        micro: dict,
+        memory_items: list[dict],
+        next_point: dict | None,
+    ) -> list[dict]:
+        sources: list[dict] = []
+        for point in [*blind_spots, *mastered]:
+            for evidence in point.get("evidence", []):
+                sources.append(
+                    {
+                        "source_type": "scored_attempt",
+                        "source_id": evidence["attempt_id"],
+                        "knowledge_point_id": point["knowledge_point_id"],
+                        "score": evidence["score"],
+                        "occurred_at": evidence["occurred_at"],
+                    }
+                )
+        for item in micro.get("items", [])[:3]:
+            sources.append(
+                {
+                    "source_type": "confirmed_micro_event",
+                    "source_id": item["event_id"],
+                    "knowledge_point_id": item.get("knowledge_point_id"),
+                    "confidence": item["confidence"],
+                }
+            )
+        for index, item in enumerate(memory_items[:3]):
+            sources.append(
+                {
+                    "source_type": "long_term_memory",
+                    "source_id": item.get("memory_id") or item.get("id") or f"memory-{index + 1}",
+                    "memory_type": item.get("memory_type"),
+                    "occurred_at": item.get("occurred_at"),
+                }
+            )
+        if next_point is not None:
+            sources.append(
+                {
+                    "source_type": "curriculum",
+                    "source_id": next_point["code"],
+                    "knowledge_point_id": next_point["knowledge_point_id"],
+                }
+            )
+        return sources[:12]
+
+    @staticmethod
+    def _build_fallback_report(
+        *,
+        ability_payload: dict,
+        accuracy_trend: dict,
+        blind_spots: list[dict],
+        mastered: list[dict],
+        recommendation: dict,
+    ) -> dict:
+        attempts = int(ability_payload["attempt_count"])
+        if attempts == 0:
+            ability_text = "尚无可更新 MIRT 的作答，能力现状和变化趋势暂不能判断。"
+            evidence_text = "尚无作答证据，已掌握知识点和知识盲区暂不能判断。"
+        else:
+            direction_labels = {
+                "improved": "上升",
+                "declined": "下降",
+                "stable": "基本稳定",
+                "insufficient_evidence": "暂不能判断",
+            }
+            ability_text = (
+                f"当前 U={ability_payload['U']:.4f}、A={ability_payload['A']:.4f}、"
+                f"R={ability_payload['R']:.4f}；近两期正确率变化"
+                f"{direction_labels[accuracy_trend['direction']]}。"
+            )
+            evidence_text = (
+                f"依据可追溯作答，识别出 {len(mastered)} 个已掌握知识点和 "
+                f"{len(blind_spots)} 个知识盲区。"
+            )
+        next_point = recommendation["next_knowledge_point"]
+        next_point_name = next_point["name"] if next_point is not None else "暂未确定"
+        path_text = (
+            f"推荐难度为 {recommendation['recommended_difficulty']}，"
+            f"下一知识点为“{next_point_name}”，"
+            f"内容形式为 {recommendation['recommended_content_format']}，"
+            f"辅导方式为 {recommendation['recommended_tutoring_method']}。"
+        )
+        return {
+            "source": "deterministic_template",
+            "ability_and_trend": ability_text,
+            "evidence_and_blind_spots": evidence_text,
+            "path_and_resources": path_text,
+        }
+
+
 # Compatibility name for code that still imports AnalysisAgent.
 AnalysisAgent = LearnerInsightService
