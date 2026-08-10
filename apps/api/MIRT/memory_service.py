@@ -9,14 +9,25 @@ from hashlib import sha256
 from typing import Any
 
 from integrations.contracts import (
+    MemoryAuthorizationResponse,
+    MemoryConsolidationResult,
     MemoryIntent,
     MemoryRecord,
     MemorySearchRequest,
     MemoryType,
+    MemoryUpsertResponse,
+    MemoryUpsertStatus,
 )
 from integrations.http_client import IntegrationUnavailable
 from integrations.simplemem import SimpleMemClient
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 
 class MemoryEvidenceType(StrEnum):
@@ -47,14 +58,36 @@ class MemoryEvidence(BaseModel):
     evidence_type: MemoryEvidenceType
     occurred_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    attempt_id: str | None = Field(default=None, max_length=128)
+    question_id: int | None = Field(default=None, gt=0)
+    knowledge_point_id: int | None = Field(default=None, gt=0)
+    is_correct: bool | None = None
+    score: float | None = None
+    misconception_key: str | None = Field(default=None, max_length=128)
+    preference_key: str | None = Field(default=None, max_length=128)
+    intervention_id: str | None = Field(default=None, max_length=128)
+    intervention_type: str | None = Field(default=None, max_length=128)
+    result_confirmed: bool | None = None
+    result_value: str | None = Field(default=None, max_length=256)
+    session_id: int | None = Field(default=None, gt=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("reference_id")
+    @field_validator(
+        "reference_id",
+        "attempt_id",
+        "misconception_key",
+        "preference_key",
+        "intervention_id",
+        "intervention_type",
+        "result_value",
+    )
     @classmethod
-    def normalize_reference_id(cls, value: str) -> str:
+    def normalize_text_identifier(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         normalized = value.strip()
         if not normalized:
-            raise ValueError("reference_id must not be blank.")
+            raise ValueError("evidence identifiers must not be blank.")
         return normalized
 
     @field_validator("occurred_at")
@@ -63,6 +96,39 @@ class MemoryEvidence(BaseModel):
         if value.tzinfo is None:
             return value.replace(tzinfo=UTC)
         return value.astimezone(UTC)
+
+    @model_validator(mode="after")
+    def validate_typed_evidence(self) -> MemoryEvidence:
+        if self.evidence_type is MemoryEvidenceType.SCORED_ATTEMPT:
+            required = {
+                "attempt_id": self.attempt_id,
+                "question_id": self.question_id,
+                "knowledge_point_id": self.knowledge_point_id,
+                "is_correct": self.is_correct,
+                "score": self.score,
+                "misconception_key": self.misconception_key,
+            }
+        elif self.evidence_type is MemoryEvidenceType.PREFERENCE_OBSERVATION:
+            required = {
+                "preference_key": self.preference_key,
+                "result_confirmed": self.result_confirmed,
+                "result_value": self.result_value,
+                "session_id": self.session_id,
+            }
+        else:
+            required = {
+                "intervention_id": self.intervention_id,
+                "intervention_type": self.intervention_type,
+                "result_confirmed": self.result_confirmed,
+                "result_value": self.result_value,
+                "session_id": self.session_id,
+            }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise ValueError(
+                f"{self.evidence_type.value} missing required fields: {', '.join(missing)}."
+            )
+        return self
 
 
 class MemoryCandidate(MemoryScope):
@@ -121,13 +187,6 @@ class StableMemoryPolicy:
     }
 
     def build_record(self, candidate: MemoryCandidate) -> MemoryRecord:
-        evidence_by_ref = {
-            item.reference_id: item
-            for item in candidate.evidence
-        }
-        evidence = list(evidence_by_ref.values())
-        if len(evidence) < self.MIN_EVIDENCE_COUNT:
-            raise MemoryPolicyError("长期记忆至少需要两个不同的证据编号。")
         if (
             candidate.memory_type is MemoryType.MISCONCEPTION
             and candidate.knowledge_point_id is None
@@ -135,14 +194,25 @@ class StableMemoryPolicy:
             raise MemoryPolicyError("稳定误区必须绑定知识点。")
 
         allowed_types = self.REQUIRED_EVIDENCE_TYPES[candidate.memory_type]
-        matching_evidence = [
-            item for item in evidence if item.evidence_type in allowed_types
+        unrelated = [
+            item.evidence_type.value
+            for item in candidate.evidence
+            if item.evidence_type not in allowed_types
         ]
-        if len(matching_evidence) < self.MIN_EVIDENCE_COUNT:
+        if unrelated:
             expected = "、".join(sorted(item.value for item in allowed_types))
             raise MemoryPolicyError(
-                f"{candidate.memory_type.value} 至少需要两个 {expected} 证据。"
+                f"{candidate.memory_type.value} 只接受 {expected} 证据，不能混入其他类型。"
             )
+
+        evidence_by_identity: dict[str, MemoryEvidence] = {}
+        for item in candidate.evidence:
+            evidence_by_identity.setdefault(self._evidence_identity(item), item)
+        evidence = list(evidence_by_identity.values())
+        if len(evidence) < self.MIN_EVIDENCE_COUNT:
+            raise MemoryPolicyError("长期记忆至少需要两个语义不同的证据编号。")
+
+        self._validate_evidence_consistency(candidate, evidence)
 
         average_confidence = sum(item.confidence for item in evidence) / len(evidence)
         if average_confidence < self.MIN_AVERAGE_CONFIDENCE:
@@ -153,20 +223,15 @@ class StableMemoryPolicy:
         metadata = dict(candidate.metadata)
         metadata.update(
             {
-                "deduplication_key": self._deduplication_key(candidate),
                 "evidence_count": len(evidence),
                 "evidence": [
-                    {
-                        "reference_id": item.reference_id,
-                        "evidence_type": item.evidence_type.value,
-                        "occurred_at": item.occurred_at.isoformat(),
-                        "confidence": item.confidence,
-                        "metadata": item.metadata,
-                    }
+                    item.model_dump(mode="json", exclude_none=True)
                     for item in evidence
                 ],
             }
         )
+        conflict_key = self._conflict_key(candidate, evidence)
+        idempotency_key = self._idempotency_key(candidate, conflict_key)
         return MemoryRecord(
             organization_id=candidate.organization_id,
             user_id=candidate.user_id,
@@ -176,6 +241,8 @@ class StableMemoryPolicy:
             session_id=candidate.session_id,
             content=candidate.content,
             memory_type=candidate.memory_type,
+            idempotency_key=idempotency_key,
+            conflict_key=conflict_key,
             confidence=round(average_confidence, 4),
             evidence_refs=[item.reference_id for item in evidence],
             occurred_at=max(item.occurred_at for item in evidence),
@@ -183,8 +250,69 @@ class StableMemoryPolicy:
         )
 
     @staticmethod
-    def _deduplication_key(candidate: MemoryCandidate) -> str:
-        normalized_content = " ".join(candidate.content.casefold().split())
+    def _evidence_identity(evidence: MemoryEvidence) -> str:
+        if evidence.evidence_type is MemoryEvidenceType.SCORED_ATTEMPT:
+            return f"attempt:{evidence.attempt_id}"
+        if evidence.evidence_type is MemoryEvidenceType.PREFERENCE_OBSERVATION:
+            return f"preference:{evidence.preference_key}:{evidence.session_id}"
+        return f"intervention:{evidence.intervention_id}"
+
+    def _validate_evidence_consistency(
+        self,
+        candidate: MemoryCandidate,
+        evidence: list[MemoryEvidence],
+    ) -> None:
+        if candidate.memory_type is MemoryType.MISCONCEPTION:
+            if any(item.is_correct is not False for item in evidence):
+                raise MemoryPolicyError("稳定误区只能由真实错误作答形成。")
+            if any(
+                item.knowledge_point_id != candidate.knowledge_point_id
+                for item in evidence
+            ):
+                raise MemoryPolicyError("错误作答的知识点必须与候选误区一致。")
+            if len({item.misconception_key for item in evidence}) != 1:
+                raise MemoryPolicyError("错误作答必须支持同一个误区结论。")
+            return
+
+        if any(item.result_confirmed is not True for item in evidence):
+            raise MemoryPolicyError("偏好或干预证据必须已确认结果。")
+
+        if candidate.memory_type is MemoryType.LEARNING_PREFERENCE:
+            if any(item.preference_key is None for item in evidence):
+                raise MemoryPolicyError("学习偏好证据必须明确 preference_key。")
+            if len({item.preference_key for item in evidence}) != 1:
+                raise MemoryPolicyError("学习偏好证据必须指向同一个偏好。")
+            intervention_types = {
+                item.intervention_type
+                for item in evidence
+                if item.evidence_type is MemoryEvidenceType.INTERVENTION_RESULT
+            }
+            if len(intervention_types) > 1:
+                raise MemoryPolicyError("学习偏好的干预证据必须来自同一种干预。")
+            if len({self._normalized_result(item.result_value) for item in evidence}) != 1:
+                raise MemoryPolicyError("学习偏好证据结果互相矛盾。")
+            return
+
+        if len({item.intervention_type for item in evidence}) != 1:
+            raise MemoryPolicyError("干预结果必须来自同一种干预。")
+        if len({self._normalized_result(item.result_value) for item in evidence}) != 1:
+            raise MemoryPolicyError("干预结果互相矛盾。")
+
+    @staticmethod
+    def _normalized_result(value: str | None) -> str:
+        return " ".join((value or "").casefold().split())
+
+    def _conflict_key(
+        self,
+        candidate: MemoryCandidate,
+        evidence: list[MemoryEvidence],
+    ) -> str:
+        if candidate.memory_type is MemoryType.MISCONCEPTION:
+            domain = f"{candidate.knowledge_point_id}:{evidence[0].misconception_key}"
+        elif candidate.memory_type is MemoryType.LEARNING_PREFERENCE:
+            domain = str(evidence[0].preference_key)
+        else:
+            domain = str(evidence[0].intervention_type)
         payload = "|".join(
             [
                 str(candidate.organization_id),
@@ -192,10 +320,15 @@ class StableMemoryPolicy:
                 str(candidate.program_id),
                 str(candidate.module_id),
                 candidate.memory_type.value,
-                str(candidate.knowledge_point_id or "-"),
-                normalized_content,
+                domain.casefold(),
             ]
         )
+        return sha256(payload.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _idempotency_key(candidate: MemoryCandidate, conflict_key: str) -> str:
+        normalized_content = " ".join(candidate.content.casefold().split())
+        payload = f"{conflict_key}|{normalized_content}"
         return sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -211,7 +344,37 @@ class LearnerMemoryService:
         self.policy = policy or StableMemoryPolicy()
 
     def create(self, candidate: MemoryCandidate) -> MemoryLifecycleResult:
-        return self._write_candidate("create", candidate, self.client.remember)
+        result = self._write_candidate("create", candidate, self.client.upsert)
+        if result.status is not MemoryLifecycleStatus.COMPLETED:
+            return result
+        try:
+            response = MemoryUpsertResponse.model_validate(result.data)
+        except ValidationError as exc:
+            return self._degraded(
+                "create",
+                f"SimpleMem 幂等写入响应无效：{exc}",
+                memory_record=result.memory_record,
+            )
+        if response.idempotency_key != result.memory_record.idempotency_key:
+            return self._degraded(
+                "create",
+                "SimpleMem 返回了不匹配的 idempotency_key。",
+                memory_record=result.memory_record,
+            )
+        if response.status is MemoryUpsertStatus.CONFLICT:
+            return MemoryLifecycleResult(
+                operation="create",
+                status=MemoryLifecycleStatus.REJECTED,
+                data=response.model_dump(mode="json"),
+                reason="同一记忆领域已有语义冲突的活跃记忆。",
+                memory_record=result.memory_record,
+            )
+        return MemoryLifecycleResult(
+            operation="create",
+            status=MemoryLifecycleStatus.COMPLETED,
+            data=response.model_dump(mode="json"),
+            memory_record=result.memory_record,
+        )
 
     def update(
         self,
@@ -221,6 +384,9 @@ class LearnerMemoryService:
         memory_id = memory_id.strip()
         if not memory_id:
             return self._rejected("update", "memory_id 不能为空。")
+        authorization = self._authorize("update", memory_id, candidate)
+        if authorization is not None:
+            return authorization
         return self._write_candidate(
             "update",
             candidate,
@@ -264,6 +430,9 @@ class LearnerMemoryService:
             return self._rejected("delete", "memory_id 不能为空。")
         if not self.client.configured:
             return self._degraded("delete", "SimpleMem 未配置。")
+        authorization = self._authorize("delete", memory_id, scope)
+        if authorization is not None:
+            return authorization
         try:
             data = self.client.delete(
                 memory_id,
@@ -284,19 +453,57 @@ class LearnerMemoryService:
         if not self.client.configured:
             return self._degraded("consolidate", "SimpleMem 未配置。")
         try:
-            data = self.client.consolidate(
+            raw_data = self.client.consolidate(
                 organization_id=scope.organization_id,
                 user_id=scope.user_id,
                 program_id=scope.program_id,
                 module_id=scope.module_id,
             )
-        except IntegrationUnavailable as exc:
+            data = MemoryConsolidationResult.model_validate(raw_data)
+            expected_scope = scope.model_dump()
+            actual_scope = {
+                field: getattr(data, field)
+                for field in expected_scope
+            }
+            if actual_scope != expected_scope:
+                raise ValueError("SimpleMem 合并结果超出请求作用域。")
+        except (IntegrationUnavailable, ValidationError, ValueError) as exc:
             return self._degraded("consolidate", f"SimpleMem 合并降级：{exc}")
         return MemoryLifecycleResult(
             operation="consolidate",
             status=MemoryLifecycleStatus.COMPLETED,
-            data=data,
+            data=data.model_dump(mode="json"),
         )
+
+    def _authorize(
+        self,
+        operation: str,
+        memory_id: str,
+        scope: MemoryScope,
+    ) -> MemoryLifecycleResult | None:
+        if not self.client.configured:
+            return self._degraded(operation, "SimpleMem 未配置。")
+        expected_scope = {
+            "organization_id": scope.organization_id,
+            "user_id": scope.user_id,
+            "program_id": scope.program_id,
+            "module_id": scope.module_id,
+        }
+        try:
+            response = self.client.authorize(memory_id, **expected_scope)
+            authorization = MemoryAuthorizationResponse.model_validate(response)
+            actual_scope = {
+                field: getattr(authorization, field)
+                for field in expected_scope
+            }
+            if authorization.memory_id != memory_id or actual_scope != expected_scope:
+                raise ValueError("SimpleMem 授权响应与请求作用域不一致。")
+        except (IntegrationUnavailable, ValidationError, ValueError) as exc:
+            return self._degraded(
+                operation,
+                f"SimpleMem 作用域授权失败：{exc}；未执行变更。",
+            )
+        return None
 
     def _write_candidate(
         self,

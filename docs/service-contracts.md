@@ -55,28 +55,61 @@
 
 - `POST /v1/memories`
 - `POST /v1/memories/search`
+- `POST /v1/memories/{memory_id}/authorize`
 - `PATCH /v1/memories/{memory_id}`
 - `DELETE /v1/memories/{memory_id}`
 - `POST /v1/memories/consolidate`
 - `GET /health`
 
-请求必须包含组织、用户、培训项目和模块。删除、查询和合并必须进行权限过滤。
+请求必须包含组织、用户、培训项目和模块。查询和合并必须进行权限过滤。
 每条记忆还要保存记忆类型、内容摘要、形成依据、形成时间、所属模块和可靠程度。
 一次偶然表现不能直接写成长期记忆；合并后必须保留原始来源编号。
 
 长期记忆形成规则固定为：
 
-- 每条记忆至少包含两个不同的证据编号，重复编号只计算一次。
-- `misconception` 必须绑定知识点，并至少包含两次可判分错误作答。
-- `learning_preference` 必须来自至少两次已确认偏好观察或有结果的辅导干预。
-- `intervention_outcome` 必须来自至少两次有结果的辅导干预。
-- 证据平均可靠程度低于 `0.65` 时不写入长期记忆。
-- 主系统为同一用户、模块、记忆类型、知识点和归一化内容生成稳定幂等键，重复形成时由
-  SimpleMem 更新或合并，不能创建互相矛盾的重复记忆。
+- 每条记忆至少包含两个语义不同的证据。错误作答按 `attempt_id` 去重，偏好观察按
+  `preference_key + session_id` 去重，干预按 `intervention_id` 去重；仅更换 `reference_id`
+  不得重复计数。
+- `scored_attempt` 明确包含 `attempt_id`、`question_id`、`knowledge_point_id`、
+  `is_correct`、`score` 和 `misconception_key`。`misconception` 必须绑定知识点，并由至少
+  两次属于该知识点、确实答错且支持同一 `misconception_key` 的作答形成。
+- 偏好证据明确包含 `preference_key`、`result_confirmed`、`result_value` 和 `session_id`；
+  `learning_preference` 的全部证据必须指向同一偏好、结果已确认且结论不矛盾。
+- 干预证据明确包含 `intervention_id`、`intervention_type`、`result_confirmed`、
+  `result_value` 和 `session_id`；`intervention_outcome` 必须由至少两次同类、已确认且结论
+  一致的干预形成。
+- 候选记忆不得混入不属于该记忆类型的证据。平均可靠程度只根据通过类型与一致性校验的
+  支持证据计算；低于 `0.65` 时不写入，最终记录也只保留这些支持证据。
+
+### 幂等写入与语义冲突
+
+`POST /v1/memories` 是幂等 upsert，而不是无条件新增。请求必须带两个正式字段：
+
+- `idempotency_key`：作用域、记忆类型、语义领域和归一化内容的 SHA-256；
+- `conflict_key`：作用域、记忆类型和语义领域的 SHA-256，不包含结论内容。
+
+响应固定返回 `status`（`created`、`updated`、`unchanged` 或 `conflict`）、
+`idempotency_key` 和 `memory_id`。同一 `idempotency_key` 再次请求只能返回 `updated` 或
+`unchanged`，不得新增记录。同一 `conflict_key` 下出现不同 `idempotency_key` 时返回
+`conflict` 和 `conflict_memory_ids`，新结论不得同时成为活跃记忆。
+
+### 修改、删除和合并
+
+修改或删除前，主系统必须调用 `POST /v1/memories/{memory_id}/authorize`。SimpleMem 必须先
+查出该 `memory_id` 的原始组织、用户、项目和模块，再与请求作用域逐字段比较；任一不一致返回
+HTTP 403，且不得执行 `PATCH` 或 `DELETE`。仅回显调用方传入的作用域不构成授权。
+
+`POST /v1/memories/consolidate` 的响应固定包含 `merged_memory_id`、至少两个去重后的
+`source_memory_ids`、至少两个去重后的 `evidence_refs`，以及组织、用户、项目和模块编号。
+缺字段或返回其他作用域时，主系统必须按 `degraded` 处理，不能接纳合并结果。
 
 主系统内的生命周期服务统一返回 `completed`、`rejected` 或 `degraded`。规则不满足时返回
 `rejected`，SimpleMem 未配置、超时或返回越权数据时返回 `degraded`。业务数据库事实必须先提交，
 因此任何 SimpleMem 降级都不能回滚答题记录或改变 U/A/R。
+
+生命周期服务本身不持有数据库会话。成员 A 在主系统接入时必须把每次 `degraded` 结果写入业务
+数据库的记忆审计表，至少持久化 `memory_record`、失败原因、操作名、发生时间和 `request_id`，
+供补偿重试和追踪；仅记录应用日志不满足该要求。
 
 ## 微表征检测
 

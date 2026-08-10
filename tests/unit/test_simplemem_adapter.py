@@ -32,6 +32,8 @@ def make_record() -> MemoryRecord:
         knowledge_point_id=5,
         content="The learner repeatedly confuses plugins with agents.",
         memory_type=MemoryType.MISCONCEPTION,
+        idempotency_key="a" * 64,
+        conflict_key="b" * 64,
         confidence=0.9,
         evidence_refs=["attempt-1", "attempt-2"],
     )
@@ -83,6 +85,60 @@ def test_simplemem_uses_patch_and_full_scope_for_mutating_operations() -> None:
     assert fake_http.calls[2] == (
         "POST",
         "/v1/memories/consolidate",
+        {
+            "organization_id": 1,
+            "user_id": 2,
+            "program_id": 3,
+            "module_id": 4,
+        },
+    )
+
+
+def test_simplemem_upsert_sends_formal_idempotency_contract() -> None:
+    record = make_record()
+    client = SimpleMemClient("http://simplemem.test")
+    fake_http = FakeHttpClient(
+        {
+            "status": "unchanged",
+            "memory_id": "memory-1",
+            "idempotency_key": record.idempotency_key,
+            "conflict_memory_ids": [],
+        }
+    )
+    client.http = fake_http
+
+    result = client.upsert(record)
+
+    assert result["status"] == "unchanged"
+    assert fake_http.calls[0][0:2] == ("POST", "/v1/memories")
+    assert fake_http.calls[0][2]["idempotency_key"] == "a" * 64
+    assert fake_http.calls[0][2]["conflict_key"] == "b" * 64
+
+
+def test_simplemem_authorization_requires_matching_memory_and_scope() -> None:
+    client = SimpleMemClient("http://simplemem.test")
+    client.http = FakeHttpClient(
+        {
+            "allowed": True,
+            "memory_id": "memory-1",
+            "organization_id": 1,
+            "user_id": 999,
+            "program_id": 3,
+            "module_id": 4,
+        }
+    )
+
+    with pytest.raises(IntegrationUnavailable, match="requested scope"):
+        client.authorize(
+            "memory-1",
+            organization_id=1,
+            user_id=2,
+            program_id=3,
+            module_id=4,
+        )
+    assert client.http.calls[0] == (
+        "POST",
+        "/v1/memories/memory-1/authorize",
         {
             "organization_id": 1,
             "user_id": 2,
