@@ -5,7 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 from app import (
+    create_mentor_batch,
     create_micro_job_record,
+    get_mentor_batch,
     get_micro_job,
     queue_awaiting_micro_job_retry,
     require_micro_callback_identity,
@@ -16,9 +18,11 @@ from config import Config
 from database import (
     Base,
     ChatSession,
+    EvidenceStatus,
     KnowledgeBase,
     KnowledgePoint,
     MicroDetectionJob,
+    MicroRepresentationEvent,
     Organization,
     TrainingModule,
     TrainingProgram,
@@ -287,3 +291,78 @@ def test_unconfigured_detector_keeps_waiting_status_and_returns_degradation(
     assert result["status"] == "awaiting_detector"
     assert result["degradation"] == "微表征检测服务未配置，任务仍在等待检测器"
     assert tasks.tasks == []
+
+
+def test_mentor_batch_can_be_queried_with_session_summary(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr("app.UPLOAD_DIR", tmp_path)
+    db, organization, mentor, _, module, point, session = make_database_context()
+    mentor.role = UserRole.MENTOR.value
+    db.commit()
+    tasks = BackgroundTasks()
+
+    created = create_mentor_batch(
+        background_tasks=tasks,
+        module_id=module.id,
+        consent_granted=True,
+        audio_files=[make_audio(b"first"), make_audio(b"second"), make_audio(b"first")],
+        learner_id=None,
+        session_id=session.id,
+        knowledge_point_id=point.id,
+        speaker_mapping_confirmed=False,
+        db=db,
+        user=mentor,
+    )
+    first_job_id, second_job_id = created.job_ids
+    assert created.accepted == 2
+    db.add_all(
+        [
+            MicroRepresentationEvent(
+                id="batch-event-1",
+                job_id=first_job_id,
+                organization_id=organization.id,
+                session_id=session.id,
+                module_id=module.id,
+                knowledge_point_id=point.id,
+                source_type=MicroSource.MENTOR_RECORDING.value,
+                event_type="thinking_pause",
+                start_ms=100,
+                end_ms=500,
+                confidence=0.9,
+                evidence_status=EvidenceStatus.CONFIRMED.value,
+            ),
+            MicroRepresentationEvent(
+                id="batch-event-2",
+                job_id=second_job_id,
+                organization_id=organization.id,
+                session_id=session.id,
+                module_id=module.id,
+                knowledge_point_id=point.id,
+                source_type=MicroSource.MENTOR_RECORDING.value,
+                event_type="hesitation",
+                start_ms=700,
+                end_ms=1000,
+                confidence=0.6,
+                evidence_status=EvidenceStatus.PENDING.value,
+            ),
+        ]
+    )
+    db.commit()
+
+    result = get_mentor_batch(created.batch_id, db, mentor)
+
+    assert result["batch_id"] == created.batch_id
+    assert [item["job_id"] for item in result["jobs"]] == created.job_ids
+    assert result["summary"]["signals_by_type"] == {
+        "thinking_pause": 1,
+        "hesitation": 1,
+    }
+    assert result["summary"]["total_pause_ms"] == 700
+    assert result["summary"]["pending_confirmation_count"] == 1
+    assert result["summary"]["trend"] == {
+        "first_half_count": 1,
+        "second_half_count": 1,
+        "change": 0,
+    }

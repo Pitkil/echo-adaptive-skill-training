@@ -41,6 +41,8 @@ from database import (
     LearningDecision,
     Message,
     MicroDetectionJob,
+    MicroMentorBatch,
+    MicroMentorBatchJob,
     MicroRepresentationEvent,
     Organization,
     Quiz,
@@ -263,6 +265,7 @@ class MicroEventBatch(BaseModel):
 
 
 class MentorBatchResult(BaseModel):
+    batch_id: str
     job_ids: list[str]
     accepted: int
 
@@ -1793,10 +1796,21 @@ def create_mentor_batch(
     if len(audio_files) > 20:
         raise HTTPException(status_code=413, detail="mentor batch exceeds 20 files")
     jobs: list[MicroDetectionJob] = []
+    linked_job_ids: set[str] = set()
     created_jobs: list[MicroDetectionJob] = []
     created_paths: list[Path] = []
     total_size = 0
+    batch = MicroMentorBatch(
+        id=uuid4().hex,
+        organization_id=user.organization_id,
+        created_by_user_id=user.id,
+        module_id=module_id,
+        session_id=session_id,
+        knowledge_point_id=knowledge_point_id,
+    )
     try:
+        db.add(batch)
+        db.flush()
         for audio in audio_files:
             creation = create_micro_job_record(
                 db,
@@ -1808,8 +1822,20 @@ def create_mentor_batch(
                 session_id=session_id,
                 knowledge_point_id=knowledge_point_id,
             )
-            jobs.append(creation.job)
             total_size += creation.audio_size
+            if creation.job.id in linked_job_ids:
+                if total_size > Config.upload.MAX_FILE_SIZE:
+                    raise HTTPException(status_code=413, detail="mentor batch exceeds total size limit")
+                continue
+            linked_job_ids.add(creation.job.id)
+            jobs.append(creation.job)
+            db.add(
+                MicroMentorBatchJob(
+                    batch_id=batch.id,
+                    job_id=creation.job.id,
+                    sequence=len(jobs),
+                )
+            )
             if creation.is_created:
                 created_jobs.append(creation.job)
                 if creation.saved_path:
@@ -1827,7 +1853,90 @@ def create_mentor_batch(
         raise HTTPException(status_code=500, detail="failed to save mentor batch") from exc
     for job in created_jobs:
         background_tasks.add_task(submit_micro_job, job.id)
-    return MentorBatchResult(job_ids=[job.id for job in jobs], accepted=len(jobs))
+    return MentorBatchResult(
+        batch_id=batch.id,
+        job_ids=[job.id for job in jobs],
+        accepted=len(jobs),
+    )
+
+
+@app.get("/v1/micro/mentor-batches/{batch_id}")
+def get_mentor_batch(
+    batch_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    batch = (
+        db.query(MicroMentorBatch)
+        .filter_by(id=batch_id, organization_id=user.organization_id)
+        .first()
+    )
+    if batch is None:
+        raise HTTPException(status_code=404, detail="mentor batch does not exist")
+    if (
+        user.role != UserRole.SYSTEM_ADMIN.value
+        and batch.created_by_user_id != user.id
+    ):
+        raise HTTPException(status_code=404, detail="mentor batch does not exist")
+    links = (
+        db.query(MicroMentorBatchJob)
+        .filter_by(batch_id=batch.id)
+        .order_by(MicroMentorBatchJob.sequence)
+        .all()
+    )
+    job_ids = [link.job_id for link in links]
+    jobs_by_id = {
+        job.id: job
+        for job in db.query(MicroDetectionJob)
+        .filter(MicroDetectionJob.id.in_(job_ids))
+        .all()
+    } if job_ids else {}
+    events = (
+        db.query(MicroRepresentationEvent)
+        .filter(MicroRepresentationEvent.job_id.in_(job_ids))
+        .order_by(MicroRepresentationEvent.start_ms)
+        .all()
+    ) if job_ids else []
+    signals_by_type: dict[str, int] = {}
+    total_pause_ms = 0
+    pending_confirmation_count = 0
+    for event in events:
+        signals_by_type[event.event_type] = signals_by_type.get(event.event_type, 0) + 1
+        if event.event_type in {"hesitation", "thinking_pause"}:
+            total_pause_ms += max(event.end_ms - event.start_ms, 0)
+        if event.evidence_status != "confirmed":
+            pending_confirmation_count += 1
+    midpoint_ms = max((event.end_ms for event in events), default=0) / 2
+    first_half_count = sum(event.start_ms < midpoint_ms for event in events)
+    second_half_count = len(events) - first_half_count
+    return {
+        "batch_id": batch.id,
+        "module_id": batch.module_id,
+        "session_id": batch.session_id,
+        "knowledge_point_id": batch.knowledge_point_id,
+        "created_at": batch.created_at.isoformat(),
+        "jobs": [
+            {
+                "job_id": job.id,
+                "status": job.status,
+                "events_sync_status": job.events_sync_status,
+                "error_message": job.error_message,
+            }
+            for link in links
+            if (job := jobs_by_id.get(link.job_id)) is not None
+        ],
+        "summary": {
+            "signals_by_type": signals_by_type,
+            "total_signal_count": len(events),
+            "total_pause_ms": total_pause_ms,
+            "pending_confirmation_count": pending_confirmation_count,
+            "trend": {
+                "first_half_count": first_half_count,
+                "second_half_count": second_half_count,
+                "change": second_half_count - first_half_count,
+            },
+        },
+    }
 
 
 def queue_awaiting_micro_job_retry(

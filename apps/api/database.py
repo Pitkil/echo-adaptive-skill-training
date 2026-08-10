@@ -333,6 +333,37 @@ class MicroDetectionJob(Base):
     )
 
 
+class MicroMentorBatch(Base):
+    __tablename__ = "micro_mentor_batches"
+
+    id = Column(String(64), primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    module_id = Column(Integer, ForeignKey("training_modules.id"), nullable=False, index=True)
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=True, index=True)
+    knowledge_point_id = Column(Integer, ForeignKey("knowledge_points.id"), nullable=True, index=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+
+
+class MicroMentorBatchJob(Base):
+    __tablename__ = "micro_mentor_batch_jobs"
+
+    batch_id = Column(
+        String(64),
+        ForeignKey("micro_mentor_batches.id"),
+        primary_key=True,
+    )
+    job_id = Column(
+        String(64),
+        ForeignKey("micro_detection_jobs.id"),
+        primary_key=True,
+    )
+    sequence = Column(Integer, nullable=False)
+    __table_args__ = (
+        UniqueConstraint("batch_id", "sequence", name="uq_micro_batch_job_sequence"),
+    )
+
+
 class MicroRepresentationEvent(Base):
     __tablename__ = "micro_representation_events"
 
