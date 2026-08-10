@@ -115,11 +115,15 @@ def _labelled_payload(text_value: str) -> list[dict[str, Any]]:
 
     for raw_line in text_value.splitlines():
         line = raw_line.strip()
-        if not line or re.fullmatch(r"-{3,}", line):
+        if re.fullmatch(r"-{3,}", line):
             if current.get("content") and current.get("answer"):
                 items.append(current)
                 current = {}
                 active_field = None
+            continue
+        if not line:
+            if active_field and current.get(active_field):
+                current[active_field] = f"{current[active_field]}\n"
             continue
         labelled = re.match(r"^(?:[-*]\s*)?([^:：]{1,20})[:：]\s*(.*)$", line)
         if labelled:
@@ -132,7 +136,8 @@ def _labelled_payload(text_value: str) -> list[dict[str, Any]]:
                 active_field = alias
                 continue
         if active_field:
-            current[active_field] = f"{current.get(active_field, '')}\n{line}".strip()
+            continuation = raw_line.rstrip()
+            current[active_field] = f"{current.get(active_field, '')}\n{continuation}".strip()
 
     if current.get("content") and current.get("answer"):
         items.append(current)
