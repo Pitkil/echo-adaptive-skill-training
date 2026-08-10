@@ -21,6 +21,6 @@ D. kernel.build_prompt()
 难度：standard
 评分方法：选 B 得 2 分，其他不得分。
 资料名称：使用 Semantic Kernel 提示範本 - Training
-官方链接：https://learn.microsoft.com/ja-jp/python/api/semantic-kernel/semantic_kernel.kernel(class)?view=semantic-kernel-python
+官方链接：https://learn.microsoft.com/en-us/python/api/semantic-kernel/semantic_kernel.kernel%28class%29?view=semantic-kernel-python
 出处章节：全文
 是否更新MIRT：是

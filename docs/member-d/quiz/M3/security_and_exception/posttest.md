@@ -1,26 +1,26 @@
-题目：在企业级 AI 应用中，内容过滤（Content Filtering）主要解决什么问题？
-答案：内容过滤主要解决输入和输出内容的安全问题，防止有害内容（如仇恨言论、暴力、色情等）的生成和传播，保障 AI 应用的合规性和安全性。
+题目：Prompt Render Filter 可以在提示词发送给模型之前完成哪些安全处理？
+答案：可以查看或修改即将发送的提示词，例如删除个人信息、补充安全约束；也可以通过覆盖结果阻止不合规提示词继续发送。
 题型：Open
 用途：posttest
 难度：standard
-评分方法：答出"防止有害内容生成"得 1 分；答出"保障合规性和安全性"得 1 分；共 2 分。
-资料名称：Safety and reliability in Semantic Kernel
-官方链接：https://learn.microsoft.com/en-gb/semantic-kernel/concepts/enterprise-readiness/filters?pivots=programming-language-csharp
-出处章节：全文
+评分方法：答出查看或修改提示词得 1 分；答出个人信息处理或安全约束得 1 分；答出可以阻止提交得 1 分；共 3 分。
+资料名称：What are Filters?
+官方链接：https://learn.microsoft.com/en-us/semantic-kernel/concepts/enterprise-readiness/filters
+出处章节：Prompt Render Filter
 是否更新MIRT：是
 
 ---
-题目：以下哪项是 Semantic Kernel 中异常处理的正确做法？
-A. 忽略所有异常
-B. 捕获特定异常类型并采取相应措施
-C. 仅在日志中记录异常
-D. 重新抛出所有异常
+题目：Function Invocation Filter 在调用发生异常时可以做什么？
+A. 只能忽略异常
+B. 记录或处理异常，并根据规则决定重试、替代处理或继续抛出
+C. 自动删除整个 Kernel
+D. 自动修改模型部署
 答案：B
 题型：Choice
 用途：posttest
 难度：standard
 评分方法：选 B 得 2 分，其他不得分。
-资料名称：Safety and reliability in Semantic Kernel
-官方链接：https://learn.microsoft.com/en-gb/semantic-kernel/concepts/enterprise-readiness/filters?pivots=programming-language-csharp
-出处章节：全文
+资料名称：What are Filters?
+官方链接：https://learn.microsoft.com/en-us/semantic-kernel/concepts/enterprise-readiness/filters
+出处章节：Function Invocation Filter
 是否更新MIRT：是

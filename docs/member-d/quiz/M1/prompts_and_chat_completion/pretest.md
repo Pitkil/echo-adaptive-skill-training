@@ -21,6 +21,22 @@ D. %variableName%
 难度：foundation
 评分方法：选 A 得 2 分，其他不得分。
 资料名称：使用 Semantic Kernel 提示範本 - Training
-官方链接：(https://learn.microsoft.com/en-us/training/modules/create-plugins-semantic-kernel/3-use-semantic-kernel-prompt-templates)
+官方链接：https://learn.microsoft.com/en-us/training/modules/create-plugins-semantic-kernel/3-use-semantic-kernel-prompt-templates
 出处章节：全文
+是否更新MIRT：是
+
+---
+题目：调用提示词函数时，`KernelArguments` 的主要作用是什么？
+A. 保存数据库连接
+B. 向函数传入模板变量和执行参数
+C. 创建 Docker 镜像
+D. 替代模型服务
+答案：B
+题型：Choice
+用途：pretest
+难度：standard
+评分方法：选 B 得 2 分，其他不得分。
+资料名称：How to quickly start with Semantic Kernel
+官方链接：https://learn.microsoft.com/en-us/semantic-kernel/get-started/quick-start-guide
+出处章节：Invoke、KernelArguments
 是否更新MIRT：是

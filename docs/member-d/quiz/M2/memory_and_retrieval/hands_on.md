@@ -1,25 +1,45 @@
-题目：在 Python 中使用 Semantic Kernel 的 TextSearch 功能，配置一个简单的内存向量存储，执行语义搜索。
-答案：参考实现如下：
-from semantic_kernel import Kernel
-from semantic_kernel.text_search import TextSearch, MemoryTextSearch
-from semantic_kernel.memory import VolatileMemoryStore
+题目：使用 Semantic Kernel 当前的 InMemoryCollection 建立一个小型向量集合，写入两条记录并按查询向量检索最相近记录。
+答案：该练习使用手工向量，便于在没有外部数据库和嵌入模型的情况下检查完整流程：
+```python
+from dataclasses import dataclass
+from typing import Annotated
 
-memory_store = VolatileMemoryStore()
-text_search = MemoryTextSearch(memory_store)
+from semantic_kernel.connectors.in_memory import InMemoryCollection
+from semantic_kernel.data.vector import VectorStoreField, vectorstoremodel
 
-# 添加文档
-await text_search.add_text("Semantic Kernel is an open-source SDK for AI agents.")
-await text_search.add_text("Plugins allow you to encapsulate functions for AI use.")
+@vectorstoremodel
+@dataclass
+class MemoryRecord:
+    record_id: Annotated[str, VectorStoreField("key")]
+    text: Annotated[str, VectorStoreField("data", is_full_text_indexed=True)]
+    embedding: Annotated[
+        list[float],
+        VectorStoreField("vector", dimensions=3, distance_function="cosine"),
+    ]
 
-# 执行搜索
-results = await text_search.search("What is Semantic Kernel?")
-for result in results:
-    print(result.text)
+collection = InMemoryCollection(
+    record_type=MemoryRecord,
+    collection_name="semantic_kernel_notes",
+)
+await collection.ensure_collection_exists()
+await collection.upsert([
+    MemoryRecord("1", "Kernel manages services and plugins.", [1.0, 0.0, 0.0]),
+    MemoryRecord("2", "Agents can cooperate through orchestration.", [0.0, 1.0, 0.0]),
+])
+
+results = await collection.search(
+    vector=[0.9, 0.1, 0.0],
+    vector_property_name="embedding",
+    top=1,
+)
+async for result in results.results:
+    print(result.record.text)
+```
 题型：Open
 用途：practice
 难度：advanced
-评分方法：正确创建 VolatileMemoryStore 得 1 分；正确创建 MemoryTextSearch 得 1 分；正确添加文本得 1 分；正确执行搜索得 1 分；共 4 分。
-资料名称：Memory in Semantic Kernel
-官方链接：https://learn.microsoft.com/zh-cn/semantic-kernel/memories/
-出处章节：全文
+评分方法：正确定义 key、data、vector 三类字段得 1 分；创建并初始化 InMemoryCollection 得 1 分；写入两条记录得 1 分；按向量搜索并读取结果得 1 分；共 4 分。
+资料名称：Using the Semantic Kernel In-Memory Vector Store connector
+官方链接：https://learn.microsoft.com/en-us/semantic-kernel/concepts/vector-store-connectors/out-of-the-box-connectors/inmemory-connector
+出处章节：Getting started、Python
 是否更新MIRT：否
