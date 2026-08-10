@@ -39,6 +39,38 @@ def test_structured_text_quiz_is_extracted_for_preview(tmp_path) -> None:
     assert items[0]["issues"] == []
 
 
+def test_multiline_answer_keeps_blank_lines_and_indentation(tmp_path) -> None:
+    source = tmp_path / "semantic-kernel-practice.md"
+    source.write_text(
+        """
+题目：补全一个带分支的插件函数。
+答案：参考实现：
+def choose(value: bool):
+    if value:
+        return "yes"
+
+    return "no"
+题型：Open
+用途：练习
+难度：标准
+评分方法：保留分支和缩进得 2 分。
+资料名称：Native plugins
+官方链接：https://learn.microsoft.com/semantic-kernel/concepts/plugins/adding-native-plugins
+出处章节：Defining a plugin using a class
+是否更新MIRT：否
+""".strip(),
+        encoding="utf-8",
+    )
+
+    _, items = extract_quiz_preview(source)
+
+    assert len(items) == 1
+    assert items[0]["valid"] is True
+    assert '    if value:' in items[0]["answer"]
+    assert '\n\n    return "no"' in items[0]["answer"]
+    assert items[0]["scoring_method"] == "保留分支和缩进得 2 分。"
+
+
 def test_preview_validation_requires_answer_scoring_and_source() -> None:
     issues = validate_quiz_item(
         {
