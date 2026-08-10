@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from app import (
     create_micro_job_record,
+    get_micro_job,
     queue_awaiting_micro_job_retry,
     require_micro_callback_identity,
     require_micro_job_access,
@@ -27,6 +28,7 @@ from database import (
 from fastapi import BackgroundTasks, HTTPException, UploadFile
 from integrations.contracts import MicroSource
 from sqlalchemy import create_engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from starlette.datastructures import Headers
 
@@ -229,3 +231,59 @@ def test_awaiting_detector_job_is_queued_only_once() -> None:
     assert queue_awaiting_micro_job_retry(db, job, tasks) is False
     assert job.status == "queued"
     assert len(tasks.tasks) == 1
+
+
+def test_flush_failure_removes_saved_audio(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr("app.UPLOAD_DIR", tmp_path)
+    db, _, learner, _, module, point, _ = make_database_context()
+
+    def fail_flush(*args, **kwargs) -> None:
+        raise SQLAlchemyError("forced flush failure")
+
+    monkeypatch.setattr(db, "flush", fail_flush)
+    with pytest.raises(SQLAlchemyError, match="forced flush failure"):
+        create_micro_job_record(
+            db,
+            user=learner,
+            module_id=module.id,
+            source_type=MicroSource.LEARNER_VOICE,
+            audio=make_audio(b"audio-to-clean"),
+            learner_id=learner.id,
+            session_id=None,
+            knowledge_point_id=point.id,
+        )
+
+    assert not list(tmp_path.rglob("*.wav"))
+
+
+def test_unconfigured_detector_keeps_waiting_status_and_returns_degradation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class UnconfiguredDetector:
+        configured = False
+
+    monkeypatch.setattr("app.MicroRepresentationClient", UnconfiguredDetector)
+    db, organization, learner, _, module, _, _ = make_database_context()
+    job = MicroDetectionJob(
+        id="unconfigured-job",
+        organization_id=organization.id,
+        created_by_user_id=learner.id,
+        learner_id=learner.id,
+        module_id=module.id,
+        source_type=MicroSource.LEARNER_VOICE.value,
+        audio_uri="file:///audio.wav",
+        consent_granted=True,
+        status="awaiting_detector",
+    )
+    db.add(job)
+    db.commit()
+    tasks = BackgroundTasks()
+
+    result = get_micro_job(job.id, tasks, db, learner)
+
+    assert result["status"] == "awaiting_detector"
+    assert result["degradation"] == "微表征检测服务未配置，任务仍在等待检测器"
+    assert tasks.tasks == []

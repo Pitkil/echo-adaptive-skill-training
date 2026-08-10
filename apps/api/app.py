@@ -1718,11 +1718,14 @@ def create_micro_job_record(
             db.add(job)
             db.flush()
     except IntegrityError:
-        existing = db.query(MicroDetectionJob).filter_by(dedupe_key=dedupe_key).first()
         destination.unlink(missing_ok=True)
+        existing = db.query(MicroDetectionJob).filter_by(dedupe_key=dedupe_key).first()
         if existing is None:
             raise
         return MicroJobCreation(existing, False, audio_size, None)
+    except SQLAlchemyError:
+        destination.unlink(missing_ok=True)
+        raise
     return MicroJobCreation(job, True, audio_size, destination)
 
 
@@ -1863,9 +1866,13 @@ def get_micro_job(
     if job is None:
         raise HTTPException(status_code=404, detail="检测任务不存在")
     require_micro_job_access(job, user)
-    if job.status == "awaiting_detector" and not job.external_job_id:
-        queue_awaiting_micro_job_retry(db, job, background_tasks)
     degradation = None
+    if job.status == "awaiting_detector" and not job.external_job_id:
+        client = MicroRepresentationClient()
+        if client.configured:
+            queue_awaiting_micro_job_retry(db, job, background_tasks)
+        else:
+            degradation = "微表征检测服务未配置，任务仍在等待检测器"
     should_sync = job.status not in {"completed", "failed"} or (
         job.status == "completed" and job.events_sync_status != "synced"
     )
