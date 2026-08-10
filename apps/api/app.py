@@ -8,11 +8,10 @@ import json
 import os
 import re
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, Literal
-from urllib.parse import unquote, urlparse
-from urllib.request import url2pathname
 from uuid import uuid4
 
 import jwt
@@ -104,7 +103,7 @@ from resource_generation import (
     ResourceGenerationAgent,
     build_personalization_plan,
 )
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 API_DIR = Path(__file__).resolve().parent
@@ -1558,6 +1557,108 @@ def save_audio_file(job_id: str, audio: UploadFile) -> tuple[Path, str, int]:
     return destination, digest.hexdigest(), size
 
 
+@dataclass(frozen=True)
+class MicroJobCreation:
+    job: MicroDetectionJob
+    is_created: bool
+    audio_size: int
+    saved_path: Path | None
+
+
+def validate_micro_job_scope(
+    db: Session,
+    *,
+    user: User,
+    module_id: int,
+    source_type: MicroSource,
+    learner_id: int | None,
+    session_id: int | None,
+    knowledge_point_id: int | None,
+) -> None:
+    module = (
+        db.query(TrainingModule)
+        .join(TrainingProgram, TrainingProgram.id == TrainingModule.program_id)
+        .filter(
+            TrainingModule.id == module_id,
+            TrainingProgram.organization_id == user.organization_id,
+        )
+        .first()
+    )
+    if module is None:
+        raise HTTPException(status_code=404, detail="training module does not exist")
+    if knowledge_point_id is not None and (
+        db.query(KnowledgePoint.id)
+        .filter(
+            KnowledgePoint.id == knowledge_point_id,
+            KnowledgePoint.module_id == module_id,
+        )
+        .first()
+        is None
+    ):
+        raise HTTPException(status_code=422, detail="knowledge point does not belong to module")
+    if learner_id is not None and (
+        db.query(User.id)
+        .filter(
+            User.id == learner_id,
+            User.organization_id == user.organization_id,
+            User.role == UserRole.LEARNER.value,
+            User.status == "active",
+        )
+        .first()
+        is None
+    ):
+        raise HTTPException(status_code=422, detail="learner is not active in this organization")
+    if session_id is None:
+        return
+    session = (
+        db.query(ChatSession)
+        .join(User, User.id == ChatSession.user_id)
+        .filter(
+            ChatSession.id == session_id,
+            User.organization_id == user.organization_id,
+        )
+        .first()
+    )
+    if session is None:
+        raise HTTPException(status_code=422, detail="session does not belong to this organization")
+    if session.module_id != module_id:
+        raise HTTPException(status_code=422, detail="session does not belong to module")
+    if source_type is MicroSource.LEARNER_VOICE and session.user_id != user.id:
+        raise HTTPException(status_code=403, detail="learner voice session must belong to current user")
+    if learner_id is not None and session.user_id != learner_id:
+        raise HTTPException(status_code=422, detail="session does not belong to learner")
+
+
+def build_micro_dedupe_key(
+    *,
+    organization_id: int,
+    created_by_user_id: int,
+    learner_id: int | None,
+    session_id: int | None,
+    module_id: int,
+    knowledge_point_id: int | None,
+    source_type: MicroSource,
+    audio_sha256: str,
+) -> str:
+    scope = {
+        "audio_sha256": audio_sha256,
+        "created_by_user_id": created_by_user_id,
+        "knowledge_point_id": knowledge_point_id,
+        "learner_id": learner_id,
+        "module_id": module_id,
+        "organization_id": organization_id,
+        "session_id": session_id,
+        "source_type": source_type.value,
+    }
+    canonical = json.dumps(scope, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def cleanup_audio_files(paths: list[Path]) -> None:
+    for path in paths:
+        path.unlink(missing_ok=True)
+
+
 def create_micro_job_record(
     db: Session,
     *,
@@ -1568,29 +1669,36 @@ def create_micro_job_record(
     learner_id: int | None,
     session_id: int | None,
     knowledge_point_id: int | None,
-) -> tuple[MicroDetectionJob, bool, int]:
-    if db.query(TrainingModule.id).filter_by(id=module_id).first() is None:
-        raise HTTPException(status_code=404, detail="培训模块不存在")
+) -> MicroJobCreation:
     job_id = uuid4().hex
+    validate_micro_job_scope(
+        db,
+        user=user,
+        module_id=module_id,
+        source_type=source_type,
+        learner_id=learner_id,
+        session_id=session_id,
+        knowledge_point_id=knowledge_point_id,
+    )
     destination, audio_sha256, audio_size = save_audio_file(job_id, audio)
+    dedupe_key = build_micro_dedupe_key(
+        organization_id=user.organization_id,
+        created_by_user_id=user.id,
+        learner_id=learner_id,
+        session_id=session_id,
+        module_id=module_id,
+        knowledge_point_id=knowledge_point_id,
+        source_type=source_type,
+        audio_sha256=audio_sha256,
+    )
     existing = (
         db.query(MicroDetectionJob)
-        .filter_by(
-            organization_id=user.organization_id,
-            created_by_user_id=user.id,
-            learner_id=learner_id,
-            session_id=session_id,
-            module_id=module_id,
-            knowledge_point_id=knowledge_point_id,
-            source_type=source_type.value,
-            audio_sha256=audio_sha256,
-        )
-        .order_by(MicroDetectionJob.created_at)
+        .filter_by(dedupe_key=dedupe_key)
         .first()
     )
     if existing is not None:
         destination.unlink(missing_ok=True)
-        return existing, False, audio_size
+        return MicroJobCreation(existing, False, audio_size, None)
     job = MicroDetectionJob(
         id=job_id,
         organization_id=user.organization_id,
@@ -1603,10 +1711,19 @@ def create_micro_job_record(
         audio_uri=destination.as_uri(),
         consent_granted=True,
         audio_sha256=audio_sha256,
+        dedupe_key=dedupe_key,
     )
-    db.add(job)
-    db.flush()
-    return job, True, audio_size
+    try:
+        with db.begin_nested():
+            db.add(job)
+            db.flush()
+    except IntegrityError:
+        existing = db.query(MicroDetectionJob).filter_by(dedupe_key=dedupe_key).first()
+        destination.unlink(missing_ok=True)
+        if existing is None:
+            raise
+        return MicroJobCreation(existing, False, audio_size, None)
+    return MicroJobCreation(job, True, audio_size, destination)
 
 
 @app.post("/v1/micro/detection-jobs")
@@ -1628,7 +1745,7 @@ def create_micro_job(
         learner_id = user.id
     elif user.role not in {UserRole.MENTOR.value, UserRole.SYSTEM_ADMIN.value}:
         raise HTTPException(status_code=403, detail="只有讲师/导师可以上传培训录音")
-    job, is_created, _ = create_micro_job_record(
+    creation = create_micro_job_record(
         db,
         user=user,
         module_id=module_id,
@@ -1638,8 +1755,14 @@ def create_micro_job(
         session_id=session_id,
         knowledge_point_id=knowledge_point_id,
     )
-    db.commit()
-    if is_created:
+    job = creation.job
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        cleanup_audio_files([creation.saved_path] if creation.saved_path else [])
+        raise HTTPException(status_code=500, detail="failed to save micro detection job") from exc
+    if creation.is_created:
         background_tasks.add_task(submit_micro_job, job.id)
     return {"job_id": job.id, "status": job.status, "source_type": job.source_type}
 
@@ -1668,10 +1791,11 @@ def create_mentor_batch(
         raise HTTPException(status_code=413, detail="mentor batch exceeds 20 files")
     jobs: list[MicroDetectionJob] = []
     created_jobs: list[MicroDetectionJob] = []
+    created_paths: list[Path] = []
     total_size = 0
     try:
         for audio in audio_files:
-            job, is_created, audio_size = create_micro_job_record(
+            creation = create_micro_job_record(
                 db,
                 user=user,
                 module_id=module_id,
@@ -1681,30 +1805,57 @@ def create_mentor_batch(
                 session_id=session_id,
                 knowledge_point_id=knowledge_point_id,
             )
-            jobs.append(job)
-            total_size += audio_size
-            if is_created:
-                created_jobs.append(job)
+            jobs.append(creation.job)
+            total_size += creation.audio_size
+            if creation.is_created:
+                created_jobs.append(creation.job)
+                if creation.saved_path:
+                    created_paths.append(creation.saved_path)
             if total_size > Config.upload.MAX_FILE_SIZE:
                 raise HTTPException(status_code=413, detail="mentor batch exceeds total size limit")
+        db.commit()
     except (HTTPException, OSError):
         db.rollback()
-        for created_job in created_jobs:
-            parsed = urlparse(created_job.audio_uri)
-            path = Path(url2pathname(unquote(parsed.path)))
-            if os.name == "nt" and str(path).startswith("/"):
-                path = Path(str(path)[1:])
-            path.unlink(missing_ok=True)
+        cleanup_audio_files(created_paths)
         raise
-    db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        cleanup_audio_files(created_paths)
+        raise HTTPException(status_code=500, detail="failed to save mentor batch") from exc
     for job in created_jobs:
         background_tasks.add_task(submit_micro_job, job.id)
     return MentorBatchResult(job_ids=[job.id for job in jobs], accepted=len(jobs))
 
 
+def queue_awaiting_micro_job_retry(
+    db: Session,
+    job: MicroDetectionJob,
+    background_tasks: BackgroundTasks,
+) -> bool:
+    updated = (
+        db.query(MicroDetectionJob)
+        .filter(
+            MicroDetectionJob.id == job.id,
+            MicroDetectionJob.status == "awaiting_detector",
+            MicroDetectionJob.external_job_id.is_(None),
+        )
+        .update(
+            {MicroDetectionJob.status: "queued", MicroDetectionJob.error_message: None},
+            synchronize_session=False,
+        )
+    )
+    if not updated:
+        return False
+    db.commit()
+    db.refresh(job)
+    background_tasks.add_task(submit_micro_job, job.id)
+    return True
+
+
 @app.get("/v1/micro/detection-jobs/{job_id}")
 def get_micro_job(
     job_id: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):
@@ -1712,6 +1863,8 @@ def get_micro_job(
     if job is None:
         raise HTTPException(status_code=404, detail="检测任务不存在")
     require_micro_job_access(job, user)
+    if job.status == "awaiting_detector" and not job.external_job_id:
+        queue_awaiting_micro_job_retry(db, job, background_tasks)
     degradation = None
     should_sync = job.status not in {"completed", "failed"} or (
         job.status == "completed" and job.events_sync_status != "synced"

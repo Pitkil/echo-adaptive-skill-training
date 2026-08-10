@@ -325,8 +325,12 @@ class MicroDetectionJob(Base):
     events_sync_error = Column(Text, nullable=True)
     events_synced_at = Column(DateTime, nullable=True)
     audio_sha256 = Column(String(64), nullable=True, index=True)
+    dedupe_key = Column(String(64), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.now)
     updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+    __table_args__ = (
+        UniqueConstraint("dedupe_key", name="uq_micro_detection_job_dedupe_key"),
+    )
 
 
 class MicroRepresentationEvent(Base):
@@ -494,6 +498,7 @@ def _ensure_micro_job_columns() -> None:
         "events_sync_error": "TEXT",
         "events_synced_at": "DATETIME",
         "audio_sha256": "VARCHAR(64)",
+        "dedupe_key": "VARCHAR(64)",
     }
     with engine.begin() as connection:
         for column_name, definition in additions.items():
@@ -504,6 +509,22 @@ def _ensure_micro_job_columns() -> None:
                         f"ADD COLUMN {column_name} {definition}"
                     )
                 )
+    inspector = inspect(engine)
+    unique_names = {
+        constraint["name"]
+        for constraint in inspector.get_unique_constraints("micro_detection_jobs")
+    }
+    index_names = {
+        index["name"] for index in inspector.get_indexes("micro_detection_jobs")
+    }
+    if "uq_micro_detection_job_dedupe_key" not in unique_names | index_names:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX uq_micro_detection_job_dedupe_key "
+                    "ON micro_detection_jobs (dedupe_key)"
+                )
+            )
 
 
 def _ensure_micro_event_columns() -> None:

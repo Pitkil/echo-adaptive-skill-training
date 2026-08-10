@@ -5,14 +5,29 @@ from types import SimpleNamespace
 
 import pytest
 from app import (
+    create_micro_job_record,
+    queue_awaiting_micro_job_retry,
     require_micro_callback_identity,
     require_micro_job_access,
     save_audio_file,
 )
 from config import Config
-from database import UserRole
-from fastapi import HTTPException, UploadFile
+from database import (
+    Base,
+    ChatSession,
+    KnowledgeBase,
+    KnowledgePoint,
+    MicroDetectionJob,
+    Organization,
+    TrainingModule,
+    TrainingProgram,
+    User,
+    UserRole,
+)
+from fastapi import BackgroundTasks, HTTPException, UploadFile
 from integrations.contracts import MicroSource
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from starlette.datastructures import Headers
 
 
@@ -37,6 +52,52 @@ def make_audio(content: bytes, filename: str = "turn.wav") -> UploadFile:
         filename=filename,
         headers=Headers({"content-type": "audio/wav"}),
     )
+
+
+def make_database_context():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine)()
+    organization = Organization(code="ORG", name="Test Organization")
+    db.add(organization)
+    db.flush()
+    learner = User(
+        organization_id=organization.id,
+        username="learner",
+        hashed_password="unused",
+        role=UserRole.LEARNER.value,
+    )
+    other_learner = User(
+        organization_id=organization.id,
+        username="other-learner",
+        hashed_password="unused",
+        role=UserRole.LEARNER.value,
+    )
+    knowledge_base = KnowledgeBase(organization_id=organization.id, code="KB", name="KB")
+    program = TrainingProgram(organization_id=organization.id, code="P", name="Program")
+    db.add_all([learner, other_learner, knowledge_base, program])
+    db.flush()
+    module = TrainingModule(
+        program_id=program.id,
+        knowledge_base_id=knowledge_base.id,
+        code="M1",
+        name="Module",
+        sequence=1,
+    )
+    db.add(module)
+    db.flush()
+    point = KnowledgePoint(module_id=module.id, code="KP", name="Point", sequence=1)
+    db.add(point)
+    db.flush()
+    session = ChatSession(
+        user_id=other_learner.id,
+        program_id=program.id,
+        module_id=module.id,
+        knowledge_base_id=knowledge_base.id,
+    )
+    db.add(session)
+    db.commit()
+    return db, organization, learner, other_learner, module, point, session
 
 
 def test_learner_cannot_read_another_learners_job() -> None:
@@ -95,3 +156,76 @@ def test_audio_extension_and_content_type_are_validated(
     with pytest.raises(HTTPException) as exc_info:
         save_audio_file("invalid", make_audio(b"audio", filename="turn.exe"))
     assert exc_info.value.status_code == 415
+
+
+def test_learner_cannot_attach_another_learners_session(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr("app.UPLOAD_DIR", tmp_path)
+    db, _, learner, _, module, point, session = make_database_context()
+
+    with pytest.raises(HTTPException) as exc_info:
+        create_micro_job_record(
+            db,
+            user=learner,
+            module_id=module.id,
+            source_type=MicroSource.LEARNER_VOICE,
+            audio=make_audio(b"audio"),
+            learner_id=learner.id,
+            session_id=session.id,
+            knowledge_point_id=point.id,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert not list(tmp_path.rglob("*.wav"))
+
+
+def test_identical_upload_is_deduplicated_by_database_key(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr("app.UPLOAD_DIR", tmp_path)
+    db, _, learner, _, module, point, _ = make_database_context()
+    values = {
+        "user": learner,
+        "module_id": module.id,
+        "source_type": MicroSource.LEARNER_VOICE,
+        "learner_id": learner.id,
+        "session_id": None,
+        "knowledge_point_id": point.id,
+    }
+
+    first = create_micro_job_record(db, audio=make_audio(b"same-audio"), **values)
+    db.commit()
+    second = create_micro_job_record(db, audio=make_audio(b"same-audio"), **values)
+
+    assert first.is_created is True
+    assert second.is_created is False
+    assert first.job.id == second.job.id
+    assert first.job.dedupe_key
+    assert db.query(MicroDetectionJob).count() == 1
+    assert len(list(tmp_path.rglob("*.wav"))) == 1
+
+
+def test_awaiting_detector_job_is_queued_only_once() -> None:
+    db, organization, learner, _, module, _, _ = make_database_context()
+    job = MicroDetectionJob(
+        id="awaiting-job",
+        organization_id=organization.id,
+        created_by_user_id=learner.id,
+        learner_id=learner.id,
+        module_id=module.id,
+        source_type=MicroSource.LEARNER_VOICE.value,
+        audio_uri="file:///audio.wav",
+        consent_granted=True,
+        status="awaiting_detector",
+    )
+    db.add(job)
+    db.commit()
+    tasks = BackgroundTasks()
+
+    assert queue_awaiting_micro_job_retry(db, job, tasks) is True
+    assert queue_awaiting_micro_job_retry(db, job, tasks) is False
+    assert job.status == "queued"
+    assert len(tasks.tasks) == 1
