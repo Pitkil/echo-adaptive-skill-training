@@ -33,11 +33,12 @@ def test_local_audio_is_uploaded_without_exposing_file_uri(
     client = MicroRepresentationClient("http://detector.test")
     captured: dict = {}
 
-    def fake_upload(path, *, filename, content, content_type, data):
+    def fake_upload(path, *, field_name, filename, content, content_type, data):
         captured.update(
             path=path,
+            field_name=field_name,
             filename=filename,
-            content=content,
+            content=content.read(),
             content_type=content_type,
             data=data,
         )
@@ -49,6 +50,7 @@ def test_local_audio_is_uploaded_without_exposing_file_uri(
 
     assert result == {"job_id": "external-001", "status": "queued"}
     assert captured["path"] == "/v1/detection/jobs"
+    assert captured["field_name"] == "audio"
     assert captured["filename"] == "learner turn.webm"
     assert captured["content"] == b"test-audio"
     assert captured["content_type"] == "audio/webm"

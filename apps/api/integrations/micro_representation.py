@@ -99,13 +99,15 @@ class MicroRepresentationClient:
             local_path.suffix.lower(),
             mimetypes.guess_type(local_path.name)[0] or "application/octet-stream",
         )
-        return self.http.upload(
-            "/v1/detection/jobs",
-            filename=local_path.name,
-            content=local_path.read_bytes(),
-            content_type=content_type,
-            data=form_data,
-        )
+        with local_path.open("rb") as content:
+            return self.http.upload(
+                "/v1/detection/jobs",
+                field_name="audio",
+                filename=local_path.name,
+                content=content,
+                content_type=content_type,
+                data=form_data,
+            )
 
     @staticmethod
     def _form_value(value: Any) -> str:

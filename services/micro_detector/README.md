@@ -17,3 +17,6 @@ start ECHO alone and exercise the documented external-service degradation path.
 
 The future real detector must keep the same `/v1/detection/jobs` contract, use separate heavy
 dependencies and external model/index volumes, and must never write directly to the ECHO database.
+Multipart requests use the `audio` file field. Detector responses and events use `job_id` only for
+the detector-generated identifier; ECHO's internal job identifier is carried separately as the
+request `trace_id` and must not replace the detector identifier in event payloads.

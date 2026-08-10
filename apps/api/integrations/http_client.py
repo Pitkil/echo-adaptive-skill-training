@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, BinaryIO
 
 import httpx
 
@@ -45,8 +45,9 @@ class JsonHttpClient:
         self,
         path: str,
         *,
+        field_name: str = "file",
         filename: str,
-        content: bytes,
+        content: BinaryIO,
         content_type: str,
         data: dict[str, str],
     ) -> Any:
@@ -55,7 +56,7 @@ class JsonHttpClient:
         try:
             response = httpx.post(
                 f"{self.base_url}/{path.lstrip('/')}",
-                files={"file": (filename, content, content_type)},
+                files={field_name: (filename, content, content_type)},
                 data=data,
                 timeout=self.timeout_seconds,
             )

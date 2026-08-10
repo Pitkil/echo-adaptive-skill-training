@@ -33,14 +33,14 @@ class RemoteDetectionRequest(DetectionMetadata):
 
 
 class DetectionJob(BaseModel):
-    job_id: str
+    job_id: str = Field(min_length=1, max_length=100)
     status: Literal["queued", "processing", "completed", "failed"]
     error_message: str | None = None
 
 
 class DetectionEvent(BaseModel):
     event_id: str
-    job_id: str
+    job_id: str = Field(min_length=1, max_length=100)
     organization_id: int
     learner_id: int | None = None
     session_id: int | None = None

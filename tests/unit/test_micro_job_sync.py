@@ -15,7 +15,11 @@ from database import (
 )
 from integrations.contracts import MicroRepresentationEvent as MicroEventContract
 from integrations.http_client import IntegrationUnavailable
-from integrations.micro_sync import persist_micro_events, synchronize_micro_job
+from integrations.micro_sync import (
+    apply_micro_job_creation_result,
+    persist_micro_events,
+    synchronize_micro_job,
+)
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -141,6 +145,40 @@ def test_completed_job_persists_events_idempotently() -> None:
     assert db.get(MicroRepresentationEvent, "event-002").evidence_status == EvidenceStatus.PENDING.value
 
 
+def test_create_response_completed_immediately_imports_events() -> None:
+    db, job, organization, learner, module, point = make_job_context()
+    job.external_job_id = None
+    client = FakeDetectorClient(
+        {"job_id": "unused", "status": "processing"},
+        [make_event(job, organization, learner, module, point, job_id="detector-direct")],
+    )
+
+    accepted = apply_micro_job_creation_result(
+        db,
+        job,
+        client,
+        {"job_id": "detector-direct", "status": "completed"},
+    )
+    db.commit()
+
+    assert accepted == 1
+    assert job.status == "completed"
+    assert job.events_sync_status == "synced"
+    assert job.events_synced_at is not None
+
+
+def test_completed_job_with_empty_events_is_still_marked_synced() -> None:
+    db, job, *_ = make_job_context()
+    client = FakeDetectorClient(
+        {"job_id": job.external_job_id, "status": "completed"},
+        [],
+    )
+
+    assert synchronize_micro_job(db, job, client) == 0
+    assert job.events_sync_status == "synced"
+    assert job.events_synced_at is not None
+
+
 def test_event_scope_mismatch_is_rejected() -> None:
     db, job, organization, learner, module, point = make_job_context()
     event = make_event(
@@ -213,7 +251,52 @@ def test_event_fetch_failure_does_not_mark_job_completed() -> None:
     with pytest.raises(IntegrationUnavailable, match="timed out"):
         synchronize_micro_job(db, job, client)
 
-    assert job.status == "processing"
+    assert job.status == "completed"
+    assert job.events_sync_status == "failed"
+    assert "timed out" in job.events_sync_error
+
+
+def test_stored_event_with_changed_content_is_rejected() -> None:
+    db, job, organization, learner, module, point = make_job_context()
+    event = make_event(job, organization, learner, module, point)
+    persist_micro_events(
+        db,
+        job,
+        [event],
+        expected_event_job_id=job.external_job_id,
+    )
+    db.commit()
+
+    with pytest.raises(IntegrationUnavailable, match="conflicting content"):
+        persist_micro_events(
+            db,
+            job,
+            [event.model_copy(update={"start_ms": 1300})],
+            expected_event_job_id=job.external_job_id,
+        )
+
+
+def test_confirmed_mentor_event_with_wrong_learner_is_rejected() -> None:
+    db, job, organization, learner, module, point = make_job_context()
+    job.source_type = "mentor_recording"
+    event = make_event(
+        job,
+        organization,
+        learner,
+        module,
+        point,
+        source_type="mentor_recording",
+        learner_id=learner.id + 1,
+        speaker_mapping_confirmed=True,
+    )
+
+    with pytest.raises(IntegrationUnavailable, match="learner_id does not match"):
+        persist_micro_events(
+            db,
+            job,
+            [event],
+            expected_event_job_id=job.external_job_id,
+        )
 
 
 def test_failed_external_job_keeps_failure_reason() -> None:

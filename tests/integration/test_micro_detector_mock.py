@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
+import httpx
+import pytest
 from fastapi.testclient import TestClient
+from integrations.contracts import MicroDetectionRequest
+from integrations.micro_representation import MicroRepresentationClient
 
 SERVICE_ROOT = Path(__file__).resolve().parents[2] / "services" / "micro_detector"
 sys.path.insert(0, str(SERVICE_ROOT))
@@ -95,3 +100,45 @@ def test_audio_without_consent_is_rejected() -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_echo_adapter_and_mock_service_share_the_multipart_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    detector = TestClient(app)
+
+    def fake_post(url, *, files, data, timeout):
+        return detector.post(urlparse(url).path, files=files, data=data)
+
+    def fake_request(*, method, url, json, timeout):
+        return detector.request(method, urlparse(url).path, json=json)
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(httpx, "request", fake_request)
+    audio_path = tmp_path / "turn.wav"
+    audio_path.write_bytes(b"RIFF-adapter-to-mock")
+    client = MicroRepresentationClient("http://micro-detector:8030")
+
+    created = client.create_job(
+        MicroDetectionRequest(
+            trace_id="echo-job-direct-completed",
+            organization_id=1,
+            learner_id=7,
+            session_id=11,
+            program_id=1,
+            module_id=2,
+            knowledge_point_id=5,
+            source_type="learner_voice",
+            audio_uri=audio_path.as_uri(),
+            consent_granted=True,
+            speaker_mapping_confirmed=True,
+        )
+    )
+    detector_job_id = created["job_id"]
+
+    assert created["status"] == "completed"
+    assert client.get_job(detector_job_id)["job_id"] == detector_job_id
+    events = client.get_events(detector_job_id)
+    assert len(events) == 1
+    assert events[0].job_id == detector_job_id
