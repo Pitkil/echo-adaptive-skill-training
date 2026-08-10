@@ -56,7 +56,23 @@ def test_simplemem_uses_patch_and_full_scope_for_mutating_operations() -> None:
     client.http = fake_http
     record = make_record()
 
+    fake_http.response = {
+        "status": "updated",
+        "memory_id": "memory-1",
+        "organization_id": 1,
+        "user_id": 2,
+        "program_id": 3,
+        "module_id": 4,
+    }
     client.update("memory-1", record)
+    fake_http.response = {
+        "status": "deleted",
+        "memory_id": "memory-1",
+        "organization_id": 1,
+        "user_id": 2,
+        "program_id": 3,
+        "module_id": 4,
+    }
     client.delete(
         "memory-1",
         organization_id=1,
@@ -64,6 +80,7 @@ def test_simplemem_uses_patch_and_full_scope_for_mutating_operations() -> None:
         program_id=3,
         module_id=4,
     )
+    fake_http.response = {}
     client.consolidate(
         organization_id=1,
         user_id=2,
@@ -92,6 +109,54 @@ def test_simplemem_uses_patch_and_full_scope_for_mutating_operations() -> None:
             "module_id": 4,
         },
     )
+
+
+@pytest.mark.parametrize(
+    ("operation", "response"),
+    [
+        ("update", {}),
+        (
+            "update",
+            {
+                "status": "updated",
+                "memory_id": "another-memory",
+                "organization_id": 1,
+                "user_id": 2,
+                "program_id": 3,
+                "module_id": 4,
+            },
+        ),
+        (
+            "delete",
+            {
+                "status": "updated",
+                "memory_id": "memory-1",
+                "organization_id": 1,
+                "user_id": 2,
+                "program_id": 3,
+                "module_id": 4,
+            },
+        ),
+    ],
+)
+def test_simplemem_rejects_invalid_mutation_response(
+    operation: str,
+    response: dict,
+) -> None:
+    client = SimpleMemClient("http://simplemem.test")
+    client.http = FakeHttpClient(response)
+
+    with pytest.raises(IntegrationUnavailable, match="mutation response"):
+        if operation == "update":
+            client.update("memory-1", make_record())
+        else:
+            client.delete(
+                "memory-1",
+                organization_id=1,
+                user_id=2,
+                program_id=3,
+                module_id=4,
+            )
 
 
 def test_simplemem_upsert_sends_formal_idempotency_contract() -> None:

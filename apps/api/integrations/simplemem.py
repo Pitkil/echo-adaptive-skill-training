@@ -7,6 +7,8 @@ from typing import Any
 
 from .contracts import (
     MemoryAuthorizationResponse,
+    MemoryMutationResponse,
+    MemoryMutationStatus,
     MemoryRecord,
     MemorySearchRequest,
     MemoryUpsertResponse,
@@ -68,10 +70,19 @@ class SimpleMemClient:
         return items
 
     def update(self, memory_id: str, record: MemoryRecord) -> dict[str, Any]:
-        return self.http.request(
+        payload = self.http.request(
             "PATCH",
             f"/v1/memories/{memory_id}",
             record.model_dump(mode="json"),
+        )
+        return self._validate_mutation_response(
+            payload,
+            memory_id=memory_id,
+            scope=self._record_scope(record),
+            allowed_statuses={
+                MemoryMutationStatus.UPDATED,
+                MemoryMutationStatus.UNCHANGED,
+            },
         )
 
     def authorize(
@@ -116,15 +127,22 @@ class SimpleMemClient:
         program_id: int,
         module_id: int,
     ) -> dict[str, Any]:
-        return self.http.request(
+        scope = {
+            "organization_id": organization_id,
+            "user_id": user_id,
+            "program_id": program_id,
+            "module_id": module_id,
+        }
+        payload = self.http.request(
             "DELETE",
             f"/v1/memories/{memory_id}",
-            {
-                "organization_id": organization_id,
-                "user_id": user_id,
-                "program_id": program_id,
-                "module_id": module_id,
-            },
+            scope,
+        )
+        return self._validate_mutation_response(
+            payload,
+            memory_id=memory_id,
+            scope=scope,
+            allowed_statuses={MemoryMutationStatus.DELETED},
         )
 
     def consolidate(
@@ -151,3 +169,37 @@ class SimpleMemClient:
         if not isinstance(payload, dict):
             raise IntegrationUnavailable("SimpleMem health response must be an object.")
         return payload
+
+    @staticmethod
+    def _record_scope(record: MemoryRecord) -> dict[str, int]:
+        return {
+            "organization_id": record.organization_id,
+            "user_id": record.user_id,
+            "program_id": record.program_id,
+            "module_id": record.module_id,
+        }
+
+    @staticmethod
+    def _validate_mutation_response(
+        payload: Any,
+        *,
+        memory_id: str,
+        scope: dict[str, int],
+        allowed_statuses: set[MemoryMutationStatus],
+    ) -> dict[str, Any]:
+        try:
+            response = MemoryMutationResponse.model_validate(payload)
+        except ValueError as exc:
+            raise IntegrationUnavailable(
+                f"Invalid SimpleMem mutation response: {exc}"
+            ) from exc
+        actual_scope = {field: getattr(response, field) for field in scope}
+        if (
+            response.memory_id != memory_id
+            or actual_scope != scope
+            or response.status not in allowed_statuses
+        ):
+            raise IntegrationUnavailable(
+                "SimpleMem mutation response does not match the requested operation and scope."
+            )
+        return response.model_dump(mode="json")

@@ -25,6 +25,8 @@ class FakeMemoryClient:
         configured: bool = True,
         fail_operation: str | None = None,
         consolidate_response: dict | None = None,
+        update_response: dict | None = None,
+        delete_response: dict | None = None,
     ) -> None:
         self.configured = configured
         self.fail_operation = fail_operation
@@ -33,6 +35,8 @@ class FakeMemoryClient:
         self.active_conflicts: dict[str, str] = {}
         self.memory_scopes = {"memory-1": make_scope().model_dump()}
         self.consolidate_response = consolidate_response
+        self.update_response = update_response
+        self.delete_response = delete_response
 
     def _fail_if_requested(self, operation: str) -> None:
         if self.fail_operation == operation:
@@ -97,12 +101,23 @@ class FakeMemoryClient:
     def update(self, memory_id: str, record: MemoryRecord):
         self._fail_if_requested("update")
         self.calls.append(("update", (memory_id, record)))
-        return {"memory_id": memory_id, "status": "updated"}
+        if self.update_response is not None:
+            return self.update_response
+        return {
+            "memory_id": memory_id,
+            "status": "updated",
+            "organization_id": record.organization_id,
+            "user_id": record.user_id,
+            "program_id": record.program_id,
+            "module_id": record.module_id,
+        }
 
     def delete(self, memory_id: str, **scope):
         self._fail_if_requested("delete")
         self.calls.append(("delete", (memory_id, scope)))
-        return {"memory_id": memory_id, "status": "deleted"}
+        if self.delete_response is not None:
+            return self.delete_response
+        return {"memory_id": memory_id, "status": "deleted", **scope}
 
     def consolidate(self, **scope):
         self._fail_if_requested("consolidate")
@@ -318,6 +333,23 @@ def test_only_semantically_distinct_supporting_evidence_is_persisted() -> None:
     ]
 
 
+def test_conflicting_duplicate_evidence_identity_is_rejected() -> None:
+    evidence = [
+        make_attempt("reference-1", attempt_id="attempt-1", is_correct=False),
+        make_attempt("reference-2", attempt_id="attempt-1", is_correct=True),
+        make_attempt("reference-3", attempt_id="attempt-2"),
+    ]
+    client = FakeMemoryClient()
+
+    result = LearnerMemoryService(client=client).create(
+        make_misconception_candidate(evidence)
+    )
+
+    assert result.status is MemoryLifecycleStatus.REJECTED
+    assert "互相矛盾" in (result.reason or "")
+    assert client.calls == []
+
+
 @pytest.mark.parametrize(
     ("evidence", "reason"),
     [
@@ -485,6 +517,63 @@ def test_cross_scope_mutation_is_degraded_without_mutating(
     assert "未执行变更" in (result.reason or "")
     assert not any(call[0] == operation for call in client.calls)
     assert (ability.U, ability.A, ability.R, ability.attempt_count) == before
+
+
+@pytest.mark.parametrize("operation", ["update", "delete"])
+@pytest.mark.parametrize(
+    "response",
+    [
+        {},
+        {
+            "memory_id": "another-memory",
+            "status": "updated",
+            **make_scope().model_dump(),
+        },
+        {
+            "memory_id": "memory-1",
+            "status": "updated",
+            **make_scope(user_id=999).model_dump(),
+        },
+    ],
+)
+def test_invalid_mutation_response_is_degraded(operation: str, response: dict) -> None:
+    client = FakeMemoryClient(
+        update_response=response if operation == "update" else None,
+        delete_response=response if operation == "delete" else None,
+    )
+    service = LearnerMemoryService(client=client)
+
+    if operation == "update":
+        result = service.update("memory-1", make_misconception_candidate())
+    else:
+        result = service.delete("memory-1", make_scope())
+
+    assert result.status is MemoryLifecycleStatus.DEGRADED
+    assert "变更结果无效" in (result.reason or "")
+
+
+@pytest.mark.parametrize(
+    "search_kwargs",
+    [
+        {"query": "   "},
+        {"query": "memory", "limit": 0},
+        {"query": "memory", "knowledge_point_id": 0},
+    ],
+)
+def test_invalid_search_request_is_rejected_without_external_call(
+    search_kwargs: dict,
+) -> None:
+    client = FakeMemoryClient()
+
+    result = LearnerMemoryService(client=client).search(
+        make_scope(),
+        intent=MemoryIntent.LEARNER_DIAGNOSIS,
+        **search_kwargs,
+    )
+
+    assert result.status is MemoryLifecycleStatus.REJECTED
+    assert "查询参数无效" in (result.reason or "")
+    assert client.calls == []
 
 
 @pytest.mark.parametrize(

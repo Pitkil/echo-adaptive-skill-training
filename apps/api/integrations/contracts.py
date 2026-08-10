@@ -28,6 +28,12 @@ class MemoryUpsertStatus(StrEnum):
     CONFLICT = "conflict"
 
 
+class MemoryMutationStatus(StrEnum):
+    UPDATED = "updated"
+    UNCHANGED = "unchanged"
+    DELETED = "deleted"
+
+
 class MicroSource(StrEnum):
     LEARNER_VOICE = "learner_voice"
     MENTOR_RECORDING = "mentor_recording"
@@ -126,6 +132,17 @@ class MemoryAuthorizationResponse(BaseModel):
     module_id: int = Field(gt=0)
 
 
+class MemoryMutationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: MemoryMutationStatus
+    memory_id: str = Field(min_length=1, max_length=128)
+    organization_id: int = Field(gt=0)
+    user_id: int = Field(gt=0)
+    program_id: int = Field(gt=0)
+    module_id: int = Field(gt=0)
+
+
 class MemoryConsolidationResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -147,14 +164,24 @@ class MemoryConsolidationResult(BaseModel):
 
 
 class MemorySearchRequest(BaseModel):
-    organization_id: int
-    user_id: int
-    program_id: int
-    module_id: int
+    model_config = ConfigDict(extra="forbid")
+
+    organization_id: int = Field(gt=0)
+    user_id: int = Field(gt=0)
+    program_id: int = Field(gt=0)
+    module_id: int = Field(gt=0)
     intent: MemoryIntent
     query: str = Field(min_length=1)
-    knowledge_point_id: int | None = None
+    knowledge_point_id: int | None = Field(default=None, gt=0)
     limit: int = Field(default=8, ge=1, le=30)
+
+    @field_validator("query")
+    @classmethod
+    def normalize_query(cls, value: str) -> str:
+        normalized = " ".join(value.split())
+        if not normalized:
+            raise ValueError("memory search query must not be blank.")
+        return normalized
 
 
 class MicroDetectionRequest(BaseModel):

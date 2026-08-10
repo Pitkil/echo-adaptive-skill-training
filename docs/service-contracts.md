@@ -99,6 +99,10 @@
 查出该 `memory_id` 的原始组织、用户、项目和模块，再与请求作用域逐字段比较；任一不一致返回
 HTTP 403，且不得执行 `PATCH` 或 `DELETE`。仅回显调用方传入的作用域不构成授权。
 
+`PATCH` 和 `DELETE` 的响应必须返回 `status`、`memory_id`、组织、用户、项目和模块编号。
+更新只接受 `updated` 或 `unchanged`，删除只接受 `deleted`；响应为空、记忆编号不一致、状态错误
+或作用域不一致时，主系统必须按 `degraded` 处理，不能记录为成功。
+
 `POST /v1/memories/consolidate` 的响应固定包含 `merged_memory_id`、至少两个去重后的
 `source_memory_ids`、至少两个去重后的 `evidence_refs`，以及组织、用户、项目和模块编号。
 缺字段或返回其他作用域时，主系统必须按 `degraded` 处理，不能接纳合并结果。
@@ -106,6 +110,10 @@ HTTP 403，且不得执行 `PATCH` 或 `DELETE`。仅回显调用方传入的作
 主系统内的生命周期服务统一返回 `completed`、`rejected` 或 `degraded`。规则不满足时返回
 `rejected`，SimpleMem 未配置、超时或返回越权数据时返回 `degraded`。业务数据库事实必须先提交，
 因此任何 SimpleMem 降级都不能回滚答题记录或改变 U/A/R。
+
+空白检索词、非正数作用域编号、非法知识点编号或超出 `1-30` 的返回数量属于无效请求，生命周期
+服务直接返回 `rejected`，不得把无效请求发送给 SimpleMem。同一作答、偏好观察或干预编号出现
+互相矛盾的数据时也必须拒绝形成长期记忆，不能采用“保留第一条”的方式掩盖冲突。
 
 生命周期服务本身不持有数据库会话。成员 A 在主系统接入时必须把每次 `degraded` 结果写入业务
 数据库的记忆审计表，至少持久化 `memory_record`、失败原因、操作名、发生时间和 `request_id`，

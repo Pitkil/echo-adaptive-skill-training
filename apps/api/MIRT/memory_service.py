@@ -12,6 +12,8 @@ from integrations.contracts import (
     MemoryAuthorizationResponse,
     MemoryConsolidationResult,
     MemoryIntent,
+    MemoryMutationResponse,
+    MemoryMutationStatus,
     MemoryRecord,
     MemorySearchRequest,
     MemoryType,
@@ -207,7 +209,15 @@ class StableMemoryPolicy:
 
         evidence_by_identity: dict[str, MemoryEvidence] = {}
         for item in candidate.evidence:
-            evidence_by_identity.setdefault(self._evidence_identity(item), item)
+            identity = self._evidence_identity(item)
+            existing = evidence_by_identity.get(identity)
+            if existing is not None:
+                if self._evidence_semantics(existing) != self._evidence_semantics(item):
+                    raise MemoryPolicyError(
+                        f"同一证据身份 {identity} 出现互相矛盾的数据。"
+                    )
+                continue
+            evidence_by_identity[identity] = item
         evidence = list(evidence_by_identity.values())
         if len(evidence) < self.MIN_EVIDENCE_COUNT:
             raise MemoryPolicyError("长期记忆至少需要两个语义不同的证据编号。")
@@ -256,6 +266,35 @@ class StableMemoryPolicy:
         if evidence.evidence_type is MemoryEvidenceType.PREFERENCE_OBSERVATION:
             return f"preference:{evidence.preference_key}:{evidence.session_id}"
         return f"intervention:{evidence.intervention_id}"
+
+    @staticmethod
+    def _evidence_semantics(evidence: MemoryEvidence) -> tuple[Any, ...]:
+        if evidence.evidence_type is MemoryEvidenceType.SCORED_ATTEMPT:
+            return (
+                evidence.evidence_type,
+                evidence.question_id,
+                evidence.knowledge_point_id,
+                evidence.is_correct,
+                evidence.score,
+                evidence.misconception_key,
+            )
+        if evidence.evidence_type is MemoryEvidenceType.PREFERENCE_OBSERVATION:
+            return (
+                evidence.evidence_type,
+                evidence.preference_key,
+                evidence.session_id,
+                evidence.result_confirmed,
+                StableMemoryPolicy._normalized_result(evidence.result_value),
+            )
+        return (
+            evidence.evidence_type,
+            evidence.intervention_id,
+            evidence.intervention_type,
+            evidence.session_id,
+            evidence.preference_key,
+            evidence.result_confirmed,
+            StableMemoryPolicy._normalized_result(evidence.result_value),
+        )
 
     def _validate_evidence_consistency(
         self,
@@ -387,10 +426,19 @@ class LearnerMemoryService:
         authorization = self._authorize("update", memory_id, candidate)
         if authorization is not None:
             return authorization
-        return self._write_candidate(
+        result = self._write_candidate(
             "update",
             candidate,
             lambda record: self.client.update(memory_id, record),
+        )
+        return self._validate_mutation_result(
+            result,
+            memory_id=memory_id,
+            scope=candidate,
+            allowed_statuses={
+                MemoryMutationStatus.UPDATED,
+                MemoryMutationStatus.UNCHANGED,
+            },
         )
 
     def search(
@@ -404,16 +452,19 @@ class LearnerMemoryService:
     ) -> MemoryLifecycleResult:
         if not self.client.configured:
             return self._degraded("search", "SimpleMem 未配置。", data=[])
-        request = MemorySearchRequest(
-            organization_id=scope.organization_id,
-            user_id=scope.user_id,
-            program_id=scope.program_id,
-            module_id=scope.module_id,
-            intent=intent,
-            query=query,
-            knowledge_point_id=knowledge_point_id,
-            limit=limit,
-        )
+        try:
+            request = MemorySearchRequest(
+                organization_id=scope.organization_id,
+                user_id=scope.user_id,
+                program_id=scope.program_id,
+                module_id=scope.module_id,
+                intent=intent,
+                query=query,
+                knowledge_point_id=knowledge_point_id,
+                limit=limit,
+            )
+        except ValidationError as exc:
+            return self._rejected("search", f"记忆查询参数无效：{exc}")
         try:
             items = self.client.search(request)
         except IntegrationUnavailable as exc:
@@ -443,10 +494,15 @@ class LearnerMemoryService:
             )
         except IntegrationUnavailable as exc:
             return self._degraded("delete", f"SimpleMem 删除降级：{exc}")
-        return MemoryLifecycleResult(
-            operation="delete",
-            status=MemoryLifecycleStatus.COMPLETED,
-            data=data,
+        return self._validate_mutation_result(
+            MemoryLifecycleResult(
+                operation="delete",
+                status=MemoryLifecycleStatus.COMPLETED,
+                data=data,
+            ),
+            memory_id=memory_id,
+            scope=scope,
+            allowed_statuses={MemoryMutationStatus.DELETED},
         )
 
     def consolidate(self, scope: MemoryScope) -> MemoryLifecycleResult:
@@ -534,6 +590,41 @@ class LearnerMemoryService:
             status=MemoryLifecycleStatus.COMPLETED,
             data=data,
             memory_record=record,
+        )
+
+    def _validate_mutation_result(
+        self,
+        result: MemoryLifecycleResult,
+        *,
+        memory_id: str,
+        scope: MemoryScope,
+        allowed_statuses: set[MemoryMutationStatus],
+    ) -> MemoryLifecycleResult:
+        if result.status is not MemoryLifecycleStatus.COMPLETED:
+            return result
+        try:
+            response = MemoryMutationResponse.model_validate(result.data)
+            expected_scope = scope.model_dump(
+                include={"organization_id", "user_id", "program_id", "module_id"}
+            )
+            actual_scope = {field: getattr(response, field) for field in expected_scope}
+            if (
+                response.memory_id != memory_id
+                or actual_scope != expected_scope
+                or response.status not in allowed_statuses
+            ):
+                raise ValueError("SimpleMem 变更结果与请求操作或作用域不一致。")
+        except (ValidationError, ValueError) as exc:
+            return self._degraded(
+                result.operation,
+                f"SimpleMem 变更结果无效：{exc}",
+                memory_record=result.memory_record,
+            )
+        return MemoryLifecycleResult(
+            operation=result.operation,
+            status=MemoryLifecycleStatus.COMPLETED,
+            data=response.model_dump(mode="json"),
+            memory_record=result.memory_record,
         )
 
     @staticmethod
