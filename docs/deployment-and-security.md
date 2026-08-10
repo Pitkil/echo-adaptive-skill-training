@@ -7,6 +7,16 @@ Copy-Item .env.example .env
 docker compose up --build
 ```
 
+上述命令只启动 ECHO。需要联调微表征接口时，显式启动不含模型的 Mock 8030 服务：
+
+```powershell
+docker compose --profile micro-mock up --build
+```
+
+Mock 服务只验证跨服务契约，并通过 `/health` 的 `mode: mock` 明确标识；固定检测事件不能作为
+真实诊断或评测结果。WavLM、FAISS、模型权重和索引不进入 ECHO 镜像，也不进入 Git。真实检测
+服务后续保持同一接口，使用独立重依赖镜像和外部数据卷。
+
 ECHO API 默认使用 `8000`。基于多路召回与混合向量的可追溯 RAG 检索引擎、SimpleMem、微表征服务分别使用独立地址。
 完整服务不可用时保留事实记录并返回降级原因，不伪造成功状态。
 

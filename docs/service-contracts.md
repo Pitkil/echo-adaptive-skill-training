@@ -70,6 +70,10 @@
 
 检测服务默认地址为 `MICRO_REPRESENTATION_BASE_URL`，提供：
 
+开发联调可显式启用 `docker compose --profile micro-mock up --build`。该服务的健康检查会返回
+`mode: mock`，固定事件只用于接口联调，不得作为真实学习诊断证据或比赛评测结果。未启用该
+profile 时，ECHO 保留任务事实并按外部服务不可用路径明确降级。
+
 - `POST /v1/detection/jobs`：创建单段音频检测任务。
 - `GET /v1/detection/jobs/{job_id}`：查询任务状态。
 - `GET /v1/detection/jobs/{job_id}/events`：读取标准化事件。
