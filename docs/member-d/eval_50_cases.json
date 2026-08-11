@@ -1303,8 +1303,8 @@
         "knowledge_coverage": "必须覆盖重复提交的处理",
         "source_traceable": "检查 source_url 可打开且章节对应"
       }
-    }
-        {
+    },
+    {
       "case_id": "046",
       "learner_type": "P1",
       "module": "M3",
