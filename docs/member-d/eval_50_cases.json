@@ -1304,5 +1304,135 @@
         "source_traceable": "检查 source_url 可打开且章节对应"
       }
     }
+        {
+      "case_id": "046",
+      "learner_type": "P1",
+      "module": "M3",
+      "knowledge_point": "Process Framework 步骤与事件",
+      "scenario_type": "dynamic",
+      "input": "我答错了上一题。请重新解释一下 Process Framework 的三个核心概念。",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "Process Framework 步骤与事件",
+        "difficulty": "foundation",
+        "source_title": "Overview of the Process Framework",
+        "source_url": "https://learn.microsoft.com/en-sg/semantic-kernel/frameworks/process/process-framework",
+        "source_section": "Core Concepts",
+        "output_characteristics": "答错后应降低难度，使用更简单的语言和比喻解释 Process、Step、Event 三个概念",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未降低难度或未用简单语言解释，标记为动态调整失败",
+        "difficulty_match": "答错后应降为 foundation 难度",
+        "knowledge_coverage": "必须覆盖 Process、Step、Event 三个核心概念",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "047",
+      "learner_type": "P2",
+      "module": "M3",
+      "knowledge_point": "日志、跟踪与可观测性",
+      "scenario_type": "dynamic",
+      "input": "我之前答对了。现在想深入了解 OpenTelemetry 的追踪实现。",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "日志、跟踪与可观测性",
+        "difficulty": "advanced",
+        "source_title": "Observability in Semantic Kernel",
+        "source_url": "https://learn.microsoft.com/ar-sa/semantic-kernel/concepts/enterprise-readiness/observability/",
+        "source_section": "Tracing",
+        "output_characteristics": "答对后应提高难度，深入讨论分布式追踪、Activity 记录和 OpenTelemetry 集成细节",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未提高难度或内容不够深入，标记为动态调整失败",
+        "difficulty_match": "答对后应升为 advanced 难度",
+        "knowledge_coverage": "必须覆盖分布式追踪的实现细节",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "048",
+      "learner_type": "P2",
+      "module": "M2",
+      "knowledge_point": "多智能体分工与协作",
+      "scenario_type": "dynamic",
+      "input": "额...那个...Sequential 和 Concurrent 编排...我好像还是不太清楚区别...",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "多智能体分工与协作",
+        "difficulty": "standard",
+        "source_title": "Concurrent Agent Orchestration",
+        "source_url": "https://learn.microsoft.com/nb-no/semantic-kernel/frameworks/agent/agent-orchestration/concurrent",
+        "source_section": "全文",
+        "output_characteristics": "检测到犹豫信号后，应提供对比表格或示例，用具体场景说明两种编排模式的区别",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未调整提示方式或未提供对比，标记为动态调整失败",
+        "difficulty_match": "犹豫时应提供更多对比和示例",
+        "knowledge_coverage": "必须覆盖两种编排模式的区别",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "049",
+      "learner_type": "P3",
+      "module": "M3",
+      "knowledge_point": "部署与质量评测",
+      "scenario_type": "exception",
+      "input": "请评估 Semantic Kernel 应用的部署方案。",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "部署与质量评测",
+        "difficulty": "advanced",
+        "source_title": "Overview of the Process Framework",
+        "source_url": "https://learn.microsoft.com/en-sg/semantic-kernel/frameworks/process/process-framework",
+        "source_section": "Getting Started",
+        "output_characteristics": "内容校验失败时（如 PunditRAG 无证据返回），应明确说明无法引用官方资料，不伪造引用",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若伪造引用或未说明校验失败，标记为异常处理失败",
+        "difficulty_match": "应有降级处理说明",
+        "knowledge_coverage": "降级响应应保持基本准确性",
+        "source_traceable": "校验失败时应返回明确说明"
+      }
+    },
+    {
+      "case_id": "050",
+      "learner_type": "P1",
+      "module": "M1",
+      "knowledge_point": "Kernel 创建与模型服务接入",
+      "scenario_type": "exception",
+      "input": "Kernel 是什么？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "Kernel 创建与模型服务接入",
+        "difficulty": "foundation",
+        "source_title": "Understanding the kernel in Semantic Kernel",
+        "source_url": "https://learn.microsoft.com/ar-sa/semantic-kernel/concepts/kernel",
+        "source_section": "全文",
+        "output_characteristics": "资料缺失时（source_url 404），应说明来源不可用但仍基于记忆给出基本解释，不编造引用",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若编造引用或未说明资料缺失，标记为异常处理失败",
+        "difficulty_match": "应有资料缺失说明",
+        "knowledge_coverage": "必须覆盖 Kernel 的核心概念",
+        "source_traceable": "资料缺失时应返回明确说明"
+      }
+    }
   ]
 }
