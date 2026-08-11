@@ -1,0 +1,1308 @@
+{
+  "version": "1.0",
+  "description": "ECHO 比赛固定评测数据集（50 组）",
+  "created_at": "2026-08-11",
+  "total_cases": 50,
+  "cases": [
+    {
+      "case_id": "001",
+      "learner_type": "P1",
+      "module": "M1",
+      "knowledge_point": "Kernel 创建与模型服务接入",
+      "scenario_type": "explanation",
+      "input": "请解释 Kernel 在 Semantic Kernel 中的作用。",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "Kernel 创建与模型服务接入",
+        "difficulty": "foundation",
+        "source_title": "Understanding the kernel in Semantic Kernel",
+        "source_url": "https://learn.microsoft.com/ar-sa/semantic-kernel/concepts/kernel",
+        "source_section": "全文",
+        "output_characteristics": "使用简单语言解释 Kernel 是中央编排器/DI 容器，管理 AI 服务和插件",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若输出未提及'编排器'或'调度中心'或'DI 容器'，标记为内容错误",
+        "difficulty_match": "foundation 难度适合 P1 学习者，应有基础解释",
+        "knowledge_coverage": "必须覆盖 Kernel 的核心定义",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "002",
+      "learner_type": "P1",
+      "module": "M1",
+      "knowledge_point": "提示词与聊天完成",
+      "scenario_type": "operation",
+      "input": "我想创建一个提示词模板，应该怎么做？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "提示词与聊天完成",
+        "difficulty": "foundation",
+        "source_title": "Semantic Kernel Components",
+        "source_url": "https://learn.microsoft.com/ar-sa/semantic-kernel/concepts/semantic-kernel-components",
+        "source_section": "全文",
+        "output_characteristics": "给出创建提示词模板的基本步骤和 Python 示例代码片段",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未提及 create_function_from_prompt 或提示词模板概念，标记为内容错误",
+        "difficulty_match": "foundation 难度应有详细步骤说明和简单示例",
+        "knowledge_coverage": "必须覆盖提示词模板的创建方式",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "003",
+      "learner_type": "P1",
+      "module": "M1",
+      "knowledge_point": "插件定义与函数调用",
+      "scenario_type": "practice",
+      "input": "插件和普通函数有什么区别？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "插件定义与函数调用",
+        "difficulty": "foundation",
+        "source_title": "Understand native plugins - Training",
+        "source_url": "https://learn.microsoft.com/en-my/training/modules/give-your-ai-agent-skills/2-understand-native-plugins",
+        "source_section": "全文",
+        "output_characteristics": "说明 Plugin 是函数的容器，注册到 Kernel 后供 AI 调用",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未说明'函数的容器'或'注册到 Kernel'，标记为内容错误",
+        "difficulty_match": "foundation 难度应有概念对比和简单说明",
+        "knowledge_coverage": "必须覆盖 Plugin 的定义和与普通函数的区别",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "004",
+      "learner_type": "P1",
+      "module": "M1",
+      "knowledge_point": "多轮对话与执行设置",
+      "scenario_type": "summary",
+      "input": "请总结一下执行设置（Execution Settings）的作用。",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "多轮对话与执行设置",
+        "difficulty": "foundation",
+        "source_title": "Conversation history and state management",
+        "source_url": "https://learn.microsoft.com/en-nz/semantic-kernel/concepts/ai-services/chat-completion/chat-history",
+        "source_section": "全文",
+        "output_characteristics": "说明执行设置控制 Temperature、MaxTokens 等 LLM 生成参数",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未提及 Temperature 或 MaxTokens，标记为内容错误",
+        "difficulty_match": "foundation 难度应有基本概念说明",
+        "knowledge_coverage": "必须覆盖执行设置的作用和常用参数",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "005",
+      "learner_type": "P2",
+      "module": "M1",
+      "knowledge_point": "Kernel 创建与模型服务接入",
+      "scenario_type": "explanation",
+      "input": "如何接入 Azure OpenAI 服务到 Semantic Kernel？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "Kernel 创建与模型服务接入",
+        "difficulty": "standard",
+        "source_title": "How to build your kernel - Training",
+        "source_url": "https://learn.microsoft.com/en-my/training/modules/build-your-kernel/4-how-build-your-kernel",
+        "source_section": "全文",
+        "output_characteristics": "说明需要 deployment_name、endpoint、api_key 三个参数，使用 AzureChatCompletion",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未列出三个必需参数或未使用 AzureChatCompletion，标记为内容错误",
+        "difficulty_match": "standard 难度适合 P2 学习者，应有具体代码参考",
+        "knowledge_coverage": "必须覆盖 Azure OpenAI 服务接入方式",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "006",
+      "learner_type": "P2",
+      "module": "M1",
+      "knowledge_point": "提示词与聊天完成",
+      "scenario_type": "operation",
+      "input": "帮我生成一个提示词模板，用于产品描述生成。",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "提示词与聊天完成",
+        "difficulty": "standard",
+        "source_title": "使用 Semantic Kernel 提示範本 - Training",
+        "source_url": "https://learn.microsoft.com/ja-jp/python/api/semantic-kernel/semantic_kernel.kernel(class)?view=semantic-kernel-python",
+        "source_section": "全文",
+        "output_characteristics": "给出包含 {{$product_name}} 等变量的提示词模板和调用示例",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若模板中没有变量占位符或未展示调用方式，标记为内容错误",
+        "difficulty_match": "standard 难度应包含完整示例和变量说明",
+        "knowledge_coverage": "必须覆盖提示词模板的变量语法和调用方式",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "007",
+      "learner_type": "P2",
+      "module": "M1",
+      "knowledge_point": "插件定义与函数调用",
+      "scenario_type": "practice",
+      "input": "自动函数调用（Automatic Function Calling）是如何实现的？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "插件定义与函数调用",
+        "difficulty": "standard",
+        "source_title": "Understand native plugins - Training",
+        "source_url": "https://learn.microsoft.com/en-my/training/modules/give-your-ai-agent-skills/2-understand-native-plugins",
+        "source_section": "Invoke functions automatically",
+        "output_characteristics": "说明 Plugin 向 Chat Completion AI 通告后，AI 自动选择调用函数",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未说明'AI 自动选择'或'通告'机制，标记为内容错误",
+        "difficulty_match": "standard 难度应有机制说明和示例",
+        "knowledge_coverage": "必须覆盖自动函数调用的工作原理",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "008",
+      "learner_type": "P2",
+      "module": "M1",
+      "knowledge_point": "多轮对话与执行设置",
+      "scenario_type": "summary",
+      "input": "多轮对话中如何保持上下文连续性？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "多轮对话与执行设置",
+        "difficulty": "standard",
+        "source_title": "Conversation history and state management",
+        "source_url": "https://learn.microsoft.com/en-nz/semantic-kernel/concepts/ai-services/chat-completion/chat-history",
+        "source_section": "全文",
+        "output_characteristics": "说明通过 Kernel 和 Agent 配合维护对话状态，使用 ChatHistory 存储",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未提及 ChatHistory 或状态管理机制，标记为内容错误",
+        "difficulty_match": "standard 难度应有机制说明和实现方式",
+        "knowledge_coverage": "必须覆盖对话状态管理的方式",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "009",
+      "learner_type": "P3",
+      "module": "M1",
+      "knowledge_point": "Kernel 创建与模型服务接入",
+      "scenario_type": "explanation",
+      "input": "Kernel 作为 DI 容器的设计模式有什么好处？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "Kernel 创建与模型服务接入",
+        "difficulty": "advanced",
+        "source_title": "Understanding the kernel in Semantic Kernel",
+        "source_url": "https://learn.microsoft.com/ar-sa/semantic-kernel/concepts/kernel",
+        "source_section": "全文",
+        "output_characteristics": "讨论依赖注入、统一配置、可测试性和组件解耦的优势",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未讨论 DI、可测试性或解耦，标记为内容错误",
+        "difficulty_match": "advanced 难度应有架构层面分析",
+        "knowledge_coverage": "必须覆盖 DI 设计模式和架构优势",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "010",
+      "learner_type": "P3",
+      "module": "M1",
+      "knowledge_point": "提示词与聊天完成",
+      "scenario_type": "operation",
+      "input": "请为一个多 Agent 协作场景设计提示词策略。",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "提示词与聊天完成",
+        "difficulty": "advanced",
+        "source_title": "Semantic Kernel Components",
+        "source_url": "https://learn.microsoft.com/ar-sa/semantic-kernel/concepts/semantic-kernel-components",
+        "source_section": "全文",
+        "output_characteristics": "讨论不同 Agent 使用不同系统指令、变量传递和模板组合策略",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未讨论多 Agent 提示词分工或变量传递，标记为内容错误",
+        "difficulty_match": "advanced 难度应有策略性思考",
+        "knowledge_coverage": "必须覆盖提示词在多 Agent 场景的应用",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "011",
+      "learner_type": "P3",
+      "module": "M1",
+      "knowledge_point": "插件定义与函数调用",
+      "scenario_type": "practice",
+      "input": "设计一个插件，包含 get_user_info 和 update_user_profile 两个函数，要求描述清晰、可被 AI 自动调用。",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "插件定义与函数调用",
+        "difficulty": "advanced",
+        "source_title": "Understand native plugins - Training",
+        "source_url": "https://learn.microsoft.com/en-my/training/modules/give-your-ai-agent-skills/2-understand-native-plugins",
+        "source_section": "Creating a plugin",
+        "output_characteristics": "给出两个函数的定义，每个函数有清晰的 description 和参数说明",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若函数缺少 description 或参数说明，标记为内容错误",
+        "difficulty_match": "advanced 难度应要求完整的函数描述",
+        "knowledge_coverage": "必须覆盖插件函数创建的最佳实践",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "012",
+      "learner_type": "P3",
+      "module": "M1",
+      "knowledge_point": "多轮对话与执行设置",
+      "scenario_type": "summary",
+      "input": "请对比 Temperature 和 TopP 对 LLM 输出的影响。",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "多轮对话与执行设置",
+        "difficulty": "advanced",
+        "source_title": "Conversation history and state management",
+        "source_url": "https://learn.microsoft.com/zh-cn/dotnet/api/microsoft.semantickernel.connectors.openai.openaipromptexecutionsettings.temperature",
+        "source_section": "全文",
+        "output_characteristics": "说明 Temperature 控制随机性，TopP 控制词汇多样性，两者配合使用",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未区分 Temperature 和 TopP 的作用，标记为内容错误",
+        "difficulty_match": "advanced 难度应有参数对比和配合使用建议",
+        "knowledge_coverage": "必须覆盖执行设置中两个关键参数的差异",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "013",
+      "learner_type": "P1",
+      "module": "M2",
+      "knowledge_point": "Agent 创建与指令设计",
+      "scenario_type": "explanation",
+      "input": "Agent 是什么？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "Agent 创建与指令设计",
+        "difficulty": "foundation",
+        "source_title": "Semantic Kernel Agent Architecture",
+        "source_url": "https://learn.microsoft.com/nb-no/semantic-kernel/frameworks/agent/agent-architecture",
+        "source_section": "Agent",
+        "output_characteristics": "用简单语言说明 Agent 是 AI 交互的封装单元，可参与对话、执行任务",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未说明 Agent 可参与对话或执行任务，标记为内容错误",
+        "difficulty_match": "foundation 难度应有简单定义和生活化解释",
+        "knowledge_coverage": "必须覆盖 Agent 的核心概念",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "014",
+      "learner_type": "P1",
+      "module": "M2",
+      "knowledge_point": "对话线程与状态管理",
+      "scenario_type": "operation",
+      "input": "ChatCompletionAgent 和 AzureAIAgent 有什么区别？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "对话线程与状态管理",
+        "difficulty": "foundation",
+        "source_title": "Semantic Kernel Agent Architecture",
+        "source_url": "https://learn.microsoft.com/nb-no/semantic-kernel/frameworks/agent/agent-architecture",
+        "source_section": "Agent Types",
+        "output_characteristics": "说明 ChatCompletionAgent 通用，AzureAIAgent 与 Azure AI Agent Service 集成",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未说明两者适用场景差异，标记为内容错误",
+        "difficulty_match": "foundation 难度应有对比说明",
+        "knowledge_coverage": "必须覆盖不同 Agent 类型的基本差异",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "015",
+      "learner_type": "P1",
+      "module": "M2",
+      "knowledge_point": "记忆与相关内容检索",
+      "scenario_type": "practice",
+      "input": "Agent 如何记住我之前说过的话？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "记忆与相关内容检索",
+        "difficulty": "foundation",
+        "source_title": "Memory in Semantic Kernel",
+        "source_url": "https://learn.microsoft.com/en-gb/semantic-kernel/concepts/vector-store-connectors/memory-stores",
+        "source_section": "全文",
+        "output_characteristics": "说明通过 Memory 机制跨会话保留信息，或通过 Thread 保存对话历史",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未提及记忆或线程机制，标记为内容错误",
+        "difficulty_match": "foundation 难度应有基本概念说明",
+        "knowledge_coverage": "必须覆盖记忆的核心作用",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "016",
+      "learner_type": "P1",
+      "module": "M2",
+      "knowledge_point": "多智能体分工与协作",
+      "scenario_type": "summary",
+      "input": "多个 Agent 如何协作完成任务？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "多智能体分工与协作",
+        "difficulty": "foundation",
+        "source_title": "Agent Orchestration - Semantic Kernel",
+        "source_url": "https://learn.microsoft.com/nb-no/semantic-kernel/frameworks/agent/agent-architecture",
+        "source_section": "Agent Orchestration",
+        "output_characteristics": "简单说明通过编排（Orchestration）让多个 Agent 分工合作",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未提及'编排'或'分工'，标记为内容错误",
+        "difficulty_match": "foundation 难度应有基本概念说明",
+        "knowledge_coverage": "必须覆盖多 Agent 协作的基本方式",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "017",
+      "learner_type": "P2",
+      "module": "M2",
+      "knowledge_point": "Agent 创建与指令设计",
+      "scenario_type": "explanation",
+      "input": "如何创建 ChatCompletionAgent 并配置指令？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "Agent 创建与指令设计",
+        "difficulty": "standard",
+        "source_title": "Semantic Kernel Agent Architecture",
+        "source_url": "https://learn.microsoft.com/nb-no/semantic-kernel/frameworks/agent/agent-architecture",
+        "source_section": "Agent",
+        "output_characteristics": "给出创建示例：ChatCompletionAgent(name=, instructions=, kernel=)",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未给出创建示例或缺少必需参数，标记为内容错误",
+        "difficulty_match": "standard 难度应有代码示例",
+        "knowledge_coverage": "必须覆盖 Agent 创建和指令配置",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "018",
+      "learner_type": "P2",
+      "module": "M2",
+      "knowledge_point": "对话线程与状态管理",
+      "scenario_type": "operation",
+      "input": "请演示如何使用 AgentThread 管理多轮对话。",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "对话线程与状态管理",
+        "difficulty": "standard",
+        "source_title": "Semantic Kernel Agent Architecture",
+        "source_url": "https://learn.microsoft.com/nb-no/semantic-kernel/frameworks/agent/agent-architecture",
+        "source_section": "Agent Thread",
+        "output_characteristics": "说明使用 ChatHistoryAgentThread 或类似方式传递 thread 参数",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未提及 thread 参数或状态管理方式，标记为内容错误",
+        "difficulty_match": "standard 难度应有实现说明",
+        "knowledge_coverage": "必须覆盖 AgentThread 的使用方式",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "019",
+      "learner_type": "P2",
+      "module": "M2",
+      "knowledge_point": "记忆与相关内容检索",
+      "scenario_type": "practice",
+      "input": "什么情况下适合使用内存存储（In-Memory）作为记忆后端？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "记忆与相关内容检索",
+        "difficulty": "standard",
+        "source_title": "Memory in Semantic Kernel",
+        "source_url": "https://learn.microsoft.com/en-gb/semantic-kernel/concepts/vector-store-connectors/memory-stores",
+        "source_section": "全文",
+        "output_characteristics": "说明内存存储适合测试、开发和短期会话，不适合生产环境",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未说明内存存储的适用场景和限制，标记为内容错误",
+        "difficulty_match": "standard 难度应有场景分析",
+        "knowledge_coverage": "必须覆盖不同记忆存储后端的选型考虑",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "020",
+      "learner_type": "P2",
+      "module": "M2",
+      "knowledge_point": "多智能体分工与协作",
+      "scenario_type": "summary",
+      "input": "Sequential Orchestration 和 Concurrent Orchestration 各适合什么场景？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "多智能体分工与协作",
+        "difficulty": "standard",
+        "source_title": "Concurrent Agent Orchestration",
+        "source_url": "https://learn.microsoft.com/nb-no/semantic-kernel/frameworks/agent/agent-orchestration/concurrent",
+        "source_section": "全文",
+        "output_characteristics": "Sequential 适合有依赖的流水线，Concurrent 适合并行分析/头脑风暴",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未区分两种编排模式的适用场景，标记为内容错误",
+        "difficulty_match": "standard 难度应有场景对比",
+        "knowledge_coverage": "必须覆盖两种主要编排模式的区别",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "021",
+      "learner_type": "P3",
+      "module": "M2",
+      "knowledge_point": "Agent 创建与指令设计",
+      "scenario_type": "explanation",
+      "input": "请比较 ChatCompletionAgent 与 OpenAIAssistantAgent 的设计差异。",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "Agent 创建与指令设计",
+        "difficulty": "advanced",
+        "source_title": "Semantic Kernel Agent Architecture",
+        "source_url": "https://learn.microsoft.com/nb-no/semantic-kernel/frameworks/agent/agent-architecture",
+        "source_section": "Agent Types",
+        "output_characteristics": "说明 ChatCompletionAgent 通用轻量，OpenAIAssistantAgent 使用 Assistant API 的额外能力",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未说明两者架构差异或适用场景，标记为内容错误",
+        "difficulty_match": "advanced 难度应有深度对比",
+        "knowledge_coverage": "必须覆盖不同 Agent 类型的架构差异",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "022",
+      "learner_type": "P3",
+      "module": "M2",
+      "knowledge_point": "对话线程与状态管理",
+      "scenario_type": "operation",
+      "input": "如何处理有状态 Agent 和无状态 Agent 的混合使用场景？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "对话线程与状态管理",
+        "difficulty": "advanced",
+        "source_title": "Semantic Kernel Agent Architecture",
+        "source_url": "https://learn.microsoft.com/nb-no/semantic-kernel/frameworks/agent/agent-architecture",
+        "source_section": "Agent Thread",
+        "output_characteristics": "讨论状态同步、线程类型匹配和降级策略",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未讨论状态同步或线程匹配问题，标记为内容错误",
+        "difficulty_match": "advanced 难度应有架构设计思考",
+        "knowledge_coverage": "必须覆盖有状态/无状态 Agent 的混合使用",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "023",
+      "learner_type": "P3",
+      "module": "M2",
+      "knowledge_point": "记忆与相关内容检索",
+      "scenario_type": "practice",
+      "input": "请设计一个记忆策略，让 Agent 能够记住用户偏好并个性化回复。",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "记忆与相关内容检索",
+        "difficulty": "advanced",
+        "source_title": "Memory in Semantic Kernel",
+        "source_url": "https://learn.microsoft.com/en-gb/semantic-kernel/concepts/vector-store-connectors/memory-stores",
+        "source_section": "全文",
+        "output_characteristics": "讨论记忆存储、检索策略、更新机制和隐私考虑",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未讨论检索策略或隐私考虑，标记为内容错误",
+        "difficulty_match": "advanced 难度应有完整策略设计",
+        "knowledge_coverage": "必须覆盖记忆系统的设计考虑",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "024",
+      "learner_type": "P3",
+      "module": "M2",
+      "knowledge_point": "多智能体分工与协作",
+      "scenario_type": "summary",
+      "input": "讨论 Agent Orchestration 实验阶段对生产环境的影响及应对策略。",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "多智能体分工与协作",
+        "difficulty": "advanced",
+        "source_title": "Semantic Kernel Agent Architecture",
+        "source_url": "https://learn.microsoft.com/nb-no/semantic-kernel/frameworks/agent/agent-architecture",
+        "source_section": "Agent Orchestration",
+        "output_characteristics": "说明实验状态、API 变更风险、迁移策略（从 AgentGroupChat 到 GroupChatOrchestration）",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未提及实验状态或迁移策略，标记为内容错误",
+        "difficulty_match": "advanced 难度应有生产环境考量",
+        "knowledge_coverage": "必须覆盖 Agent Orchestration 的实验性质和应对策略",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "025",
+      "learner_type": "P1",
+      "module": "M3",
+      "knowledge_point": "Process Framework 步骤与事件",
+      "scenario_type": "explanation",
+      "input": "Process Framework 是什么？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "Process Framework 步骤与事件",
+        "difficulty": "foundation",
+        "source_title": "Overview of the Process Framework",
+        "source_url": "https://learn.microsoft.com/en-sg/semantic-kernel/frameworks/process/process-framework",
+        "source_section": "全文",
+        "output_characteristics": "用简单语言说明 Process Framework 是定义多步骤 AI 工作流的引擎",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未说明'多步骤工作流'或'引擎'，标记为内容错误",
+        "difficulty_match": "foundation 难度应有基本概念解释",
+        "knowledge_coverage": "必须覆盖 Process Framework 的核心概念",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "026",
+      "learner_type": "P1",
+      "module": "M3",
+      "knowledge_point": "日志、跟踪与可观测性",
+      "scenario_type": "operation",
+      "input": "可观测性（Observability）是什么意思？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "日志、跟踪与可观测性",
+        "difficulty": "foundation",
+        "source_title": "Observability in Semantic Kernel",
+        "source_url": "https://learn.microsoft.com/ar-sa/semantic-kernel/concepts/enterprise-readiness/observability/",
+        "source_section": "全文",
+        "output_characteristics": "说明可观测性是通过日志、指标、追踪了解系统运行状态",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未提及三大支柱（日志/指标/追踪），标记为内容错误",
+        "difficulty_match": "foundation 难度应有基本概念说明",
+        "knowledge_coverage": "必须覆盖可观测性的三大支柱",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "027",
+      "learner_type": "P1",
+      "module": "M3",
+      "knowledge_point": "过滤、安全与异常处理",
+      "scenario_type": "practice",
+      "input": "内容过滤（Content Filtering）为什么重要？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "过滤、安全与异常处理",
+        "difficulty": "foundation",
+        "source_title": "What are Filters?",
+        "source_url": "https://learn.microsoft.com/en-gb/semantic-kernel/concepts/enterprise-readiness/filters",
+        "source_section": "全文",
+        "output_characteristics": "说明内容过滤防止有害内容生成，保障应用安全合规",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未说明'防止有害内容'或'安全合规'，标记为内容错误",
+        "difficulty_match": "foundation 难度应有基本重要性说明",
+        "knowledge_coverage": "必须覆盖内容过滤的目的",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "028",
+      "learner_type": "P1",
+      "module": "M3",
+      "knowledge_point": "部署与质量评测",
+      "scenario_type": "summary",
+      "input": "Semantic Kernel 应用如何部署？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "部署与质量评测",
+        "difficulty": "foundation",
+        "source_title": "Overview of the Process Framework",
+        "source_url": "https://learn.microsoft.com/en-sg/semantic-kernel/frameworks/process/process-framework",
+        "source_section": "Getting Started",
+        "output_characteristics": "说明本地开发、Docker 容器化、云部署三种方式",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未列出至少两种部署方式，标记为内容错误",
+        "difficulty_match": "foundation 难度应有基本部署方式说明",
+        "knowledge_coverage": "必须覆盖主要部署方式",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "029",
+      "learner_type": "P2",
+      "module": "M3",
+      "knowledge_point": "Process Framework 步骤与事件",
+      "scenario_type": "explanation",
+      "input": "Process、Step、Event 三个概念如何协作？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "Process Framework 步骤与事件",
+        "difficulty": "standard",
+        "source_title": "Overview of the Process Framework",
+        "source_url": "https://learn.microsoft.com/en-sg/semantic-kernel/frameworks/process/process-framework",
+        "source_section": "Core Concepts",
+        "output_characteristics": "说明 Process 包含 Step，Step 通过 Event 触发转换",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未说明三者的包含关系或触发关系，标记为内容错误",
+        "difficulty_match": "standard 难度应有结构说明",
+        "knowledge_coverage": "必须覆盖 Process Framework 三个核心概念的关系",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "030",
+      "learner_type": "P2",
+      "module": "M3",
+      "knowledge_point": "日志、跟踪与可观测性",
+      "scenario_type": "operation",
+      "input": "OpenTelemetry 在 Semantic Kernel 中如何工作？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "日志、跟踪与可观测性",
+        "difficulty": "standard",
+        "source_title": "Observability in Semantic Kernel",
+        "source_url": "https://learn.microsoft.com/ar-sa/semantic-kernel/concepts/enterprise-readiness/observability/",
+        "source_section": "全文",
+        "output_characteristics": "说明 Semantic Kernel 兼容 OpenTelemetry，发出日志、指标和追踪",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未说明 OpenTelemetry 兼容性或三大输出类型，标记为内容错误",
+        "difficulty_match": "standard 难度应有机制说明",
+        "knowledge_coverage": "必须覆盖 OpenTelemetry 集成方式",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "031",
+      "learner_type": "P2",
+      "module": "M3",
+      "knowledge_point": "过滤、安全与异常处理",
+      "scenario_type": "practice",
+      "input": "服务端过滤和客户端过滤有什么区别？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "过滤、安全与异常处理",
+        "difficulty": "standard",
+        "source_title": "What are Filters?",
+        "source_url": "https://learn.microsoft.com/en-gb/semantic-kernel/concepts/enterprise-readiness/filters",
+        "source_section": "全文",
+        "output_characteristics": "服务端过滤利用 Azure OpenAI 能力，客户端过滤在应用层自定义",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未区分服务端和客户端的过滤位置，标记为内容错误",
+        "difficulty_match": "standard 难度应有对比说明",
+        "knowledge_coverage": "必须覆盖两种过滤方式的差异",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "032",
+      "learner_type": "P2",
+      "module": "M3",
+      "knowledge_point": "部署与质量评测",
+      "scenario_type": "summary",
+      "input": "质量评测中的'漂移检测'（Drift Detection）监测什么？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "部署与质量评测",
+        "difficulty": "standard",
+        "source_title": "Observability in Semantic Kernel",
+        "source_url": "https://learn.microsoft.com/ar-sa/semantic-kernel/concepts/enterprise-readiness/observability/",
+        "source_section": "全文",
+        "output_characteristics": "说明漂移检测监测模型输出质量下降或行为偏离预期",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未说明'质量下降'或'行为偏离'，标记为内容错误",
+        "difficulty_match": "standard 难度应有概念说明",
+        "knowledge_coverage": "必须覆盖漂移检测的目的",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "033",
+      "learner_type": "P3",
+      "module": "M3",
+      "knowledge_point": "Process Framework 步骤与事件",
+      "scenario_type": "explanation",
+      "input": "Process Framework 的事件驱动架构如何支持复杂工作流？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "Process Framework 步骤与事件",
+        "difficulty": "advanced",
+        "source_title": "Overview of the Process Framework",
+        "source_url": "https://learn.microsoft.com/en-sg/semantic-kernel/frameworks/process/process-framework",
+        "source_section": "Key Features",
+        "output_characteristics": "说明事件驱动实现解耦、条件分支、循环和并行执行",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未说明解耦或复杂控制流，标记为内容错误",
+        "difficulty_match": "advanced 难度应有架构深度分析",
+        "knowledge_coverage": "必须覆盖事件驱动架构的优势",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "034",
+      "learner_type": "P3",
+      "module": "M3",
+      "knowledge_point": "日志、跟踪与可观测性",
+      "scenario_type": "operation",
+      "input": "请设计一套可观测性方案，监控 Semantic Kernel 应用的性能和成本。",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "日志、跟踪与可观测性",
+        "difficulty": "advanced",
+        "source_title": "Observability in Semantic Kernel",
+        "source_url": "https://learn.microsoft.com/ar-sa/semantic-kernel/concepts/enterprise-readiness/observability/",
+        "source_section": "全文",
+        "output_characteristics": "讨论使用 function.invocation.duration 监控性能，使用 token_usage 监控成本",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未提及具体指标或监控目标，标记为内容错误",
+        "difficulty_match": "advanced 难度应有完整方案设计",
+        "knowledge_coverage": "必须覆盖可观测性指标的应用",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "035",
+      "learner_type": "P3",
+      "module": "M3",
+      "knowledge_point": "过滤、安全与异常处理",
+      "scenario_type": "practice",
+      "input": "如何为 Semantic Kernel 应用设计异常处理策略？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "过滤、安全与异常处理",
+        "difficulty": "advanced",
+        "source_title": "What are Filters?",
+        "source_url": "https://learn.microsoft.com/en-gb/semantic-kernel/concepts/enterprise-readiness/filters",
+        "source_section": "Function Invocation Filter",
+        "output_characteristics": "讨论通过 Filters 机制实现异常处理和重试策略",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未讨论 Filters 机制或重试策略，标记为内容错误",
+        "difficulty_match": "advanced 难度应有完整策略设计",
+        "knowledge_coverage": "必须覆盖异常处理的设计考虑",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "036",
+      "learner_type": "P3",
+      "module": "M3",
+      "knowledge_point": "部署与质量评测",
+      "scenario_type": "summary",
+      "input": "讨论 observe → evaluate → improve 闭环在 Semantic Kernel 应用中的实践。",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "部署与质量评测",
+        "difficulty": "advanced",
+        "source_title": "Observability in Semantic Kernel",
+        "source_url": "https://learn.microsoft.com/ar-sa/semantic-kernel/concepts/enterprise-readiness/observability/",
+        "source_section": "全文",
+        "output_characteristics": "说明观察（日志/指标）→ 评估（质量评分）→ 改进（版本迭代）的循环",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未说明三个环节的闭环关系，标记为内容错误",
+        "difficulty_match": "advanced 难度应有完整流程说明",
+        "knowledge_coverage": "必须覆盖质量评测的闭环流程",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "037",
+      "learner_type": "P1",
+      "module": "M1",
+      "knowledge_point": "Kernel 创建与模型服务接入",
+      "scenario_type": "practice",
+      "input": "前测：Kernel 在 Semantic Kernel 中的作用是什么？",
+      "expected": {
+        "intent": "QUIZ_REQUEST",
+        "primary_action": "GENERATE_QUIZ",
+        "knowledge_point": "Kernel 创建与模型服务接入",
+        "difficulty": "foundation",
+        "source_title": "Understanding the kernel in Semantic Kernel",
+        "source_url": "https://learn.microsoft.com/ar-sa/semantic-kernel/concepts/kernel",
+        "source_section": "全文",
+        "output_characteristics": "应返回一道前测题，难度 foundation，内容关于 Kernel 的核心作用",
+        "publish_resource": false,
+        "update_mirt": true
+      },
+      "judgment": {
+        "content_correctness": "若返回的题目不涉及 Kernel 作用或难度不是 foundation，标记为内容错误",
+        "difficulty_match": "前测题难度应与学习者能力匹配",
+        "knowledge_coverage": "必须覆盖 Kernel 的核心概念",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "038",
+      "learner_type": "P2",
+      "module": "M2",
+      "knowledge_point": "Agent 创建与指令设计",
+      "scenario_type": "practice",
+      "input": "阶段测验：如何创建 ChatCompletionAgent？",
+      "expected": {
+        "intent": "QUIZ_REQUEST",
+        "primary_action": "GENERATE_QUIZ",
+        "knowledge_point": "Agent 创建与指令设计",
+        "difficulty": "standard",
+        "source_title": "Semantic Kernel Agent Architecture",
+        "source_url": "https://learn.microsoft.com/nb-no/semantic-kernel/frameworks/agent/agent-architecture",
+        "source_section": "Agent",
+        "output_characteristics": "应返回一道阶段测验题，难度 standard，关于 ChatCompletionAgent 的创建",
+        "publish_resource": false,
+        "update_mirt": true
+      },
+      "judgment": {
+        "content_correctness": "若返回的题目不涉及 Agent 创建或难度不是 standard，标记为内容错误",
+        "difficulty_match": "阶段测验题难度应与学习阶段匹配",
+        "knowledge_coverage": "必须覆盖 Agent 创建的步骤",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "039",
+      "learner_type": "P3",
+      "module": "M3",
+      "knowledge_point": "部署与质量评测",
+      "scenario_type": "practice",
+      "input": "后测：部署 Semantic Kernel 应用有哪些方式？",
+      "expected": {
+        "intent": "QUIZ_REQUEST",
+        "primary_action": "GENERATE_QUIZ",
+        "knowledge_point": "部署与质量评测",
+        "difficulty": "advanced",
+        "source_title": "Overview of the Process Framework",
+        "source_url": "https://learn.microsoft.com/en-sg/semantic-kernel/frameworks/process/process-framework",
+        "source_section": "Getting Started",
+        "output_characteristics": "应返回一道后测题，难度 advanced，关于部署方式",
+        "publish_resource": false,
+        "update_mirt": true
+      },
+      "judgment": {
+        "content_correctness": "若返回的题目不涉及部署或难度不是 advanced，标记为内容错误",
+        "difficulty_match": "后测题难度应评估模块完成度",
+        "knowledge_coverage": "必须覆盖部署方式的知识点",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "040",
+      "learner_type": "P1",
+      "module": "M1",
+      "knowledge_point": "插件定义与函数调用",
+      "scenario_type": "practice",
+      "input": "什么是 Plugin？请举例说明。",
+      "expected": {
+        "intent": "QUIZ_REQUEST",
+        "primary_action": "GENERATE_QUIZ",
+        "knowledge_point": "插件定义与函数调用",
+        "difficulty": "foundation",
+        "source_title": "Understand native plugins - Training",
+        "source_url": "https://learn.microsoft.com/en-my/training/modules/give-your-ai-agent-skills/2-understand-native-plugins",
+        "source_section": "全文",
+        "output_characteristics": "应返回一道阶段测验题，难度 foundation，关于 Plugin 的定义和示例",
+        "publish_resource": false,
+        "update_mirt": true
+      },
+      "judgment": {
+        "content_correctness": "若返回的题目不涉及 Plugin 定义，标记为内容错误",
+        "difficulty_match": "foundation 难度适合 P1 学习者",
+        "knowledge_coverage": "必须覆盖 Plugin 的核心概念",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "041",
+      "learner_type": "P1",
+      "module": "M1",
+      "knowledge_point": "Kernel 创建与模型服务接入",
+      "scenario_type": "practice",
+      "input": "答案是 Kernel 是中央编排器。",
+      "expected": {
+        "intent": "ANSWER_SUBMIT",
+        "primary_action": "GRADE_ANSWER",
+        "knowledge_point": "Kernel 创建与模型服务接入",
+        "difficulty": "foundation",
+        "source_title": "Understanding the kernel in Semantic Kernel",
+        "source_url": "https://learn.microsoft.com/ar-sa/semantic-kernel/concepts/kernel",
+        "source_section": "全文",
+        "output_characteristics": "应判断为正确，更新 MIRT，并给出正向反馈",
+        "publish_resource": false,
+        "update_mirt": true
+      },
+      "judgment": {
+        "content_correctness": "若判定为错误或未更新 MIRT，标记为内容错误",
+        "difficulty_match": "基础题正确率应合理",
+        "knowledge_coverage": "正确答案应覆盖 Kernel 的核心概念",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "042",
+      "learner_type": "P2",
+      "module": "M2",
+      "knowledge_point": "多智能体分工与协作",
+      "scenario_type": "practice",
+      "input": "什么是 Sequential Orchestration？",
+      "expected": {
+        "intent": "QUIZ_REQUEST",
+        "primary_action": "GENERATE_QUIZ",
+        "knowledge_point": "多智能体分工与协作",
+        "difficulty": "standard",
+        "source_title": "Concurrent Agent Orchestration",
+        "source_url": "https://learn.microsoft.com/nb-no/semantic-kernel/frameworks/agent/agent-orchestration/concurrent",
+        "source_section": "全文",
+        "output_characteristics": "应返回一道题目，测试对 Sequential Orchestration 的理解",
+        "publish_resource": false,
+        "update_mirt": true
+      },
+      "judgment": {
+        "content_correctness": "若返回的题目未正确描述 Sequential 模式特点，标记为内容错误",
+        "difficulty_match": "standard 难度应包含对比和场景说明",
+        "knowledge_coverage": "必须覆盖 Sequential 编排的核心特点",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "043",
+      "learner_type": "P2",
+      "module": "M3",
+      "knowledge_point": "Process Framework 步骤与事件",
+      "scenario_type": "practice",
+      "input": "我提交的答案：Process Framework 有三个核心概念：Process、Step、Event。",
+      "expected": {
+        "intent": "ANSWER_SUBMIT",
+        "primary_action": "GRADE_ANSWER",
+        "knowledge_point": "Process Framework 步骤与事件",
+        "difficulty": "standard",
+        "source_title": "Overview of the Process Framework",
+        "source_url": "https://learn.microsoft.com/en-sg/semantic-kernel/frameworks/process/process-framework",
+        "source_section": "Core Concepts",
+        "output_characteristics": "应判断为正确，更新 MIRT",
+        "publish_resource": false,
+        "update_mirt": true
+      },
+      "judgment": {
+        "content_correctness": "若判定为错误，标记为内容错误",
+        "difficulty_match": "标准答案应被正确识别",
+        "knowledge_coverage": "正确答案覆盖三个核心概念",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "044",
+      "learner_type": "P3",
+      "module": "M1",
+      "knowledge_point": "多轮对话与执行设置",
+      "scenario_type": "practice",
+      "input": "我选择 B：Temperature 控制随机性。",
+      "expected": {
+        "intent": "ANSWER_SUBMIT",
+        "primary_action": "GRADE_ANSWER",
+        "knowledge_point": "多轮对话与执行设置",
+        "difficulty": "advanced",
+        "source_title": "Conversation history and state management",
+        "source_url": "https://learn.microsoft.com/zh-cn/dotnet/api/microsoft.semantickernel.connectors.openai.openaipromptexecutionsettings.temperature",
+        "source_section": "全文",
+        "output_characteristics": "应判断为正确，更新 MIRT",
+        "publish_resource": false,
+        "update_mirt": true
+      },
+      "judgment": {
+        "content_correctness": "若判定为错误，标记为内容错误",
+        "difficulty_match": "标准答案应被正确识别",
+        "knowledge_coverage": "正确答案覆盖 Temperature 的作用",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "045",
+      "learner_type": "P1",
+      "module": "M2",
+      "knowledge_point": "记忆与相关内容检索",
+      "scenario_type": "practice",
+      "input": "答错后：Agent 如何记住我的信息？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "记忆与相关内容检索",
+        "difficulty": "foundation",
+        "source_title": "Memory in Semantic Kernel",
+        "source_url": "https://learn.microsoft.com/en-gb/semantic-kernel/concepts/vector-store-connectors/memory-stores",
+        "source_section": "全文",
+        "output_characteristics": "答错后应降低难度，给出更基础的解释，使用更简单的语言",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未降低难度或解释不够基础，标记为难度适配问题",
+        "difficulty_match": "答错后应降为 foundation 难度",
+        "knowledge_coverage": "必须覆盖记忆的核心概念",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "046",
+      "learner_type": "P2",
+      "module": "M1",
+      "knowledge_point": "插件定义与函数调用",
+      "scenario_type": "practice",
+      "input": "答对后：如何创建自定义插件？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "插件定义与函数调用",
+        "difficulty": "advanced",
+        "source_title": "Understand native plugins - Training",
+        "source_url": "https://learn.microsoft.com/en-my/training/modules/give-your-ai-agent-skills/2-understand-native-plugins",
+        "source_section": "Creating a plugin",
+        "output_characteristics": "答对后应提高难度，给出更深入的创建指南和最佳实践",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未提高难度或内容不够深入，标记为难度适配问题",
+        "difficulty_match": "答对后应升为 advanced 难度",
+        "knowledge_coverage": "必须覆盖插件创建的最佳实践",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "047",
+      "learner_type": "P3",
+      "module": "M3",
+      "knowledge_point": "日志、跟踪与可观测性",
+      "scenario_type": "practice",
+      "input": "出现犹豫：我...嗯...OpenTelemetry 的追踪...是怎么工作的？",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "日志、跟踪与可观测性",
+        "difficulty": "standard",
+        "source_title": "Observability in Semantic Kernel",
+        "source_url": "https://learn.microsoft.com/ar-sa/semantic-kernel/concepts/enterprise-readiness/observability/",
+        "source_section": "Tracing",
+        "output_characteristics": "检测到犹豫信号后，应提供更详细的步骤说明和示例，降低抽象程度",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未调整提示方式或未提供示例，标记为内容错误",
+        "difficulty_match": "犹豫时应提供更多引导",
+        "knowledge_coverage": "必须覆盖追踪的工作机制",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    },
+    {
+      "case_id": "048",
+      "learner_type": "P1",
+      "module": "M1",
+      "knowledge_point": "提示词与聊天完成",
+      "scenario_type": "exception",
+      "input": "请帮我生成一段关于提示词模板的代码。",
+      "expected": {
+        "intent": "LEARNING_QUERY",
+        "primary_action": "LEARNING_DIALOGUE",
+        "knowledge_point": "提示词与聊天完成",
+        "difficulty": "foundation",
+        "source_title": "Semantic Kernel Components",
+        "source_url": "https://learn.microsoft.com/ar-sa/semantic-kernel/concepts/semantic-kernel-components",
+        "source_section": "全文",
+        "output_characteristics": "外部服务不可用时，应在响应中明确说明降级原因，不伪造引用",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若伪造引用或未说明降级原因，标记为内容错误",
+        "difficulty_match": "应有降级说明",
+        "knowledge_coverage": "降级响应应保持基本准确性",
+        "source_traceable": "服务不可用时应返回降级原因"
+      }
+    },
+    {
+      "case_id": "049",
+      "learner_type": "P2",
+      "module": "M2",
+      "knowledge_point": "Agent 创建与指令设计",
+      "scenario_type": "exception",
+      "input": "我想切换到 M3 模块学习 Process Framework。",
+      "expected": {
+        "intent": "SWITCH_MODULE",
+        "primary_action": "CHANGE_MODULE",
+        "knowledge_point": "Agent 创建与指令设计",
+        "difficulty": "standard",
+        "source_title": "Semantic Kernel Agent Architecture",
+        "source_url": "https://learn.microsoft.com/nb-no/semantic-kernel/frameworks/agent/agent-architecture",
+        "source_section": "Agent",
+        "output_characteristics": "应响应模块切换请求，切换到 M3 并重置 ECHO 状态为 E",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若未切换模块或未重置状态，标记为内容错误",
+        "difficulty_match": "模块切换应正确执行",
+        "knowledge_coverage": "必须覆盖模块切换的完整流程",
+        "source_traceable": "不适用"
+      }
+    },
+    {
+      "case_id": "050",
+      "learner_type": "P3",
+      "module": "M3",
+      "knowledge_point": "部署与质量评测",
+      "scenario_type": "exception",
+      "input": "重复提交：我的答案是 observe → evaluate → improve。",
+      "expected": {
+        "intent": "ANSWER_SUBMIT",
+        "primary_action": "GRADE_ANSWER",
+        "knowledge_point": "部署与质量评测",
+        "difficulty": "advanced",
+        "source_title": "Observability in Semantic Kernel",
+        "source_url": "https://learn.microsoft.com/ar-sa/semantic-kernel/concepts/enterprise-readiness/observability/",
+        "source_section": "全文",
+        "output_characteristics": "重复提交应返回原状态（幂等），不重复更新 MIRT",
+        "publish_resource": false,
+        "update_mirt": false
+      },
+      "judgment": {
+        "content_correctness": "若重复提交导致重复更新 MIRT，标记为内容错误",
+        "difficulty_match": "幂等性应被正确实现",
+        "knowledge_coverage": "必须覆盖重复提交的处理",
+        "source_traceable": "检查 source_url 可打开且章节对应"
+      }
+    }
+  ]
+}
