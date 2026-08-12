@@ -121,14 +121,54 @@ HTTP 403，且不得执行 `PATCH` 或 `DELETE`。仅回显调用方传入的作
 
 ## 微表征检测
 
+### ECHO 调用检测服务
+
+检测服务默认地址为 `MICRO_REPRESENTATION_BASE_URL`，提供：
+
+开发联调可显式启用
+`docker compose -f docker-compose.yml -f docker-compose.micro-mock.yml --profile micro-mock up --build`。
+覆盖配置让 ECHO 通过容器网络访问 Mock，并等待其健康检查通过。健康检查会返回 `mode: mock`，
+固定事件只用于接口联调，不得作为真实学习诊断证据或比赛评测结果。未启用该 profile 时，
+ECHO 保留任务事实并按外部服务不可用路径明确降级。
+
+- `POST /v1/detection/jobs`：创建单段音频检测任务。
+- `GET /v1/detection/jobs/{job_id}`：查询任务状态。
+- `GET /v1/detection/jobs/{job_id}/events`：读取标准化事件。
+
+任务状态固定为 `queued`、`processing`、`completed` 或 `failed`。创建任务和状态查询响应
+必须包含非空 `job_id` 和任务状态；失败时同时返回 `error_message`。
+
+ECHO 保存的本地音频通过 `multipart/form-data` 流式上传，文件字段名为 `audio`，其余字段与
+`MicroDetectionRequest` 一致，但不得把 `file:///` 本机绝对路径发送给检测服务。检测服务
+能够访问的 `http` 或 `https` 音频地址可以使用 UTF-8 JSON 请求提交。
+
+检测服务只返回结果，不能直接写 ECHO 业务数据库。检测服务响应和事件中的 `job_id` 始终表示
+`detector_job_id`；ECHO 路由中的 `{job_id}` 表示 `echo_job_id`，两者不得混用。检测编号在任务
+和事件中统一限制为最多 100 字符。
+
+ECHO 分别保存检测状态与事件同步状态。创建检测任务直接返回 `completed` 时立即读取事件；
+任务为 `completed` 但事件同步状态不是 `synced` 时，后续查询继续重试。合法空事件结果也会
+标记为已同步。外部任务完成后读取事件，并在整批事件通过组织、
+模块、会话、知识点、来源和学习者范围检查后写入业务数据库。相同 `event_id` 重复返回时
+不重复保存；数据库已有同编号事件时只有内容完全相同才视为幂等，内容变化时整批拒绝。
+同一批中存在越权或冲突事件时整批拒绝，不允许部分写入。同步超时或服务
+不可用时保留原任务状态和失败原因，后续查询可以重试。
+
+### ECHO 主系统入口
+
 ECHO 主系统对外入口：
 
 - `POST /v1/micro/detection-jobs`：学习者单轮音频
 - `POST /v1/micro/mentor-batches`：讲师批量录音
 - `GET /v1/micro/mentor-batches/{batch_id}`：批量任务和课次汇总
 - `GET /v1/micro/detection-jobs/{job_id}`：任务状态
-- `POST /v1/micro/detection-jobs/{job_id}/events`：检测服务回传事件
+- `POST /v1/micro/detection-jobs/{job_id}/events`：检测服务使用独立服务密钥回传事件
 - `GET /v1/sessions/{session_id}/micro-events`：会话证据
+
+讲师批量上传响应包含稳定的 `batch_id`、去重后的 `job_ids` 和 `accepted` 数量。同一批次中
+完全相同的录音只关联并统计一次。`GET /v1/micro/mentor-batches/{batch_id}` 仅允许批次创建者
+和同组织系统管理员访问，返回每个任务的检测/同步状态，以及以下课次汇总：各类信号次数、
+信号总数、犹豫与思考停顿的总时长、待确认数量，并按录音时间中点比较前后半段信号数量。
 
 事件类型固定为犹豫、猜测、思考停顿、不确定、自我修正和其他。事件包含模块、知识点、
 来源、开始和结束时间、可信程度、短转写、证据地址和说话人确认状态。
@@ -137,7 +177,8 @@ ECHO 主系统对外入口：
 同一录音重复提交时返回原任务编号，不重复分析和重复计入课次汇总。
 
 未授权录音不创建任务。讲师多人录音未确认说话人时，`learner_id` 必须为空，
-事件只能进入课次统计。置信度低于阈值时保持待确认状态。
+事件只能进入课次统计。已经确认但学习者与任务不一致时整批拒绝，不能静默降级为匿名事件。
+置信度低于阈值时保持待确认状态。
 
 ## 学习画像
 
@@ -156,6 +197,20 @@ MIRT 更新接口只接受有效题目和唯一 `attempt_id`。重复编号必�
 大模型只负责把上述结果写成易懂文字；无证据时返回“暂不能判断”，模型不可用时使用固定模板。
 
 ## 联调规则
+
+微表征检测任务的提交失败分为两类：未配置、连接失败、超时、HTTP 429 和 HTTP 5xx
+属于临时不可用，ECHO 保存最近失败原因并将任务保持为 `awaiting_detector`；请求参数错误、
+HTTP 4xx（429 除外）、响应格式错误和业务范围不一致属于确定失败，任务进入 `failed`。
+查询可重试任务或重复上传相同录音时，ECHO 可以原子地重新排队；并发请求只能触发一次外部提交。
+无外部任务编号且超过 60 秒仍处于 `queued` 的任务视为提交租约过期，查询时可以原子回收并重新提交。
+事件响应格式错误、事件编号冲突和业务范围不一致会终止自动同步并将任务标记为 `failed`。
+
+录音去重范围固定为 `organization_id`、`learner_id`、`session_id`、`module_id`、
+`knowledge_point_id`、`source_type` 和 `audio_sha256`，`created_by_user_id` 仅用于权限与审计。
+跨讲师命中已有任务时不创建第二个检测任务，也不向后上传者公开原任务详情和检测事件。
+`POST /v1/micro/detection-jobs` 固定返回 `job_id`、`status`、`source_type`、`is_duplicate`
+和 `retry_scheduled`。跨讲师命中时 `job_id` 为 `null`、`status` 为 `already_submitted`；
+该状态只表示脱敏后的提交结果，不是检测器任务状态。
 
 1. 先提交契约样例和测试，再连接真实模型。
 2. 超时、空结果和不可用必须返回明确降级原因。
