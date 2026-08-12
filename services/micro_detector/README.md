@@ -7,10 +7,11 @@ does not contain WavLM, FAISS, model weights, indexes, audio, or code copied fro
 Start ECHO and the mock detector:
 
 ```powershell
-docker compose --profile micro-mock up --build
+docker compose -f docker-compose.yml -f docker-compose.micro-mock.yml --profile micro-mock up --build
 ```
 
-The mock service listens on `http://127.0.0.1:8030`. Its `/health` response always identifies
+The override routes ECHO to `http://micro-detector:8030` and waits for the detector health check.
+The mock service is also published at `http://127.0.0.1:8030`. Its `/health` response always identifies
 `mode` as `mock`; its deterministic hesitation event is for contract integration only and must
 not be treated as a real analysis result. Run `docker compose up --build` without the profile to
 start ECHO alone and exercise the documented external-service degradation path.

@@ -125,9 +125,11 @@ HTTP 403，且不得执行 `PATCH` 或 `DELETE`。仅回显调用方传入的作
 
 检测服务默认地址为 `MICRO_REPRESENTATION_BASE_URL`，提供：
 
-开发联调可显式启用 `docker compose --profile micro-mock up --build`。该服务的健康检查会返回
-`mode: mock`，固定事件只用于接口联调，不得作为真实学习诊断证据或比赛评测结果。未启用该
-profile 时，ECHO 保留任务事实并按外部服务不可用路径明确降级。
+开发联调可显式启用
+`docker compose -f docker-compose.yml -f docker-compose.micro-mock.yml --profile micro-mock up --build`。
+覆盖配置让 ECHO 通过容器网络访问 Mock，并等待其健康检查通过。健康检查会返回 `mode: mock`，
+固定事件只用于接口联调，不得作为真实学习诊断证据或比赛评测结果。未启用该 profile 时，
+ECHO 保留任务事实并按外部服务不可用路径明确降级。
 
 - `POST /v1/detection/jobs`：创建单段音频检测任务。
 - `GET /v1/detection/jobs/{job_id}`：查询任务状态。
