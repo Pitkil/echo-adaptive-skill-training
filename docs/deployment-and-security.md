@@ -7,21 +7,6 @@ Copy-Item .env.example .env
 docker compose up --build
 ```
 
-上述命令只启动 ECHO。需要联调微表征接口时，显式启动不含模型的 Mock 8030 服务：
-
-```powershell
-docker compose -f docker-compose.yml -f docker-compose.micro-mock.yml --profile micro-mock up --build
-```
-
-覆盖配置将 ECHO 的容器内检测地址设为 `http://micro-detector:8030`，并等待 Mock 的 `/health`
-健康检查通过。Mock 服务只验证跨服务契约，并通过 `/health` 的 `mode: mock` 明确标识；固定检测事件不能作为
-真实诊断或评测结果。WavLM、FAISS、模型权重和索引不进入 ECHO 镜像，也不进入 Git。真实检测
-服务后续保持同一接口，使用独立重依赖镜像和外部数据卷。
-
-需要启用检测服务事件回调时，在 ECHO 与 8030 服务中配置相同的 `MICRO_CALLBACK_SECRET`，
-8030 使用 `X-Micro-Service-Key` 请求头调用回调。该值为空时回调入口保持关闭；不得使用普通
-学习者或导师登录令牌代替服务身份。生产部署应通过密钥管理系统注入，不写入 Git。
-
 ECHO API 默认使用 `8000`。基于多路召回与混合向量的可追溯 RAG 检索引擎、SimpleMem、微表征服务分别使用独立地址。
 完整服务不可用时保留事实记录并返回降级原因，不伪造成功状态。
 
