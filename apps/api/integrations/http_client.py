@@ -11,6 +11,23 @@ class IntegrationUnavailable(RuntimeError):
     """Raised when an optional integration cannot serve a request."""
 
 
+class IntegrationTransientError(IntegrationUnavailable):
+    """Raised when an integration request is safe to retry later."""
+
+
+class IntegrationContractError(IntegrationUnavailable):
+    """Raised when retrying the same integration request cannot succeed."""
+
+
+def _raise_http_error(exc: httpx.HTTPError) -> None:
+    if isinstance(exc, httpx.HTTPStatusError):
+        status_code = exc.response.status_code
+        if status_code == 429 or status_code >= 500:
+            raise IntegrationTransientError(str(exc)) from exc
+        raise IntegrationContractError(str(exc)) from exc
+    raise IntegrationTransientError(str(exc)) from exc
+
+
 class JsonHttpClient:
     def __init__(self, base_url: str, timeout_seconds: float = 10.0) -> None:
         self.base_url = base_url.rstrip("/")
@@ -27,7 +44,7 @@ class JsonHttpClient:
         payload: dict[str, Any] | None = None,
     ) -> Any:
         if not self.configured:
-            raise IntegrationUnavailable("Integration base URL is not configured.")
+            raise IntegrationTransientError("Integration base URL is not configured.")
 
         try:
             response = httpx.request(
@@ -38,8 +55,10 @@ class JsonHttpClient:
             )
             response.raise_for_status()
             return response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            raise IntegrationUnavailable(str(exc)) from exc
+        except httpx.HTTPError as exc:
+            _raise_http_error(exc)
+        except ValueError as exc:
+            raise IntegrationContractError(str(exc)) from exc
 
     def upload(
         self,
@@ -52,7 +71,7 @@ class JsonHttpClient:
         data: dict[str, str],
     ) -> Any:
         if not self.configured:
-            raise IntegrationUnavailable("Integration base URL is not configured.")
+            raise IntegrationTransientError("Integration base URL is not configured.")
         try:
             response = httpx.post(
                 f"{self.base_url}/{path.lstrip('/')}",
@@ -62,5 +81,7 @@ class JsonHttpClient:
             )
             response.raise_for_status()
             return response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            raise IntegrationUnavailable(str(exc)) from exc
+        except httpx.HTTPError as exc:
+            _raise_http_error(exc)
+        except ValueError as exc:
+            raise IntegrationContractError(str(exc)) from exc

@@ -10,10 +10,11 @@ docker compose up --build
 上述命令只启动 ECHO。需要联调微表征接口时，显式启动不含模型的 Mock 8030 服务：
 
 ```powershell
-docker compose --profile micro-mock up --build
+docker compose -f docker-compose.yml -f docker-compose.micro-mock.yml --profile micro-mock up --build
 ```
 
-Mock 服务只验证跨服务契约，并通过 `/health` 的 `mode: mock` 明确标识；固定检测事件不能作为
+覆盖配置将 ECHO 的容器内检测地址设为 `http://micro-detector:8030`，并等待 Mock 的 `/health`
+健康检查通过。Mock 服务只验证跨服务契约，并通过 `/health` 的 `mode: mock` 明确标识；固定检测事件不能作为
 真实诊断或评测结果。WavLM、FAISS、模型权重和索引不进入 ECHO 镜像，也不进入 Git。真实检测
 服务后续保持同一接口，使用独立重依赖镜像和外部数据卷。
 

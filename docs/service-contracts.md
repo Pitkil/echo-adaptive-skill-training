@@ -196,6 +196,20 @@ MIRT 更新接口只接受有效题目和唯一 `attempt_id`。重复编号必�
 
 ## 联调规则
 
+微表征检测任务的提交失败分为两类：未配置、连接失败、超时、HTTP 429 和 HTTP 5xx
+属于临时不可用，ECHO 保存最近失败原因并将任务保持为 `awaiting_detector`；请求参数错误、
+HTTP 4xx（429 除外）、响应格式错误和业务范围不一致属于确定失败，任务进入 `failed`。
+查询可重试任务或重复上传相同录音时，ECHO 可以原子地重新排队；并发请求只能触发一次外部提交。
+无外部任务编号且超过 60 秒仍处于 `queued` 的任务视为提交租约过期，查询时可以原子回收并重新提交。
+事件响应格式错误、事件编号冲突和业务范围不一致会终止自动同步并将任务标记为 `failed`。
+
+录音去重范围固定为 `organization_id`、`learner_id`、`session_id`、`module_id`、
+`knowledge_point_id`、`source_type` 和 `audio_sha256`，`created_by_user_id` 仅用于权限与审计。
+跨讲师命中已有任务时不创建第二个检测任务，也不向后上传者公开原任务详情和检测事件。
+`POST /v1/micro/detection-jobs` 固定返回 `job_id`、`status`、`source_type`、`is_duplicate`
+和 `retry_scheduled`。跨讲师命中时 `job_id` 为 `null`、`status` 为 `already_submitted`；
+该状态只表示脱敏后的提交结果，不是检测器任务状态。
+
 1. 先提交契约样例和测试，再连接真实模型。
 2. 超时、空结果和不可用必须返回明确降级原因。
 3. 禁止传递数据库对象、本机绝对路径、密钥和完整令牌。

@@ -190,10 +190,11 @@ docker compose exec echo-api python /workspace/scripts/bootstrap_admin.py --user
 需要联调不含真实模型的微表征 Mock 服务时使用：
 
 ```powershell
-docker compose --profile micro-mock up --build -d
+docker compose -f docker-compose.yml -f docker-compose.micro-mock.yml --profile micro-mock up --build -d
 ```
 
-Mock 服务只用于接口联调，不能作为真实诊断或比赛评测结果。
+该覆盖配置让 ECHO 容器通过 `http://micro-detector:8030` 访问 Mock，并等待其健康检查通过。
+Mock 服务只用于接口联调，不能作为真实诊断，也不能用于检测准确率、Precision、Recall 或 F1 评测。
 
 已有账号可追加 `--promote-existing` 提升为系统管理员。系统管理员登录后在“成员管理”
 中把负责维护内容的账号设为“讲师/导师”。只有讲师/导师和系统管理员能看到“内容导入”，

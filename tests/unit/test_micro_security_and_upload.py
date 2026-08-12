@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
 from app import (
+    build_micro_dedupe_key,
     create_mentor_batch,
+    create_micro_job,
     create_micro_job_record,
     get_mentor_batch,
     get_micro_job,
@@ -13,6 +16,7 @@ from app import (
     require_micro_callback_identity,
     require_micro_job_access,
     save_audio_file,
+    submit_micro_job,
 )
 from config import Config
 from database import (
@@ -31,6 +35,7 @@ from database import (
 )
 from fastapi import BackgroundTasks, HTTPException, UploadFile
 from integrations.contracts import MicroSource
+from integrations.http_client import IntegrationContractError, IntegrationTransientError
 from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
@@ -214,6 +219,111 @@ def test_identical_upload_is_deduplicated_by_database_key(
     assert len(list(tmp_path.rglob("*.wav"))) == 1
 
 
+def test_identical_mentor_uploads_are_deduplicated_across_uploaders(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr("app.UPLOAD_DIR", tmp_path)
+    db, organization, _, _, module, point, session = make_database_context()
+    first_mentor = User(
+        organization_id=organization.id,
+        username="mentor-one",
+        hashed_password="unused",
+        role=UserRole.MENTOR.value,
+    )
+    second_mentor = User(
+        organization_id=organization.id,
+        username="mentor-two",
+        hashed_password="unused",
+        role=UserRole.MENTOR.value,
+    )
+    db.add_all([first_mentor, second_mentor])
+    db.commit()
+    values = {
+        "module_id": module.id,
+        "source_type": MicroSource.MENTOR_RECORDING,
+        "learner_id": None,
+        "session_id": session.id,
+        "knowledge_point_id": point.id,
+    }
+
+    first = create_micro_job_record(
+        db, user=first_mentor, audio=make_audio(b"shared-audio"), **values
+    )
+    db.commit()
+    second = create_micro_job_record(
+        db, user=second_mentor, audio=make_audio(b"shared-audio"), **values
+    )
+
+    assert second.is_created is False
+    assert second.job.id == first.job.id
+    assert second.job.created_by_user_id == first_mentor.id
+    assert db.query(MicroDetectionJob).count() == 1
+    with pytest.raises(HTTPException) as exc_info:
+        require_micro_job_access(second.job, second_mentor)
+    assert exc_info.value.status_code == 404
+
+
+def test_same_audio_in_different_business_scope_is_not_deduplicated(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr("app.UPLOAD_DIR", tmp_path)
+    db, _, learner, other_learner, module, point, _ = make_database_context()
+
+    first = create_micro_job_record(
+        db,
+        user=learner,
+        module_id=module.id,
+        source_type=MicroSource.LEARNER_VOICE,
+        audio=make_audio(b"same-content"),
+        learner_id=learner.id,
+        session_id=None,
+        knowledge_point_id=point.id,
+    )
+    db.commit()
+    second = create_micro_job_record(
+        db,
+        user=other_learner,
+        module_id=module.id,
+        source_type=MicroSource.LEARNER_VOICE,
+        audio=make_audio(b"same-content"),
+        learner_id=other_learner.id,
+        session_id=None,
+        knowledge_point_id=point.id,
+    )
+
+    assert first.job.id != second.job.id
+    assert db.query(MicroDetectionJob).count() == 2
+
+
+def test_dedupe_key_separates_module_and_source_type() -> None:
+    common = {
+        "organization_id": 1,
+        "learner_id": 7,
+        "session_id": 11,
+        "knowledge_point_id": None,
+        "audio_sha256": "a" * 64,
+    }
+    learner_voice = build_micro_dedupe_key(
+        module_id=1,
+        source_type=MicroSource.LEARNER_VOICE,
+        **common,
+    )
+    another_module = build_micro_dedupe_key(
+        module_id=2,
+        source_type=MicroSource.LEARNER_VOICE,
+        **common,
+    )
+    mentor_recording = build_micro_dedupe_key(
+        module_id=1,
+        source_type=MicroSource.MENTOR_RECORDING,
+        **common,
+    )
+
+    assert len({learner_voice, another_module, mentor_recording}) == 3
+
+
 def test_awaiting_detector_job_is_queued_only_once() -> None:
     db, organization, learner, _, module, _, _ = make_database_context()
     job = MicroDetectionJob(
@@ -235,6 +345,141 @@ def test_awaiting_detector_job_is_queued_only_once() -> None:
     assert queue_awaiting_micro_job_retry(db, job, tasks) is False
     assert job.status == "queued"
     assert len(tasks.tasks) == 1
+
+
+def test_stale_queued_job_without_external_id_is_reclaimed_once() -> None:
+    db, organization, learner, _, module, _, _ = make_database_context()
+    job = MicroDetectionJob(
+        id="stale-queued-job",
+        organization_id=organization.id,
+        created_by_user_id=learner.id,
+        learner_id=learner.id,
+        module_id=module.id,
+        source_type=MicroSource.LEARNER_VOICE.value,
+        audio_uri="file:///audio.wav",
+        consent_granted=True,
+        status="queued",
+        updated_at=datetime.now() - timedelta(minutes=5),
+    )
+    db.add(job)
+    db.commit()
+    tasks = BackgroundTasks()
+
+    assert queue_awaiting_micro_job_retry(db, job, tasks) is True
+    assert queue_awaiting_micro_job_retry(db, job, tasks) is False
+    assert len(tasks.tasks) == 1
+
+
+def test_duplicate_upload_requeues_an_awaiting_job(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr("app.UPLOAD_DIR", tmp_path)
+    db, _, learner, _, module, point, _ = make_database_context()
+    first_tasks = BackgroundTasks()
+    first = create_micro_job(
+        background_tasks=first_tasks,
+        module_id=module.id,
+        source_type=MicroSource.LEARNER_VOICE,
+        consent_granted=True,
+        audio=make_audio(b"retry-audio"),
+        session_id=None,
+        knowledge_point_id=point.id,
+        learner_id=None,
+        db=db,
+        user=learner,
+    )
+    job = db.query(MicroDetectionJob).filter_by(id=first["job_id"]).one()
+    job.status = "awaiting_detector"
+    job.error_message = "detector timed out"
+    db.commit()
+    retry_tasks = BackgroundTasks()
+
+    repeated = create_micro_job(
+        background_tasks=retry_tasks,
+        module_id=module.id,
+        source_type=MicroSource.LEARNER_VOICE,
+        consent_granted=True,
+        audio=make_audio(b"retry-audio"),
+        session_id=None,
+        knowledge_point_id=point.id,
+        learner_id=None,
+        db=db,
+        user=learner,
+    )
+
+    assert repeated["job_id"] == first["job_id"]
+    assert repeated["status"] == "queued"
+    assert len(retry_tasks.tasks) == 1
+    assert db.query(MicroDetectionJob).count() == 1
+
+
+def test_temporary_submit_failure_returns_job_to_awaiting_detector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class TemporarilyUnavailableDetector:
+        configured = True
+
+        def create_job(self, request):
+            raise IntegrationTransientError("detector timed out")
+
+    db, organization, learner, _, module, _, _ = make_database_context()
+    job = MicroDetectionJob(
+        id="temporary-failure",
+        organization_id=organization.id,
+        created_by_user_id=learner.id,
+        learner_id=learner.id,
+        module_id=module.id,
+        source_type=MicroSource.LEARNER_VOICE.value,
+        audio_uri="file:///audio.wav",
+        consent_granted=True,
+        status="queued",
+    )
+    db.add(job)
+    db.commit()
+    job_id = job.id
+    monkeypatch.setattr("app.SessionLocal", lambda: db)
+    monkeypatch.setattr("app.MicroRepresentationClient", TemporarilyUnavailableDetector)
+
+    submit_micro_job(job_id)
+
+    stored = db.query(MicroDetectionJob).filter_by(id=job_id).one()
+    assert stored.status == "awaiting_detector"
+    assert stored.error_message == "detector timed out"
+
+
+def test_contract_submit_failure_is_permanent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class InvalidDetector:
+        configured = True
+
+        def create_job(self, request):
+            raise IntegrationContractError("invalid detection job response")
+
+    db, organization, learner, _, module, _, _ = make_database_context()
+    job = MicroDetectionJob(
+        id="contract-failure",
+        organization_id=organization.id,
+        created_by_user_id=learner.id,
+        learner_id=learner.id,
+        module_id=module.id,
+        source_type=MicroSource.LEARNER_VOICE.value,
+        audio_uri="file:///audio.wav",
+        consent_granted=True,
+        status="queued",
+    )
+    db.add(job)
+    db.commit()
+    job_id = job.id
+    monkeypatch.setattr("app.SessionLocal", lambda: db)
+    monkeypatch.setattr("app.MicroRepresentationClient", InvalidDetector)
+
+    submit_micro_job(job_id)
+
+    stored = db.query(MicroDetectionJob).filter_by(id=job_id).one()
+    assert stored.status == "failed"
+    assert stored.error_message == "invalid detection job response"
 
 
 def test_flush_failure_removes_saved_audio(
@@ -291,6 +536,81 @@ def test_unconfigured_detector_keeps_waiting_status_and_returns_degradation(
     assert result["status"] == "awaiting_detector"
     assert result["degradation"] == "微表征检测服务未配置，任务仍在等待检测器"
     assert tasks.tasks == []
+
+
+def test_query_requeues_awaiting_job_when_detector_recovers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ConfiguredDetector:
+        configured = True
+
+    monkeypatch.setattr("app.MicroRepresentationClient", ConfiguredDetector)
+    db, organization, learner, _, module, _, _ = make_database_context()
+    job = MicroDetectionJob(
+        id="recovered-job",
+        organization_id=organization.id,
+        created_by_user_id=learner.id,
+        learner_id=learner.id,
+        module_id=module.id,
+        source_type=MicroSource.LEARNER_VOICE.value,
+        audio_uri="file:///audio.wav",
+        consent_granted=True,
+        status="awaiting_detector",
+        error_message="detector timed out",
+    )
+    db.add(job)
+    db.commit()
+    tasks = BackgroundTasks()
+
+    result = get_micro_job(job.id, tasks, db, learner)
+
+    assert result["status"] == "queued"
+    assert result["error_message"] is None
+    assert len(tasks.tasks) == 1
+
+
+def test_contract_sync_error_permanently_fails_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class InvalidEventDetector:
+        configured = True
+        event_calls = 0
+
+        def get_job(self, job_id):
+            return {"job_id": job_id, "status": "completed"}
+
+        def get_events(self, job_id):
+            self.event_calls += 1
+            raise IntegrationContractError("event scope mismatch")
+
+    detector = InvalidEventDetector()
+    monkeypatch.setattr("app.MicroRepresentationClient", lambda: detector)
+    db, organization, learner, _, module, _, _ = make_database_context()
+    job = MicroDetectionJob(
+        id="invalid-event-job",
+        organization_id=organization.id,
+        created_by_user_id=learner.id,
+        learner_id=learner.id,
+        module_id=module.id,
+        source_type=MicroSource.LEARNER_VOICE.value,
+        audio_uri="file:///audio.wav",
+        consent_granted=True,
+        status="completed",
+        external_job_id="external-invalid-event",
+        events_sync_status="failed",
+    )
+    db.add(job)
+    db.commit()
+
+    first = get_micro_job(job.id, BackgroundTasks(), db, learner)
+    second = get_micro_job(job.id, BackgroundTasks(), db, learner)
+
+    assert first["status"] == "failed"
+    assert second["status"] == "failed"
+    assert first["error_message"] == "event scope mismatch"
+    assert first["degradation"] == "微表征检测服务同步失败：event scope mismatch"
+    assert first["events_sync_error"] == first["degradation"]
+    assert detector.event_calls == 1
 
 
 def test_mentor_batch_can_be_queried_with_session_summary(
@@ -366,3 +686,58 @@ def test_mentor_batch_can_be_queried_with_session_summary(
         "second_half_count": 1,
         "change": 0,
     }
+
+
+def test_cross_mentor_duplicate_batch_does_not_expose_original_job(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr("app.UPLOAD_DIR", tmp_path)
+    db, organization, _, _, module, point, session = make_database_context()
+    first_mentor = User(
+        organization_id=organization.id,
+        username="batch-mentor-one",
+        hashed_password="unused",
+        role=UserRole.MENTOR.value,
+    )
+    second_mentor = User(
+        organization_id=organization.id,
+        username="batch-mentor-two",
+        hashed_password="unused",
+        role=UserRole.MENTOR.value,
+    )
+    db.add_all([first_mentor, second_mentor])
+    db.commit()
+    first = create_micro_job_record(
+        db,
+        user=first_mentor,
+        module_id=module.id,
+        source_type=MicroSource.MENTOR_RECORDING,
+        audio=make_audio(b"shared-batch-audio"),
+        learner_id=None,
+        session_id=session.id,
+        knowledge_point_id=point.id,
+    )
+    first.job.status = "completed"
+    db.commit()
+
+    result = create_mentor_batch(
+        background_tasks=BackgroundTasks(),
+        module_id=module.id,
+        consent_granted=True,
+        audio_files=[make_audio(b"shared-batch-audio")],
+        learner_id=None,
+        session_id=session.id,
+        knowledge_point_id=point.id,
+        speaker_mapping_confirmed=False,
+        db=db,
+        user=second_mentor,
+    )
+    batch = get_mentor_batch(result.batch_id, db, second_mentor)
+
+    assert result.accepted == 0
+    assert result.already_submitted == 1
+    assert result.job_ids == []
+    assert batch["jobs"] == []
+    assert batch["summary"]["total_signal_count"] == 0
+    assert db.query(MicroDetectionJob).count() == 1

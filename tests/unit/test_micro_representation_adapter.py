@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import httpx
 import pytest
 from integrations.contracts import MicroDetectionRequest
-from integrations.http_client import IntegrationUnavailable
+from integrations.http_client import (
+    IntegrationContractError,
+    IntegrationTransientError,
+    IntegrationUnavailable,
+)
 from integrations.micro_representation import MicroRepresentationClient
 
 
@@ -174,3 +179,33 @@ def test_get_events_rejects_event_from_another_job(monkeypatch: pytest.MonkeyPat
 
     with pytest.raises(IntegrationUnavailable, match="event job_id does not match"):
         client.get_events("external-006")
+
+
+@pytest.mark.parametrize("status_code", [429, 500, 503])
+def test_retryable_http_status_is_classified_as_transient(
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int,
+) -> None:
+    client = MicroRepresentationClient("http://detector.test")
+    request = httpx.Request("POST", "http://detector.test/v1/detection/jobs")
+    response = httpx.Response(status_code, request=request)
+    monkeypatch.setattr(httpx, "request", lambda *args, **kwargs: response)
+
+    with pytest.raises(IntegrationTransientError):
+        client.create_job(build_request("https://media.example/turn.webm"))
+
+
+def test_bad_request_is_classified_as_contract_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = MicroRepresentationClient("http://detector.test")
+    request = httpx.Request("POST", "http://detector.test/v1/detection/jobs")
+    response = httpx.Response(400, request=request)
+    monkeypatch.setattr(
+        httpx,
+        "request",
+        lambda *args, **kwargs: response,
+    )
+
+    with pytest.raises(IntegrationContractError):
+        client.create_job(build_request("https://media.example/turn.webm"))

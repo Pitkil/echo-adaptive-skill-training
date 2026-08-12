@@ -16,7 +16,7 @@ from .contracts import (
     MicroDetectionRequest,
     MicroRepresentationEvent,
 )
-from .http_client import IntegrationUnavailable, JsonHttpClient
+from .http_client import IntegrationContractError, JsonHttpClient
 
 _AUDIO_CONTENT_TYPES = {
     ".flac": "audio/flac",
@@ -50,7 +50,7 @@ class MicroRepresentationClient:
                 request.model_dump(mode="json"),
             )
         else:
-            raise IntegrationUnavailable(
+            raise IntegrationContractError(
                 "micro-representation audio_uri must use file, http, or https."
             )
         return self._validate_job_result(payload)
@@ -59,20 +59,20 @@ class MicroRepresentationClient:
         payload = self.http.request("GET", f"/v1/detection/jobs/{job_id}", None)
         result = self._validate_job_result(payload)
         if result["job_id"] != job_id:
-            raise IntegrationUnavailable("detection job response job_id does not match request.")
+            raise IntegrationContractError("detection job response job_id does not match request.")
         return result
 
     def get_events(self, job_id: str) -> list[MicroRepresentationEvent]:
         payload = self.http.request("GET", f"/v1/detection/jobs/{job_id}/events", None)
         raw_events = payload.get("items", payload) if isinstance(payload, dict) else payload
         if not isinstance(raw_events, list):
-            raise IntegrationUnavailable("invalid micro-representation event response: items must be a list.")
+            raise IntegrationContractError("invalid micro-representation event response: items must be a list.")
         try:
             events = [MicroRepresentationEvent.model_validate(item) for item in raw_events]
         except ValidationError as exc:
-            raise IntegrationUnavailable(f"invalid micro-representation event response: {exc}") from exc
+            raise IntegrationContractError(f"invalid micro-representation event response: {exc}") from exc
         if any(event.job_id != job_id for event in events):
-            raise IntegrationUnavailable("micro-representation event job_id does not match request.")
+            raise IntegrationContractError("micro-representation event job_id does not match request.")
         return events
 
     def _upload_local_audio(
@@ -81,12 +81,12 @@ class MicroRepresentationClient:
         parsed_uri: ParseResult,
     ) -> Any:
         if parsed_uri.netloc not in {"", "localhost"}:
-            raise IntegrationUnavailable("remote file audio_uri is not allowed.")
+            raise IntegrationContractError("remote file audio_uri is not allowed.")
         local_path = Path(url2pathname(unquote(parsed_uri.path)))
         if os.name == "nt" and len(str(local_path)) >= 3 and str(local_path)[0] == "/":
             local_path = Path(str(local_path)[1:])
         if not local_path.is_file():
-            raise IntegrationUnavailable(
+            raise IntegrationContractError(
                 f"micro-representation audio file does not exist: {local_path.name}"
             )
 
@@ -120,5 +120,5 @@ class MicroRepresentationClient:
         try:
             result = MicroDetectionJobResult.model_validate(payload)
         except ValidationError as exc:
-            raise IntegrationUnavailable(f"invalid detection job response: {exc}") from exc
+            raise IntegrationContractError(f"invalid detection job response: {exc}") from exc
         return result.model_dump(mode="json", exclude_none=True)

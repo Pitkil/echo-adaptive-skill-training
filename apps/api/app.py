@@ -80,7 +80,11 @@ from integrations.contracts import (
 from integrations.contracts import (
     MicroRepresentationEvent as MicroEventContract,
 )
-from integrations.http_client import IntegrationUnavailable
+from integrations.http_client import (
+    IntegrationContractError,
+    IntegrationTransientError,
+    IntegrationUnavailable,
+)
 from integrations.micro_representation import MicroRepresentationClient
 from integrations.micro_sync import (
     apply_micro_job_creation_result,
@@ -105,6 +109,7 @@ from resource_generation import (
     ResourceGenerationAgent,
     build_personalization_plan,
 )
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -112,6 +117,10 @@ API_DIR = Path(__file__).resolve().parent
 WEB_DIR = API_DIR / "web"
 UPLOAD_DIR = Path(Config.upload.UPLOAD_DIR).resolve()
 MICRO_AUDIO_EXTENSIONS = {".flac", ".m4a", ".mp3", ".ogg", ".wav", ".webm"}
+MICRO_SUBMISSION_LEASE_SECONDS = max(
+    60,
+    int(float(os.getenv("MICRO_REPRESENTATION_TIMEOUT_SECONDS", "30"))) + 30,
+)
 MICRO_AUDIO_CONTENT_TYPES = {
     "audio/flac",
     "audio/mp4",
@@ -268,6 +277,22 @@ class MentorBatchResult(BaseModel):
     batch_id: str
     job_ids: list[str]
     accepted: int
+    already_submitted: int = 0
+
+
+class MicroJobSubmissionResult(BaseModel):
+    job_id: str | None
+    status: Literal[
+        "queued",
+        "awaiting_detector",
+        "processing",
+        "completed",
+        "failed",
+        "already_submitted",
+    ]
+    source_type: str
+    is_duplicate: bool = False
+    retry_scheduled: bool = False
 
 
 def ensure_catalog(db: Session) -> None:
@@ -1498,6 +1523,7 @@ def submit_micro_job(job_id: str) -> None:
         client = MicroRepresentationClient()
         if not client.configured:
             job.status = "awaiting_detector"
+            job.error_message = "Integration base URL is not configured."
             db.commit()
             return
         module = db.query(TrainingModule).filter_by(id=job.module_id).first()
@@ -1519,11 +1545,24 @@ def submit_micro_job(job_id: str) -> None:
             )
             try:
                 apply_micro_job_creation_result(db, job, client, response)
+            except IntegrationContractError as exc:
+                job.events_sync_status = "failed"
+                job.events_sync_error = str(exc)
+                job.status = "failed"
+                job.error_message = str(exc)
             except IntegrationUnavailable as exc:
                 job.events_sync_status = "failed"
                 job.events_sync_error = str(exc)
-        except (IntegrationUnavailable, ValueError) as exc:
+        except IntegrationTransientError as exc:
+            job.status = "awaiting_detector"
+            job.error_message = str(exc)
+        except (IntegrationContractError, ValueError) as exc:
             job.status = "failed"
+            job.error_message = str(exc)
+        except IntegrationUnavailable as exc:
+            # Older/custom adapters still raising the base error are treated as
+            # temporary so an optional detector outage cannot lock the audio.
+            job.status = "awaiting_detector"
             job.error_message = str(exc)
         db.commit()
     finally:
@@ -1635,7 +1674,6 @@ def validate_micro_job_scope(
 def build_micro_dedupe_key(
     *,
     organization_id: int,
-    created_by_user_id: int,
     learner_id: int | None,
     session_id: int | None,
     module_id: int,
@@ -1645,7 +1683,6 @@ def build_micro_dedupe_key(
 ) -> str:
     scope = {
         "audio_sha256": audio_sha256,
-        "created_by_user_id": created_by_user_id,
         "knowledge_point_id": knowledge_point_id,
         "learner_id": learner_id,
         "module_id": module_id,
@@ -1686,7 +1723,6 @@ def create_micro_job_record(
     destination, audio_sha256, audio_size = save_audio_file(job_id, audio)
     dedupe_key = build_micro_dedupe_key(
         organization_id=user.organization_id,
-        created_by_user_id=user.id,
         learner_id=learner_id,
         session_id=session_id,
         module_id=module_id,
@@ -1694,11 +1730,21 @@ def create_micro_job_record(
         source_type=source_type,
         audio_sha256=audio_sha256,
     )
-    existing = (
-        db.query(MicroDetectionJob)
-        .filter_by(dedupe_key=dedupe_key)
-        .first()
-    )
+    existing = db.query(MicroDetectionJob).filter(
+        MicroDetectionJob.organization_id == user.organization_id,
+        MicroDetectionJob.learner_id.is_(learner_id)
+        if learner_id is None
+        else MicroDetectionJob.learner_id == learner_id,
+        MicroDetectionJob.session_id.is_(session_id)
+        if session_id is None
+        else MicroDetectionJob.session_id == session_id,
+        MicroDetectionJob.module_id == module_id,
+        MicroDetectionJob.knowledge_point_id.is_(knowledge_point_id)
+        if knowledge_point_id is None
+        else MicroDetectionJob.knowledge_point_id == knowledge_point_id,
+        MicroDetectionJob.source_type == source_type.value,
+        MicroDetectionJob.audio_sha256 == audio_sha256,
+    ).order_by(MicroDetectionJob.created_at, MicroDetectionJob.id).first()
     if existing is not None:
         destination.unlink(missing_ok=True)
         return MicroJobCreation(existing, False, audio_size, None)
@@ -1732,7 +1778,7 @@ def create_micro_job_record(
     return MicroJobCreation(job, True, audio_size, destination)
 
 
-@app.post("/v1/micro/detection-jobs")
+@app.post("/v1/micro/detection-jobs", response_model=MicroJobSubmissionResult)
 def create_micro_job(
     background_tasks: BackgroundTasks,
     module_id: Annotated[int, Form()],
@@ -1768,9 +1814,30 @@ def create_micro_job(
         db.rollback()
         cleanup_audio_files([creation.saved_path] if creation.saved_path else [])
         raise HTTPException(status_code=500, detail="failed to save micro detection job") from exc
+    retry_scheduled = False
     if creation.is_created:
         background_tasks.add_task(submit_micro_job, job.id)
-    return {"job_id": job.id, "status": job.status, "source_type": job.source_type}
+    elif job.status == "awaiting_detector" and not job.external_job_id:
+        retry_scheduled = queue_awaiting_micro_job_retry(db, job, background_tasks)
+    if (
+        not creation.is_created
+        and user.role != UserRole.SYSTEM_ADMIN.value
+        and job.created_by_user_id != user.id
+    ):
+        return {
+            "job_id": None,
+            "status": "already_submitted",
+            "source_type": job.source_type,
+            "is_duplicate": True,
+            "retry_scheduled": retry_scheduled,
+        }
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "source_type": job.source_type,
+        "is_duplicate": not creation.is_created,
+        "retry_scheduled": retry_scheduled,
+    }
 
 
 @app.post("/v1/micro/mentor-batches", response_model=MentorBatchResult)
@@ -1799,6 +1866,9 @@ def create_mentor_batch(
     linked_job_ids: set[str] = set()
     created_jobs: list[MicroDetectionJob] = []
     created_paths: list[Path] = []
+    already_submitted = 0
+    retry_jobs: list[MicroDetectionJob] = []
+    hidden_job_ids: set[str] = set()
     total_size = 0
     batch = MicroMentorBatch(
         id=uuid4().hex,
@@ -1823,6 +1893,25 @@ def create_mentor_batch(
                 knowledge_point_id=knowledge_point_id,
             )
             total_size += creation.audio_size
+            if (
+                not creation.is_created
+                and user.role != UserRole.SYSTEM_ADMIN.value
+                and creation.job.created_by_user_id != user.id
+            ):
+                if creation.job.id in hidden_job_ids:
+                    if total_size > Config.upload.MAX_FILE_SIZE:
+                        raise HTTPException(status_code=413, detail="mentor batch exceeds total size limit")
+                    continue
+                hidden_job_ids.add(creation.job.id)
+                already_submitted += 1
+                if (
+                    creation.job.status == "awaiting_detector"
+                    and not creation.job.external_job_id
+                ):
+                    retry_jobs.append(creation.job)
+                if total_size > Config.upload.MAX_FILE_SIZE:
+                    raise HTTPException(status_code=413, detail="mentor batch exceeds total size limit")
+                continue
             if creation.job.id in linked_job_ids:
                 if total_size > Config.upload.MAX_FILE_SIZE:
                     raise HTTPException(status_code=413, detail="mentor batch exceeds total size limit")
@@ -1853,10 +1942,16 @@ def create_mentor_batch(
         raise HTTPException(status_code=500, detail="failed to save mentor batch") from exc
     for job in created_jobs:
         background_tasks.add_task(submit_micro_job, job.id)
+    for job in retry_jobs:
+        queue_awaiting_micro_job_retry(db, job, background_tasks)
+    for job in jobs:
+        if job not in created_jobs and job.status == "awaiting_detector" and not job.external_job_id:
+            queue_awaiting_micro_job_retry(db, job, background_tasks)
     return MentorBatchResult(
         batch_id=batch.id,
         job_ids=[job.id for job in jobs],
         accepted=len(jobs),
+        already_submitted=already_submitted,
     )
 
 
@@ -1944,15 +2039,29 @@ def queue_awaiting_micro_job_retry(
     job: MicroDetectionJob,
     background_tasks: BackgroundTasks,
 ) -> bool:
+    # MicroDetectionJob.updated_at is stored as the project's existing naive
+    # local database timestamp, so the lease comparison must use the same base.
+    now = datetime.now()
+    stale_before = now - timedelta(seconds=MICRO_SUBMISSION_LEASE_SECONDS)
     updated = (
         db.query(MicroDetectionJob)
         .filter(
             MicroDetectionJob.id == job.id,
-            MicroDetectionJob.status == "awaiting_detector",
             MicroDetectionJob.external_job_id.is_(None),
+            or_(
+                MicroDetectionJob.status == "awaiting_detector",
+                and_(
+                    MicroDetectionJob.status == "queued",
+                    MicroDetectionJob.updated_at < stale_before,
+                ),
+            ),
         )
         .update(
-            {MicroDetectionJob.status: "queued", MicroDetectionJob.error_message: None},
+            {
+                MicroDetectionJob.status: "queued",
+                MicroDetectionJob.error_message: None,
+                MicroDetectionJob.updated_at: now,
+            },
             synchronize_session=False,
         )
     )
@@ -1976,7 +2085,7 @@ def get_micro_job(
         raise HTTPException(status_code=404, detail="检测任务不存在")
     require_micro_job_access(job, user)
     degradation = None
-    if job.status == "awaiting_detector" and not job.external_job_id:
+    if job.status in {"awaiting_detector", "queued"} and not job.external_job_id:
         client = MicroRepresentationClient()
         if client.configured:
             queue_awaiting_micro_job_retry(db, job, background_tasks)
@@ -1990,6 +2099,13 @@ def get_micro_job(
         if client.configured:
             try:
                 synchronize_micro_job(db, job, client)
+                db.commit()
+            except IntegrationContractError as exc:
+                degradation = f"微表征检测服务同步失败：{exc}"
+                job.status = "failed"
+                job.error_message = str(exc)
+                job.events_sync_status = "failed"
+                job.events_sync_error = degradation
                 db.commit()
             except IntegrationUnavailable as exc:
                 degradation = f"微表征检测服务同步失败：{exc}"

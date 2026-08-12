@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from .contracts import MicroRepresentationEvent as MicroEventContract
 from .contracts import MicroSource
-from .http_client import IntegrationUnavailable
+from .http_client import IntegrationContractError, IntegrationUnavailable
 from .micro_representation import MicroRepresentationClient
 
 DEFAULT_CONFIRMATION_THRESHOLD = 0.75
@@ -45,7 +45,7 @@ def persist_micro_events(
     for event in events:
         duplicate = unique_events.get(event.event_id)
         if duplicate is not None and duplicate != event:
-            raise IntegrationUnavailable(
+            raise IntegrationContractError(
                 "duplicate micro-representation event_id has conflicting content."
             )
         unique_events[event.event_id] = event
@@ -56,7 +56,7 @@ def persist_micro_events(
         resolved_learners[event.event_id] = _resolve_learner(job, event)
         existing = db.get(MicroRepresentationEvent, event.event_id)
         if existing is not None and existing.job_id != job.id:
-            raise IntegrationUnavailable(
+            raise IntegrationContractError(
                 "micro-representation event_id is already used by another job."
             )
         if existing is not None:
@@ -66,7 +66,7 @@ def persist_micro_events(
                 event,
                 learner_id=learner_id,
             ):
-                raise IntegrationUnavailable(
+                raise IntegrationContractError(
                     "stored micro-representation event_id has conflicting content."
                 )
 
@@ -116,7 +116,7 @@ def synchronize_micro_job(
 ) -> int:
     """Refresh one external job and persist events when detection is complete."""
     if not job.external_job_id:
-        raise IntegrationUnavailable("micro-representation job has no external_job_id.")
+        raise IntegrationContractError("micro-representation job has no external_job_id.")
 
     external_state = external_state or client.get_job(job.external_job_id)
     external_status = external_state["status"]
@@ -168,7 +168,7 @@ def _validate_event_scope(
     }
     mismatched = [name for name, value in expected.items() if actual[name] != value]
     if mismatched:
-        raise IntegrationUnavailable(
+        raise IntegrationContractError(
             "micro-representation event scope mismatch: " + ", ".join(mismatched)
         )
 
@@ -179,17 +179,17 @@ def _resolve_learner(
 ) -> tuple[int | None, bool]:
     if job.source_type == MicroSource.LEARNER_VOICE.value:
         if job.learner_id is None or event.learner_id != job.learner_id:
-            raise IntegrationUnavailable("learner voice event learner_id does not match job.")
+            raise IntegrationContractError("learner voice event learner_id does not match job.")
         return job.learner_id, True
 
     if job.learner_id is None:
         if event.speaker_mapping_confirmed or event.learner_id is not None:
-            raise IntegrationUnavailable(
+            raise IntegrationContractError(
                 "unbound mentor event cannot declare a confirmed learner."
             )
         return None, False
     if not event.speaker_mapping_confirmed or event.learner_id != job.learner_id:
-        raise IntegrationUnavailable("confirmed mentor event learner_id does not match job.")
+        raise IntegrationContractError("confirmed mentor event learner_id does not match job.")
     return job.learner_id, True
 
 
