@@ -660,10 +660,7 @@
         try {
             const response = await api("/v1/micro/mentor-batches", {method: "POST", body: data});
             const payload = await response.json();
-            const duplicateNote = payload.already_submitted
-                ? `，${payload.already_submitted} 段录音已由其他讲师提交`
-                : "";
-            $("#mentor-job-status").textContent = `已创建 ${payload.accepted} 个异步检测任务${duplicateNote}。`;
+            $("#mentor-job-status").textContent = `已创建 ${payload.accepted} 个异步检测任务。`;
         } catch (error) {
             $("#mentor-job-status").textContent = error.message;
         }

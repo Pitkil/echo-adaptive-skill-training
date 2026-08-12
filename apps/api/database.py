@@ -310,7 +310,6 @@ class MicroDetectionJob(Base):
 
     id = Column(String(64), primary_key=True)
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
-    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     learner_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=True, index=True)
     module_id = Column(Integer, ForeignKey("training_modules.id"), nullable=False, index=True)
@@ -321,47 +320,8 @@ class MicroDetectionJob(Base):
     status = Column(String(30), nullable=False, default="queued")
     external_job_id = Column(String(100), nullable=True)
     error_message = Column(Text, nullable=True)
-    events_sync_status = Column(String(20), nullable=False, default="pending")
-    events_sync_error = Column(Text, nullable=True)
-    events_synced_at = Column(DateTime, nullable=True)
-    audio_sha256 = Column(String(64), nullable=True, index=True)
-    dedupe_key = Column(String(64), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.now)
     updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
-    __table_args__ = (
-        UniqueConstraint("dedupe_key", name="uq_micro_detection_job_dedupe_key"),
-    )
-
-
-class MicroMentorBatch(Base):
-    __tablename__ = "micro_mentor_batches"
-
-    id = Column(String(64), primary_key=True)
-    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
-    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    module_id = Column(Integer, ForeignKey("training_modules.id"), nullable=False, index=True)
-    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=True, index=True)
-    knowledge_point_id = Column(Integer, ForeignKey("knowledge_points.id"), nullable=True, index=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.now)
-
-
-class MicroMentorBatchJob(Base):
-    __tablename__ = "micro_mentor_batch_jobs"
-
-    batch_id = Column(
-        String(64),
-        ForeignKey("micro_mentor_batches.id"),
-        primary_key=True,
-    )
-    job_id = Column(
-        String(64),
-        ForeignKey("micro_detection_jobs.id"),
-        primary_key=True,
-    )
-    sequence = Column(Integer, nullable=False)
-    __table_args__ = (
-        UniqueConstraint("batch_id", "sequence", name="uq_micro_batch_job_sequence"),
-    )
 
 
 class MicroRepresentationEvent(Base):
@@ -382,7 +342,6 @@ class MicroRepresentationEvent(Base):
     transcript = Column(Text, nullable=True)
     evidence_uri = Column(String(500), nullable=True)
     speaker_ref = Column(String(100), nullable=True)
-    speaker_mapping_confirmed = Column(Boolean, nullable=False, default=False)
     evidence_status = Column(String(20), nullable=False, default=EvidenceStatus.PENDING.value)
     created_at = Column(DateTime, nullable=False, default=datetime.now)
 
@@ -464,8 +423,6 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_quiz_metadata_columns()
     _ensure_quiz_history_columns()
-    _ensure_micro_job_columns()
-    _ensure_micro_event_columns()
 
 
 def _ensure_quiz_metadata_columns() -> None:
@@ -514,70 +471,3 @@ def _ensure_quiz_history_columns() -> None:
                         f"ADD COLUMN {column_name} {definition}"
                     )
                 )
-
-
-def _ensure_micro_job_columns() -> None:
-    """Add synchronization and ownership fields to existing micro jobs."""
-
-    inspector = inspect(engine)
-    if "micro_detection_jobs" not in inspector.get_table_names():
-        return
-    existing = {column["name"] for column in inspector.get_columns("micro_detection_jobs")}
-    additions = {
-        "created_by_user_id": "INTEGER",
-        "events_sync_status": "VARCHAR(20) DEFAULT 'pending' NOT NULL",
-        "events_sync_error": "TEXT",
-        "events_synced_at": "DATETIME",
-        "audio_sha256": "VARCHAR(64)",
-        "dedupe_key": "VARCHAR(64)",
-    }
-    with engine.begin() as connection:
-        for column_name, definition in additions.items():
-            if column_name not in existing:
-                connection.execute(
-                    text(
-                        "ALTER TABLE micro_detection_jobs "
-                        f"ADD COLUMN {column_name} {definition}"
-                    )
-                )
-    inspector = inspect(engine)
-    unique_names = {
-        constraint["name"]
-        for constraint in inspector.get_unique_constraints("micro_detection_jobs")
-    }
-    index_names = {
-        index["name"] for index in inspector.get_indexes("micro_detection_jobs")
-    }
-    if "uq_micro_detection_job_dedupe_key" not in unique_names | index_names:
-        with engine.begin() as connection:
-            connection.execute(
-                text(
-                    "CREATE UNIQUE INDEX uq_micro_detection_job_dedupe_key "
-                    "ON micro_detection_jobs (dedupe_key)"
-                )
-            )
-
-
-def _ensure_micro_event_columns() -> None:
-    """Add explicit speaker confirmation to existing micro events."""
-
-    inspector = inspect(engine)
-    if "micro_representation_events" not in inspector.get_table_names():
-        return
-    existing = {
-        column["name"] for column in inspector.get_columns("micro_representation_events")
-    }
-    if "speaker_mapping_confirmed" not in existing:
-        with engine.begin() as connection:
-            connection.execute(
-                text(
-                    "ALTER TABLE micro_representation_events "
-                    "ADD COLUMN speaker_mapping_confirmed BOOLEAN DEFAULT 0 NOT NULL"
-                )
-            )
-            connection.execute(
-                text(
-                    "UPDATE micro_representation_events "
-                    "SET speaker_mapping_confirmed = 1 WHERE learner_id IS NOT NULL"
-                )
-            )

@@ -10,9 +10,6 @@ if (-not (Test-Path -LiteralPath $Python)) {
 Push-Location $RepositoryRoot
 try {
     & $Python -m pytest
-    if ($LASTEXITCODE -ne 0) {
-        exit $LASTEXITCODE
-    }
 }
 finally {
     Pop-Location

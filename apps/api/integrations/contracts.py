@@ -206,21 +206,9 @@ class MicroDetectionRequest(BaseModel):
         return self
 
 
-class MicroDetectionJobResult(BaseModel):
-    job_id: str = Field(min_length=1, max_length=100)
-    status: Literal["queued", "processing", "completed", "failed"]
-    error_message: str | None = None
-
-    @model_validator(mode="after")
-    def validate_failure_reason(self) -> MicroDetectionJobResult:
-        if self.status == "failed" and not (self.error_message or "").strip():
-            raise ValueError("failed detection job requires error_message.")
-        return self
-
-
 class MicroRepresentationEvent(BaseModel):
     event_id: str = Field(min_length=1, max_length=64)
-    job_id: str = Field(min_length=1, max_length=100)
+    job_id: str = Field(min_length=1, max_length=64)
     organization_id: int
     learner_id: int | None = None
     session_id: int | None = None

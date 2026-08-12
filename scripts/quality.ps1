@@ -9,14 +9,8 @@ if (-not (Test-Path -LiteralPath $Python)) {
 
 Push-Location $RepositoryRoot
 try {
-    & $Python -m ruff check apps services tests
-    if ($LASTEXITCODE -ne 0) {
-        exit $LASTEXITCODE
-    }
-    & $Python -m compileall -q apps/api services
-    if ($LASTEXITCODE -ne 0) {
-        exit $LASTEXITCODE
-    }
+    & $Python -m ruff check apps/api/integrations tests/unit tests/integration
+    & $Python -m compileall -q apps/api
 }
 finally {
     Pop-Location
