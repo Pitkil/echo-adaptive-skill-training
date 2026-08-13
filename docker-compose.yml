@@ -22,5 +22,14 @@ services:
       - echo-data:/workspace/data
     restart: unless-stopped
 
+  micro-detector:
+    profiles: ["micro-mock"]
+    build:
+      context: services/micro_detector
+      dockerfile: Dockerfile
+    ports:
+      - "${MICRO_DETECTOR_PORT:-8030}:8030"
+    restart: unless-stopped
+
 volumes:
   echo-data:

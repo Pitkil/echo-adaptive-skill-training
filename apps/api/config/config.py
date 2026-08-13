@@ -118,6 +118,7 @@ class SecurityConfig:
     PWD_DEPRECATED = "auto"
     RESET_CODE_LENGTH = int(os.getenv("RESET_CODE_LENGTH", "6"))
     RESET_CODE_EXPIRE_MINUTES = int(os.getenv("RESET_CODE_EXPIRE", "10"))
+    MICRO_CALLBACK_SECRET = os.getenv("MICRO_CALLBACK_SECRET", "")
 
 
 class LogConfig:
