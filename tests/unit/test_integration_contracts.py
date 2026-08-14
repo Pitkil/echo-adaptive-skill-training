@@ -144,4 +144,18 @@ def test_event_accepts_same_job_id_length_as_job_result() -> None:
         end_ms=2,
         confidence=0.8,
     )
+
     assert event.job_id == detector_job_id
+    assert MicroRepresentationEvent(
+        event_id="e" * 100,
+        job_id="detector-job",
+        organization_id=1,
+        learner_id=7,
+        module_id=2,
+        source_type="learner_voice",
+        event_type="hesitation",
+        start_ms=1,
+        end_ms=2,
+        confidence=0.8,
+        speaker_mapping_confirmed=True,
+    ).event_id == "e" * 100

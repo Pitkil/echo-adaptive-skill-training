@@ -75,6 +75,14 @@ def test_evaluation_rejects_mock_results() -> None:
             )
         )
 
+    with pytest.raises(ValueError, match="mock detector"):
+        evaluate(
+            payload(
+                [observation("o2", event_type="hesitation", expected=True, predicted=True)],
+                detector_mode="Mock",
+            )
+        )
+
 
 @pytest.mark.parametrize(
     ("field", "value", "message"),

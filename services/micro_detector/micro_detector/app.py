@@ -79,7 +79,7 @@ async def create_job(request: Request) -> DetectionJob:
             audio = form.get("audio")
             if not isinstance(audio, UploadFile):
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    status_code=422,
                     detail="audio file is required",
                 )
             metadata = DetectionMetadata.model_validate(
@@ -97,7 +97,7 @@ async def create_job(request: Request) -> DetectionJob:
                 audio_hash.update(chunk)
             if size == 0:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    status_code=422,
                     detail="audio is empty",
                 )
             return _create_completed_job(metadata, audio_hash.digest())
@@ -106,7 +106,7 @@ async def create_job(request: Request) -> DetectionJob:
         return _create_completed_job(payload, payload.audio_uri.encode())
     except ValidationError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=422,
             detail=exc.errors(include_url=False, include_context=False),
         ) from exc
 

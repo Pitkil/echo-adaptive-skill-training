@@ -8,6 +8,7 @@ from typing import Any, Protocol
 
 class MicroJobSummarySource(Protocol):
     audio_duration_ms: int | None
+    status: str
 
 
 class MicroEventSummarySource(Protocol):
@@ -61,12 +62,19 @@ def _build_recording_half_trend(
     jobs_by_id: Mapping[str, MicroJobSummarySource],
     events: Sequence[MicroEventSummarySource],
 ) -> dict[str, Any]:
+    event_job_ids = {event.job_id for event in events}
     missing_duration_job_ids = {
+        job_id
+        for job_id, job in jobs_by_id.items()
+        if job.audio_duration_ms is None
+        and (job_id in event_job_ids or job.status == "completed")
+    }
+    missing_duration_job_ids.update({
         event.job_id
         for event in events
         if (job := jobs_by_id.get(event.job_id)) is None
         or job.audio_duration_ms is None
-    }
+    })
     if missing_duration_job_ids:
         return {
             "is_available": False,

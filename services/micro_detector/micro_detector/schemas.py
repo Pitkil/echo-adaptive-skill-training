@@ -43,9 +43,15 @@ class DetectionJob(BaseModel):
     error_message: str | None = None
     audio_duration_ms: int | None = Field(default=None, gt=0)
 
+    @model_validator(mode="after")
+    def validate_failure_reason(self) -> DetectionJob:
+        if self.status == "failed" and not (self.error_message or "").strip():
+            raise ValueError("failed detection job requires error_message.")
+        return self
+
 
 class DetectionEvent(BaseModel):
-    event_id: str
+    event_id: str = Field(min_length=1, max_length=100)
     job_id: str = Field(min_length=1, max_length=100)
     organization_id: int
     learner_id: int | None = None
@@ -68,6 +74,17 @@ class DetectionEvent(BaseModel):
     evidence_uri: str | None = None
     speaker_ref: str | None = None
     speaker_mapping_confirmed: bool = False
+
+    @model_validator(mode="after")
+    def validate_event(self) -> DetectionEvent:
+        if self.end_ms <= self.start_ms:
+            raise ValueError("end_ms must be greater than start_ms.")
+        if self.source_type == "mentor_recording":
+            if self.speaker_mapping_confirmed != (self.learner_id is not None):
+                raise ValueError(
+                    "mentor event learner_id requires confirmed speaker mapping."
+                )
+        return self
 
 
 class HealthResponse(BaseModel):

@@ -7,12 +7,14 @@ from types import SimpleNamespace
 import database as database_module
 import pytest
 from app import (
+    MicroEventBatch,
     build_micro_dedupe_key,
     create_mentor_batch,
     create_micro_job,
     create_micro_job_record,
     get_mentor_batch,
     get_micro_job,
+    ingest_micro_events,
     queue_awaiting_micro_job_retry,
     require_micro_callback_identity,
     require_micro_job_access,
@@ -36,6 +38,7 @@ from database import (
     _ensure_micro_job_columns,
 )
 from fastapi import BackgroundTasks, HTTPException, UploadFile
+from integrations.contracts import MicroRepresentationEvent as MicroEventContract
 from integrations.contracts import MicroSource
 from integrations.http_client import IntegrationContractError, IntegrationTransientError
 from sqlalchemy import create_engine, inspect, text
@@ -829,6 +832,163 @@ def test_mentor_batch_trend_degrades_without_recording_duration(
     assert trend["second_half_count"] is None
     assert trend["change"] is None
     assert "录音时长" in trend["degradation_reason"]
+
+
+def test_empty_completed_batch_degrades_without_recording_duration(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr("app.UPLOAD_DIR", tmp_path)
+    db, _, mentor, _, module, point, session = make_database_context()
+    mentor.role = UserRole.MENTOR.value
+    db.commit()
+    created = create_mentor_batch(
+        background_tasks=BackgroundTasks(),
+        module_id=module.id,
+        consent_granted=True,
+        audio_files=[make_audio(b"empty-result-no-duration")],
+        learner_id=None,
+        session_id=session.id,
+        knowledge_point_id=point.id,
+        speaker_mapping_confirmed=False,
+        db=db,
+        user=mentor,
+    )
+    job = db.get(MicroDetectionJob, created.job_ids[0])
+    job.status = "completed"
+    job.events_sync_status = "synced"
+    db.commit()
+
+    summary = get_mentor_batch(created.batch_id, db, mentor)["summary"]
+
+    assert summary["total_signal_count"] == 0
+    assert summary["trend"]["is_available"] is False
+    assert "录音时长" in summary["trend"]["degradation_reason"]
+
+
+def test_callback_rejects_job_without_external_detector_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(Config.security, "MICRO_CALLBACK_SECRET", "service-secret")
+    db, organization, learner, _, module, point, session = make_database_context()
+    job = MicroDetectionJob(
+        id="echo-job-without-detector-id",
+        organization_id=organization.id,
+        created_by_user_id=learner.id,
+        learner_id=learner.id,
+        session_id=session.id,
+        module_id=module.id,
+        knowledge_point_id=point.id,
+        source_type=MicroSource.LEARNER_VOICE.value,
+        audio_uri="file:///controlled/audio.wav",
+        consent_granted=True,
+        status="queued",
+    )
+    db.add(job)
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        ingest_micro_events(
+            job.id,
+            MicroEventBatch(items=[]),
+            db=db,
+            x_micro_service_key="service-secret",
+        )
+
+    assert exc_info.value.status_code == 409
+    db.refresh(job)
+    assert job.status == "queued"
+    assert job.events_sync_status == "pending"
+
+
+def test_callback_does_not_resurrect_failed_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(Config.security, "MICRO_CALLBACK_SECRET", "service-secret")
+    db, organization, learner, _, module, point, session = make_database_context()
+    job = MicroDetectionJob(
+        id="failed-echo-job",
+        organization_id=organization.id,
+        created_by_user_id=learner.id,
+        learner_id=learner.id,
+        session_id=session.id,
+        module_id=module.id,
+        knowledge_point_id=point.id,
+        source_type=MicroSource.LEARNER_VOICE.value,
+        audio_uri="file:///controlled/audio.wav",
+        consent_granted=True,
+        status="failed",
+        external_job_id="failed-detector-job",
+        error_message="event scope mismatch",
+    )
+    db.add(job)
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        ingest_micro_events(
+            job.id,
+            MicroEventBatch(items=[]),
+            db=db,
+            x_micro_service_key="service-secret",
+        )
+
+    assert exc_info.value.status_code == 409
+    db.refresh(job)
+    assert job.status == "failed"
+
+
+def test_callback_scope_failure_is_atomic_and_marks_job_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(Config.security, "MICRO_CALLBACK_SECRET", "service-secret")
+    db, organization, learner, _, module, point, session = make_database_context()
+    job = MicroDetectionJob(
+        id="echo-job-scope-failure",
+        organization_id=organization.id,
+        created_by_user_id=learner.id,
+        learner_id=learner.id,
+        session_id=session.id,
+        module_id=module.id,
+        knowledge_point_id=point.id,
+        source_type=MicroSource.LEARNER_VOICE.value,
+        audio_uri="file:///controlled/audio.wav",
+        consent_granted=True,
+        status="processing",
+        external_job_id="detector-job-scope-failure",
+    )
+    db.add(job)
+    db.commit()
+    event = MicroEventContract(
+        event_id="wrong-scope-event",
+        job_id=job.external_job_id,
+        organization_id=organization.id + 1,
+        learner_id=learner.id,
+        session_id=session.id,
+        module_id=module.id,
+        knowledge_point_id=point.id,
+        source_type=MicroSource.LEARNER_VOICE,
+        event_type="hesitation",
+        start_ms=100,
+        end_ms=300,
+        confidence=0.9,
+        speaker_mapping_confirmed=True,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        ingest_micro_events(
+            job.id,
+            MicroEventBatch(items=[event], audio_duration_ms=1000),
+            db=db,
+            x_micro_service_key="service-secret",
+        )
+
+    assert exc_info.value.status_code == 422
+    db.refresh(job)
+    assert job.status == "failed"
+    assert job.events_sync_status == "failed"
+    assert "organization_id" in job.events_sync_error
+    assert job.audio_duration_ms is None
+    assert db.get(MicroRepresentationEvent, event.event_id) is None
 
 
 def test_cross_mentor_duplicate_batch_does_not_expose_original_job(

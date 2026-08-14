@@ -14,6 +14,7 @@ SERVICE_ROOT = Path(__file__).resolve().parents[2] / "services" / "micro_detecto
 sys.path.insert(0, str(SERVICE_ROOT))
 
 from micro_detector.app import _jobs, app  # noqa: E402
+from micro_detector.schemas import DetectionEvent, DetectionJob  # noqa: E402
 
 
 def request_fields(**overrides: object) -> dict[str, object]:
@@ -47,6 +48,25 @@ def test_health_identifies_mock_mode() -> None:
         "model_loaded": False,
         "index_loaded": False,
     }
+
+
+def test_mock_response_models_enforce_the_shared_contract() -> None:
+    with pytest.raises(ValueError, match="error_message"):
+        DetectionJob(job_id="failed-job", status="failed")
+    with pytest.raises(ValueError, match="end_ms"):
+        DetectionEvent(
+            event_id="e" * 100,
+            job_id="detector-job",
+            organization_id=1,
+            learner_id=7,
+            module_id=2,
+            source_type="learner_voice",
+            event_type="hesitation",
+            start_ms=20,
+            end_ms=10,
+            confidence=0.8,
+            speaker_mapping_confirmed=True,
+        )
 
 
 def test_uploaded_audio_completes_contract_and_is_idempotent() -> None:

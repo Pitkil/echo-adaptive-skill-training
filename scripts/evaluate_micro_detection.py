@@ -24,7 +24,7 @@ def evaluate(payload: dict[str, Any]) -> dict[str, Any]:
     dataset_version = _required_text(payload, "dataset_version")
     detector_version = _required_text(payload, "detector_version")
     detector_mode = _required_text(payload, "detector_mode")
-    if detector_mode == "mock":
+    if detector_mode.casefold() == "mock":
         raise ValueError("mock detector output cannot be used for detection metrics")
 
     observations = payload.get("observations")

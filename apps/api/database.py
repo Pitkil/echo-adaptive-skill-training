@@ -368,7 +368,7 @@ class MicroMentorBatchJob(Base):
 class MicroRepresentationEvent(Base):
     __tablename__ = "micro_representation_events"
 
-    id = Column(String(64), primary_key=True)
+    id = Column(String(100), primary_key=True)
     job_id = Column(String(64), ForeignKey("micro_detection_jobs.id"), nullable=False, index=True)
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     learner_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
@@ -561,7 +561,7 @@ def _ensure_micro_job_columns() -> None:
 
 
 def _ensure_micro_event_columns() -> None:
-    """Add explicit speaker confirmation to existing micro events."""
+    """Keep micro event identity and speaker fields compatible with the v1 contract."""
 
     inspector = inspect(engine)
     if "micro_representation_events" not in inspector.get_table_names():
@@ -583,3 +583,17 @@ def _ensure_micro_event_columns() -> None:
                     "SET speaker_mapping_confirmed = 1 WHERE learner_id IS NOT NULL"
                 )
             )
+    if engine.dialect.name == "mysql":
+        id_column = next(
+            column
+            for column in inspect(engine).get_columns("micro_representation_events")
+            if column["name"] == "id"
+        )
+        if getattr(id_column["type"], "length", None) != 100:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE micro_representation_events "
+                        "MODIFY COLUMN id VARCHAR(100) NOT NULL"
+                    )
+                )

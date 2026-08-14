@@ -2203,17 +2203,33 @@ def ingest_micro_events(
     job = db.query(MicroDetectionJob).filter_by(id=job_id).first()
     if job is None:
         raise HTTPException(status_code=404, detail="检测任务不存在")
+    if not job.external_job_id:
+        raise HTTPException(status_code=409, detail="检测任务尚未绑定外部任务编号")
+    if job.status == "failed":
+        raise HTTPException(status_code=409, detail="失败的检测任务不能接收事件回调")
     try:
         apply_micro_audio_duration(job, batch.audio_duration_ms)
         accepted = persist_micro_events(
             db,
             job,
             batch.items,
-            expected_event_job_id=job.external_job_id or "",
+            expected_event_job_id=job.external_job_id,
         )
-    except IntegrationUnavailable as exc:
+    except IntegrationContractError as exc:
+        db.rollback()
+        failed_job = db.query(MicroDetectionJob).filter_by(id=job_id).first()
+        if failed_job is not None:
+            failed_job.status = "failed"
+            failed_job.error_message = str(exc)
+            failed_job.events_sync_status = "failed"
+            failed_job.events_sync_error = str(exc)
+            db.commit()
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except IntegrationUnavailable as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     job.status = "completed"
+    job.error_message = None
     job.events_sync_status = "synced"
     job.events_sync_error = None
     job.events_synced_at = datetime.now(UTC)

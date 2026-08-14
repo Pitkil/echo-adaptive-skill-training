@@ -225,7 +225,7 @@ class MicroDetectionJobResult(BaseModel):
 
 
 class MicroRepresentationEvent(BaseModel):
-    event_id: str = Field(min_length=1, max_length=64)
+    event_id: str = Field(min_length=1, max_length=100)
     job_id: str = Field(min_length=1, max_length=100)
     organization_id: int
     learner_id: int | None = None
