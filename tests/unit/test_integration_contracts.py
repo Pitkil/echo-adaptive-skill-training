@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from integrations.contracts import (
     MicroDetectionJobResult,
+    MicroDetectionRequest,
     MicroRepresentationEvent,
     RetrievalHit,
     normalize_retrieval_payload,
@@ -69,9 +70,63 @@ def test_micro_representation_validates_time_and_confidence() -> None:
         )
 
 
+def test_mentor_identity_requires_explicit_speaker_confirmation() -> None:
+    common = {
+        "trace_id": "trace-mentor",
+        "organization_id": 1,
+        "program_id": 1,
+        "module_id": 2,
+        "source_type": "mentor_recording",
+        "audio_uri": "https://media.example/lesson.wav",
+        "consent_granted": True,
+    }
+    with pytest.raises(ValidationError, match="confirmed speaker mapping"):
+        MicroDetectionRequest(
+            **common,
+            learner_id=7,
+            speaker_mapping_confirmed=False,
+        )
+    with pytest.raises(ValidationError, match="confirmed speaker mapping"):
+        MicroDetectionRequest(
+            **common,
+            learner_id=None,
+            speaker_mapping_confirmed=True,
+        )
+    with pytest.raises(ValidationError, match="confirmed speaker mapping"):
+        MicroRepresentationEvent(
+            event_id="mentor-event",
+            job_id="mentor-job",
+            organization_id=1,
+            learner_id=7,
+            module_id=2,
+            source_type="mentor_recording",
+            event_type="hesitation",
+            start_ms=100,
+            end_ms=200,
+            confidence=0.8,
+            speaker_mapping_confirmed=False,
+        )
+
+
 def test_failed_detection_job_requires_reason() -> None:
     with pytest.raises(ValidationError, match="requires error_message"):
         MicroDetectionJobResult(job_id="detector-001", status="failed")
+
+
+def test_detection_job_duration_is_positive_when_present() -> None:
+    result = MicroDetectionJobResult(
+        job_id="detector-001",
+        status="completed",
+        audio_duration_ms=4200,
+    )
+
+    assert result.audio_duration_ms == 4200
+    with pytest.raises(ValidationError):
+        MicroDetectionJobResult(
+            job_id="detector-001",
+            status="completed",
+            audio_duration_ms=0,
+        )
 
 
 def test_event_accepts_same_job_id_length_as_job_result() -> None:

@@ -324,6 +324,7 @@ class MicroDetectionJob(Base):
     events_sync_status = Column(String(20), nullable=False, default="pending")
     events_sync_error = Column(Text, nullable=True)
     events_synced_at = Column(DateTime, nullable=True)
+    audio_duration_ms = Column(Integer, nullable=True)
     audio_sha256 = Column(String(64), nullable=True, index=True)
     dedupe_key = Column(String(64), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.now)
@@ -528,6 +529,7 @@ def _ensure_micro_job_columns() -> None:
         "events_sync_status": "VARCHAR(20) DEFAULT 'pending' NOT NULL",
         "events_sync_error": "TEXT",
         "events_synced_at": "DATETIME",
+        "audio_duration_ms": "INTEGER",
         "audio_sha256": "VARCHAR(64)",
         "dedupe_key": "VARCHAR(64)",
     }

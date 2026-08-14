@@ -203,6 +203,11 @@ class MicroDetectionRequest(BaseModel):
             raise ValueError("consent_granted must be true before audio analysis.")
         if self.source_type is MicroSource.LEARNER_VOICE and self.learner_id is None:
             raise ValueError("learner voice requires learner_id.")
+        if self.source_type is MicroSource.MENTOR_RECORDING:
+            if self.speaker_mapping_confirmed != (self.learner_id is not None):
+                raise ValueError(
+                    "mentor recording learner_id requires confirmed speaker mapping."
+                )
         return self
 
 
@@ -210,6 +215,7 @@ class MicroDetectionJobResult(BaseModel):
     job_id: str = Field(min_length=1, max_length=100)
     status: Literal["queued", "processing", "completed", "failed"]
     error_message: str | None = None
+    audio_duration_ms: int | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def validate_failure_reason(self) -> MicroDetectionJobResult:
@@ -247,8 +253,11 @@ class MicroRepresentationEvent(BaseModel):
     def validate_event(self) -> MicroRepresentationEvent:
         if self.end_ms <= self.start_ms:
             raise ValueError("end_ms must be greater than start_ms.")
-        if self.source_type is MicroSource.MENTOR_RECORDING and not self.speaker_mapping_confirmed:
-            self.learner_id = None
+        if self.source_type is MicroSource.MENTOR_RECORDING:
+            if self.speaker_mapping_confirmed != (self.learner_id is not None):
+                raise ValueError(
+                    "mentor event learner_id requires confirmed speaker mapping."
+                )
         return self
 
 

@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from io import BytesIO
 from types import SimpleNamespace
 
+import database as database_module
 import pytest
 from app import (
     build_micro_dedupe_key,
@@ -32,11 +33,12 @@ from database import (
     TrainingProgram,
     User,
     UserRole,
+    _ensure_micro_job_columns,
 )
 from fastapi import BackgroundTasks, HTTPException, UploadFile
 from integrations.contracts import MicroSource
 from integrations.http_client import IntegrationContractError, IntegrationTransientError
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from starlette.datastructures import Headers
@@ -167,6 +169,27 @@ def test_audio_extension_and_content_type_are_validated(
     with pytest.raises(HTTPException) as exc_info:
         save_audio_file("invalid", make_audio(b"audio", filename="turn.exe"))
     assert exc_info.value.status_code == 415
+
+
+def test_micro_job_migration_is_repeatable_for_legacy_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    legacy_engine = create_engine("sqlite:///:memory:")
+    with legacy_engine.begin() as connection:
+        connection.execute(
+            text("CREATE TABLE micro_detection_jobs (id VARCHAR(64) PRIMARY KEY)")
+        )
+    monkeypatch.setattr(database_module, "engine", legacy_engine)
+
+    _ensure_micro_job_columns()
+    _ensure_micro_job_columns()
+
+    inspector = inspect(legacy_engine)
+    columns = {column["name"] for column in inspector.get_columns("micro_detection_jobs")}
+    indexes = {index["name"] for index in inspector.get_indexes("micro_detection_jobs")}
+    assert "audio_duration_ms" in columns
+    assert "events_sync_status" in columns
+    assert "uq_micro_detection_job_dedupe_key" in indexes
 
 
 def test_learner_cannot_attach_another_learners_session(
@@ -414,6 +437,58 @@ def test_duplicate_upload_requeues_an_awaiting_job(
     assert db.query(MicroDetectionJob).count() == 1
 
 
+def test_single_voice_endpoint_rejects_mentor_recording() -> None:
+    db, _, mentor, _, module, point, _ = make_database_context()
+    mentor.role = UserRole.MENTOR.value
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        create_micro_job(
+            background_tasks=BackgroundTasks(),
+            module_id=module.id,
+            source_type=MicroSource.MENTOR_RECORDING,
+            consent_granted=True,
+            audio=make_audio(b"mentor-audio"),
+            session_id=None,
+            knowledge_point_id=point.id,
+            learner_id=None,
+            db=db,
+            user=mentor,
+        )
+
+    assert exc_info.value.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("learner_id", "speaker_mapping_confirmed"),
+    [(7, False), (None, True)],
+)
+def test_mentor_batch_rejects_inconsistent_speaker_mapping(
+    learner_id: int | None,
+    speaker_mapping_confirmed: bool,
+) -> None:
+    db, _, mentor, learner, module, point, _ = make_database_context()
+    mentor.role = UserRole.MENTOR.value
+    db.commit()
+    resolved_learner_id = learner.id if learner_id is not None else None
+
+    with pytest.raises(HTTPException) as exc_info:
+        create_mentor_batch(
+            background_tasks=BackgroundTasks(),
+            module_id=module.id,
+            consent_granted=True,
+            audio_files=[make_audio(b"mentor-audio")],
+            learner_id=resolved_learner_id,
+            session_id=None,
+            knowledge_point_id=point.id,
+            speaker_mapping_confirmed=speaker_mapping_confirmed,
+            db=db,
+            user=mentor,
+        )
+
+    assert exc_info.value.status_code == 422
+
+
 def test_temporary_submit_failure_returns_job_to_awaiting_detector(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -637,6 +712,10 @@ def test_mentor_batch_can_be_queried_with_session_summary(
     )
     first_job_id, second_job_id = created.job_ids
     assert created.accepted == 2
+    first_job = db.get(MicroDetectionJob, first_job_id)
+    second_job = db.get(MicroDetectionJob, second_job_id)
+    first_job.audio_duration_ms = 2000
+    second_job.audio_duration_ms = 1200
     db.add_all(
         [
             MicroRepresentationEvent(
@@ -667,6 +746,20 @@ def test_mentor_batch_can_be_queried_with_session_summary(
                 confidence=0.6,
                 evidence_status=EvidenceStatus.PENDING.value,
             ),
+            MicroRepresentationEvent(
+                id="batch-event-ignored",
+                job_id=first_job_id,
+                organization_id=organization.id,
+                session_id=session.id,
+                module_id=module.id,
+                knowledge_point_id=point.id,
+                source_type=MicroSource.MENTOR_RECORDING.value,
+                event_type="guessing",
+                start_ms=1500,
+                end_ms=1600,
+                confidence=0.9,
+                evidence_status=EvidenceStatus.REJECTED.value,
+            ),
         ]
     )
     db.commit()
@@ -681,11 +774,61 @@ def test_mentor_batch_can_be_queried_with_session_summary(
     }
     assert result["summary"]["total_pause_ms"] == 700
     assert result["summary"]["pending_confirmation_count"] == 1
+    assert result["summary"]["ignored_count"] == 1
     assert result["summary"]["trend"] == {
+        "is_available": True,
         "first_half_count": 1,
         "second_half_count": 1,
         "change": 0,
+        "degradation_reason": None,
     }
+
+
+def test_mentor_batch_trend_degrades_without_recording_duration(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr("app.UPLOAD_DIR", tmp_path)
+    db, _, mentor, _, module, point, session = make_database_context()
+    mentor.role = UserRole.MENTOR.value
+    db.commit()
+    created = create_mentor_batch(
+        background_tasks=BackgroundTasks(),
+        module_id=module.id,
+        consent_granted=True,
+        audio_files=[make_audio(b"no-duration")],
+        learner_id=None,
+        session_id=session.id,
+        knowledge_point_id=point.id,
+        speaker_mapping_confirmed=False,
+        db=db,
+        user=mentor,
+    )
+    db.add(
+        MicroRepresentationEvent(
+            id="event-without-duration",
+            job_id=created.job_ids[0],
+            organization_id=mentor.organization_id,
+            session_id=session.id,
+            module_id=module.id,
+            knowledge_point_id=point.id,
+            source_type=MicroSource.MENTOR_RECORDING.value,
+            event_type="hesitation",
+            start_ms=100,
+            end_ms=300,
+            confidence=0.8,
+            evidence_status=EvidenceStatus.PENDING.value,
+        )
+    )
+    db.commit()
+
+    trend = get_mentor_batch(created.batch_id, db, mentor)["summary"]["trend"]
+
+    assert trend["is_available"] is False
+    assert trend["first_half_count"] is None
+    assert trend["second_half_count"] is None
+    assert trend["change"] is None
+    assert "录音时长" in trend["degradation_reason"]
 
 
 def test_cross_mentor_duplicate_batch_does_not_expose_original_job(

@@ -64,6 +64,7 @@ def test_uploaded_audio_completes_contract_and_is_idempotent() -> None:
 
     assert first.status_code == 200
     assert second.json() == first.json()
+    assert first.json()["audio_duration_ms"] == 4000
     job_id = first.json()["job_id"]
     assert client.get(f"/v1/detection/jobs/{job_id}").json()["status"] == "completed"
     events = client.get(f"/v1/detection/jobs/{job_id}/events").json()["items"]
@@ -79,6 +80,7 @@ def test_unconfirmed_mentor_speaker_is_not_bound_to_learner() -> None:
         json={
             **request_fields(
                 source_type="mentor_recording",
+                learner_id=None,
                 speaker_mapping_confirmed=False,
             ),
             "audio_uri": "https://media.example/lesson.wav",
@@ -138,6 +140,7 @@ def test_echo_adapter_and_mock_service_share_the_multipart_contract(
     detector_job_id = created["job_id"]
 
     assert created["status"] == "completed"
+    assert created["audio_duration_ms"] == 4000
     assert client.get_job(detector_job_id)["job_id"] == detector_job_id
     events = client.get_events(detector_job_id)
     assert len(events) == 1

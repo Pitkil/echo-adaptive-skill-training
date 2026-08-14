@@ -25,6 +25,7 @@ def apply_micro_job_creation_result(
     """Persist a detector create response and immediately import completed results."""
 
     job.external_job_id = result["job_id"]
+    apply_micro_audio_duration(job, result.get("audio_duration_ms"))
     job.status = result["status"]
     job.error_message = result.get("error_message")
     if job.status != "completed":
@@ -119,6 +120,7 @@ def synchronize_micro_job(
         raise IntegrationContractError("micro-representation job has no external_job_id.")
 
     external_state = external_state or client.get_job(job.external_job_id)
+    apply_micro_audio_duration(job, external_state.get("audio_duration_ms"))
     external_status = external_state["status"]
     job.status = external_status
     if external_status != "completed":
@@ -171,6 +173,27 @@ def _validate_event_scope(
         raise IntegrationContractError(
             "micro-representation event scope mismatch: " + ", ".join(mismatched)
         )
+    if job.audio_duration_ms is not None and event.end_ms > job.audio_duration_ms:
+        raise IntegrationContractError(
+            "micro-representation event exceeds recording duration."
+        )
+
+
+def apply_micro_audio_duration(
+    job: MicroDetectionJob,
+    duration_ms: int | None,
+) -> None:
+    """Persist one stable positive recording duration for an ECHO job."""
+
+    if duration_ms is None:
+        return
+    if isinstance(duration_ms, bool) or not isinstance(duration_ms, int) or duration_ms <= 0:
+        raise IntegrationContractError("audio_duration_ms must be a positive integer.")
+    if job.audio_duration_ms is not None and job.audio_duration_ms != duration_ms:
+        raise IntegrationContractError(
+            "audio_duration_ms conflicts with the duration already stored for this job."
+        )
+    job.audio_duration_ms = duration_ms
 
 
 def _resolve_learner(

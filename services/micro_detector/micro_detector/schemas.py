@@ -25,6 +25,11 @@ class DetectionMetadata(BaseModel):
             raise ValueError("consent_granted must be true before audio analysis.")
         if self.source_type == "learner_voice" and self.learner_id is None:
             raise ValueError("learner voice requires learner_id.")
+        if self.source_type == "mentor_recording":
+            if self.speaker_mapping_confirmed != (self.learner_id is not None):
+                raise ValueError(
+                    "mentor recording learner_id requires confirmed speaker mapping."
+                )
         return self
 
 
@@ -36,6 +41,7 @@ class DetectionJob(BaseModel):
     job_id: str = Field(min_length=1, max_length=100)
     status: Literal["queued", "processing", "completed", "failed"]
     error_message: str | None = None
+    audio_duration_ms: int | None = Field(default=None, gt=0)
 
 
 class DetectionEvent(BaseModel):
