@@ -188,6 +188,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--blue); box-shado
 .workbench-heading h2, .list-heading h2 { margin: 0; font-size: 17px; }
 .step-state { padding: 5px 8px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font-size: 11px; }
 .import-form-grid { display: grid; grid-template-columns: minmax(180px, .7fr) minmax(280px, 1.6fr) auto; align-items: end; gap: 14px; }
+.material-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.material-form-grid .span-2 { grid-column: 1 / -1; }
+.material-form-grid .button { justify-self: start; }
 .quiz-scope-grid { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(200px, 1fr) minmax(260px, 1.4fr) auto; align-items: end; gap: 14px; }
 .file-field input { padding: 7px; }
 .import-workbench .job-status { margin-top: 16px; }
@@ -262,6 +265,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--blue); box-shado
     .module-picker select { width: 100%; }
     .view { padding: 20px 14px 32px; }
     .metric-grid, .evidence-grid, .path-grid, .upload-grid, .resource-list, .demo-metrics, .import-summary, .import-form-grid, .quiz-scope-grid, .quiz-editor-grid { grid-template-columns: minmax(0, 1fr); }
+    .material-form-grid .span-2 { grid-column: auto; }
     .chart-band, .evidence-grid > section, .path-grid > section { min-width: 0; padding: 16px; overflow: hidden; }
     .chart-band canvas, .path-grid canvas { width: 100% !important; max-width: 100%; }
     .learning-path li { grid-template-columns: 28px minmax(0, 1fr); }

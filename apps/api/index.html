@@ -209,8 +209,12 @@
                             <div><p class="eyebrow">COURSE MATERIAL</p><h2>上传课程材料</h2></div>
                             <span class="step-state">按模块建立索引</span>
                         </div>
-                        <div class="import-form-grid">
+                        <div class="import-form-grid material-form-grid">
                             <label>学习模块<select id="material-module-select"></select></label>
+                            <label>资料名称<input id="knowledge-source-title" maxlength="255" placeholder="Microsoft Learn 页面或官方仓库资料名"></label>
+                            <label class="span-2">官方链接<input id="knowledge-source-url" type="url" maxlength="500" placeholder="https://learn.microsoft.com/... 或官方 GitHub 仓库"></label>
+                            <label>相关章节<input id="knowledge-source-section" maxlength="255" placeholder="页面标题、章节或仓库路径"></label>
+                            <label>版本或获取日期<input id="knowledge-source-version" maxlength="120" placeholder="例如 2026-08-19 或 commit SHA"></label>
                             <label class="file-field">课程材料<input id="knowledge-file" type="file" accept=".pdf,.docx,.md,.txt"></label>
                             <button id="upload-knowledge" class="button primary" type="button"><i data-lucide="database-zap"></i>上传并建立索引</button>
                         </div>

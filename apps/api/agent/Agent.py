@@ -48,9 +48,23 @@ class StudentHelper:
         lines = []
         for index, item in enumerate(items, start=1):
             metadata = item.get("metadata", {})
-            source = metadata.get("filename") or metadata.get("source") or f"证据{index}"
-            chapter = metadata.get("chapter")
-            label = f"{source} / {chapter}" if chapter else source
+            source = (
+                metadata.get("source_title")
+                or metadata.get("filename")
+                or metadata.get("source")
+                or f"证据{index}"
+            )
+            chapter = metadata.get("source_section") or metadata.get("chapter")
+            version = metadata.get("version")
+            source_url = metadata.get("source_url")
+            label_parts = [str(source)]
+            if chapter:
+                label_parts.append(str(chapter))
+            if version:
+                label_parts.append(str(version))
+            if source_url:
+                label_parts.append(str(source_url))
+            label = " / ".join(label_parts)
             lines.append(f"[{index}] {label}: {item.get('text', '')}")
         return "\n".join(lines)
 
@@ -69,12 +83,16 @@ class StudentHelper:
     ) -> str:
         if evidence:
             first = evidence[0]
-            source = first.get("metadata", {}).get("filename", "领域知识库")
+            metadata = first.get("metadata", {})
+            source = metadata.get("source_title") or metadata.get("filename", "领域知识库")
+            source_url = metadata.get("source_url")
+            reference = f"\n\n[1] {source}：{source_url}" if source_url else ""
             return (
-                f"当前在“{module_name}”模块。根据 {source} 的证据，"
+                f"当前在“{module_name}”模块。根据 {source} 的证据 [1]，"
                 f"{first.get('text', '')}\n\n"
                 f"请结合你的问题“{user_input}”说明其中最关键的判断依据，"
                 "我再根据你的解释决定是补充基础示例还是进入实践任务。"
+                f"{reference}"
             )
         return (
             f"当前在“{module_name}”模块，现有知识库没有返回足够证据。"
