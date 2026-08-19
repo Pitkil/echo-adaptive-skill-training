@@ -3,9 +3,9 @@
 ## 自动检查
 
 ```powershell
-python -m ruff check apps tests
+python -m ruff check apps services tests
 python -m pytest -q
-python -m compileall apps/api
+python -m compileall -q apps/api services
 docker compose config
 ```
 

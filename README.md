@@ -170,8 +170,8 @@ powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
 ```
 
 `setup.ps1` 会自动创建 `.venv`、安装开发和测试依赖，并在缺少时生成 `.env`。
-默认访问 `http://127.0.0.1:8010`。独立运行的基于多路召回与混合向量的可追溯 RAG 检索引擎默认使用
-`http://127.0.0.1:8000`。
+默认访问 `http://127.0.0.1:8010`。独立运行的 PunditRAG 导入服务默认使用
+`http://127.0.0.1:8000`，查询服务默认使用 `http://127.0.0.1:8001`。
 
 公开注册的账号默认是学习者。首次部署时创建系统管理员：
 
@@ -187,13 +187,23 @@ docker compose up --build -d
 docker compose exec echo-api python /workspace/scripts/bootstrap_admin.py --username admin
 ```
 
+需要联调不含真实模型的微表征 Mock 服务时使用：
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.micro-mock.yml --profile micro-mock up --build -d
+```
+
+该覆盖配置让 ECHO 容器通过 `http://micro-detector:8030` 访问 Mock，并等待其健康检查通过。
+Mock 服务只用于接口联调，不能作为真实诊断，也不能用于检测准确率、Precision、Recall 或 F1 评测。
+
 已有账号可追加 `--promote-existing` 提升为系统管理员。系统管理员登录后在“成员管理”
 中把负责维护内容的账号设为“讲师/导师”。只有讲师/导师和系统管理员能看到“内容导入”，
 只有系统管理员能看到“成员管理”。
 
 外部服务未启动时，主系统保留业务记录并显示降级原因：
 
-- 基于多路召回与混合向量的可追溯 RAG 检索引擎：`http://127.0.0.1:8000`
+- PunditRAG 导入服务：`http://127.0.0.1:8000`
+- PunditRAG 查询服务：`http://127.0.0.1:8001`
 - SimpleMem：`http://127.0.0.1:8020`
 - 微表征检测：`http://127.0.0.1:8030`
 
