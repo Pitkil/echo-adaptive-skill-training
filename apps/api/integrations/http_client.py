@@ -66,7 +66,7 @@ class JsonHttpClient:
         *,
         field_name: str = "file",
         filename: str,
-        content: BinaryIO,
+        content: BinaryIO | bytes,
         content_type: str,
         data: dict[str, str],
     ) -> Any:

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 import jwt
@@ -1019,24 +1020,131 @@ def create_session(db: Session, user: User, request: ChatRequest) -> ChatSession
     return session
 
 
-def safe_retrieve(plan, query: str) -> tuple[list[dict], str | None]:
-    if not plan.use_rag:
-        return [], None
+def is_official_microsoft_source_url(source_url: str) -> bool:
+    """Return whether a citation points to an allowed Microsoft source."""
+
+    parsed = urlsplit(source_url.strip())
+    host = (parsed.hostname or "").lower()
+    path = parsed.path.lower().rstrip("/")
+    if parsed.scheme != "https":
+        return False
+    if host == "learn.microsoft.com":
+        return True
+    return host == "github.com" and path.startswith("/microsoft/semantic-kernel")
+
+
+def enrich_official_evidence(
+    db: Session,
+    *,
+    knowledge_base_id: int,
+    module_id: int,
+    evidence: list[dict],
+) -> list[dict]:
+    """Attach registered source metadata and reject untraceable RAG results."""
+
+    external_ids = {
+        str(item.get("metadata", {}).get("external_document_id") or "").strip()
+        for item in evidence
+    }
+    external_ids.discard("")
+    if not external_ids:
+        return []
+    uploads = (
+        db.query(Upload)
+        .filter(
+            Upload.knowledge_base_id == knowledge_base_id,
+            Upload.module_id == module_id,
+            Upload.external_document_id.in_(external_ids),
+        )
+        .all()
+    )
+    by_external_id = {row.external_document_id: row for row in uploads}
+    trusted: list[dict] = []
+    for item in evidence:
+        metadata = dict(item.get("metadata") or {})
+        external_document_id = str(metadata.get("external_document_id") or "").strip()
+        upload = by_external_id.get(external_document_id)
+        if upload is None:
+            continue
+        if not all(
+            (
+                upload.source_title,
+                upload.source_url,
+                upload.source_section,
+                upload.source_version,
+            )
+        ):
+            continue
+        if not is_official_microsoft_source_url(upload.source_url):
+            continue
+        upload.index_status = "completed"
+        upload.index_error = None
+        metadata.update(
+            {
+                "source": upload.source_title,
+                "filename": upload.filename,
+                "chapter": upload.source_section,
+                "source_title": upload.source_title,
+                "source_url": upload.source_url,
+                "source_section": upload.source_section,
+                "version": upload.source_version,
+                "knowledge_base_id": knowledge_base_id,
+                "module_id": module_id,
+            }
+        )
+        trusted.append({**item, "metadata": metadata})
+    return trusted
+
+
+def search_official_evidence(
+    db: Session,
+    *,
+    query: str,
+    knowledge_base_id: int,
+    module_id: int,
+    trace_id: str | None = None,
+    knowledge_point_ids: list[int] | None = None,
+) -> tuple[list[dict], str | None]:
+    """Search the mapped PunditRAG knowledge base and keep publishable evidence."""
+
+    knowledge_base = db.query(KnowledgeBase).filter_by(id=knowledge_base_id).first()
+    if knowledge_base is None or not knowledge_base.external_ref:
+        return [], "PunditRAG知识库尚未建立映射"
     client = PunditRAGClient()
     if not client.configured:
-        return [], "PunditRAG未配置"
+        return [], "PunditRAG查询服务未配置"
     try:
-        return (
-            client.search(
-                query,
-                plan.context.knowledge_base_id,
-                plan.context.module_id,
-                trace_id=plan.trace_id,
-            ),
-            None,
+        raw_evidence = client.search(
+            query,
+            knowledge_base_id,
+            module_id,
+            external_knowledge_base_id=knowledge_base.external_ref,
+            trace_id=trace_id,
+            knowledge_point_ids=knowledge_point_ids,
         )
-    except IntegrationUnavailable as exc:
+    except (IntegrationUnavailable, ValueError) as exc:
         return [], str(exc)
+    evidence = enrich_official_evidence(
+        db,
+        knowledge_base_id=knowledge_base_id,
+        module_id=module_id,
+        evidence=raw_evidence,
+    )
+    if raw_evidence and not evidence:
+        return [], "PunditRAG返回结果缺少已登记且可追溯的Microsoft官方出处"
+    return evidence, None
+
+
+def safe_retrieve(db: Session, plan, query: str) -> tuple[list[dict], str | None]:
+    if not plan.use_rag:
+        return [], None
+    return search_official_evidence(
+        db,
+        query=query,
+        knowledge_base_id=plan.context.knowledge_base_id,
+        module_id=plan.context.module_id,
+        trace_id=plan.trace_id,
+    )
 
 
 def safe_memories(plan, user: User, query: str) -> tuple[list[dict], str | None]:
@@ -1179,7 +1287,7 @@ def execute_turn(
         else:
             content = f"本题需要巩固。参考要点：{quiz.answer}"
     elif action is PrimaryAction.LEARNING_DIALOGUE:
-        evidence, rag_error = safe_retrieve(plan, request.user_input)
+        evidence, rag_error = safe_retrieve(db, plan, request.user_input)
         memories, memory_error = safe_memories(plan, user, request.user_input)
         if rag_error:
             degradation.append(rag_error)
@@ -2222,6 +2330,10 @@ def session_turns(
 def upload_knowledge_document(
     knowledge_base_id: int,
     module_id: Annotated[int, Form()],
+    source_title: Annotated[str, Form(min_length=1, max_length=255)],
+    source_url: Annotated[str, Form(min_length=1, max_length=500)],
+    source_section: Annotated[str, Form(min_length=1, max_length=255)],
+    source_version: Annotated[str, Form(min_length=1, max_length=120)],
     document: Annotated[UploadFile, File()],
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
@@ -2240,6 +2352,15 @@ def upload_knowledge_document(
     )
     if module is None:
         raise HTTPException(status_code=404, detail="知识库或培训模块不存在")
+    source_title = source_title.strip()
+    source_url = source_url.strip()
+    source_section = source_section.strip()
+    source_version = source_version.strip()
+    if not is_official_microsoft_source_url(source_url):
+        raise HTTPException(
+            status_code=400,
+            detail="课程材料链接必须来自 Microsoft Learn 或 microsoft/semantic-kernel 官方仓库",
+        )
     trace_id = uuid4().hex
     destination_dir = UPLOAD_DIR / "knowledge"
     destination_dir.mkdir(parents=True, exist_ok=True)
@@ -2255,27 +2376,51 @@ def upload_knowledge_document(
         filepath=str(destination),
         file_type=document.content_type or "application/octet-stream",
         file_size=len(content),
+        source_title=source_title,
+        source_url=source_url,
+        source_section=source_section,
+        source_version=source_version,
+        index_status="stored",
     )
     db.add(upload)
     db.flush()
     status = "stored"
     degradation = None
     client = PunditRAGClient()
-    if client.configured:
+    if client.import_configured:
         try:
-            client.ingest_document(
+            knowledge_base = module.knowledge_base
+            if not knowledge_base.external_ref:
+                external = client.ensure_knowledge_base(
+                    name=knowledge_base.name,
+                    description=(
+                        f"ECHO {module.program.name} 官方课程知识库；"
+                        "仅收录 Microsoft Learn 与 microsoft/semantic-kernel 官方资料。"
+                    ),
+                )
+                knowledge_base.external_ref = str(external["kb_id"])
+                db.flush()
+            result = client.ingest_document(
                 knowledge_base_id=knowledge_base_id,
                 module_id=module.id,
                 filename=upload.filename,
                 content=content,
                 content_type=upload.file_type,
                 trace_id=trace_id,
+                external_knowledge_base_id=knowledge_base.external_ref,
             )
-            status = "indexed"
-        except IntegrationUnavailable as exc:
+            upload.external_document_id = result["document_id"]
+            upload.external_task_id = result["task_id"]
+            upload.index_status = result["status"]
+            status = result["status"]
+        except (IntegrationUnavailable, ValueError) as exc:
+            upload.index_status = "degraded"
+            upload.index_error = str(exc)
             degradation = str(exc)
     else:
-        degradation = "PunditRAG 未配置，文件已保存但尚未建立索引"
+        upload.index_status = "degraded"
+        upload.index_error = "PunditRAG 导入服务未配置"
+        degradation = "PunditRAG 导入服务未配置，文件已保存但尚未建立索引"
     db.commit()
     return {
         "upload_id": upload.id,
@@ -2292,13 +2437,33 @@ def list_knowledge_documents(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):
-    query = db.query(Upload).filter_by(
-        user_id=user.id,
-        knowledge_base_id=knowledge_base_id,
+    if user.role not in {UserRole.MENTOR.value, UserRole.SYSTEM_ADMIN.value}:
+        raise HTTPException(status_code=403, detail="仅讲师、导师或系统管理员可查看知识库材料")
+    query = (
+        db.query(Upload)
+        .join(User, User.id == Upload.user_id)
+        .filter(
+            User.organization_id == user.organization_id,
+            Upload.knowledge_base_id == knowledge_base_id,
+        )
     )
     if module_id is not None:
         query = query.filter(Upload.module_id == module_id)
     rows = query.order_by(Upload.uploaded_at.desc()).all()
+    rag_client = PunditRAGClient()
+    if rag_client.import_configured:
+        for row in rows:
+            if not row.external_task_id or row.index_status not in {"pending", "processing"}:
+                continue
+            try:
+                task = rag_client.get_import_status(row.external_task_id)
+                task_status = str(task.get("status") or "").strip()
+                if task_status in {"pending", "processing", "completed", "failed"}:
+                    row.index_status = task_status
+                    row.index_error = str(task.get("error") or "").strip() or None
+            except (IntegrationUnavailable, ValueError) as exc:
+                row.index_error = str(exc)
+        db.commit()
     return {
         "items": [
             {
@@ -2307,6 +2472,14 @@ def list_knowledge_documents(
                 "filename": row.filename,
                 "file_type": row.file_type,
                 "file_size": row.file_size,
+                "source_title": row.source_title,
+                "source_url": row.source_url,
+                "source_section": row.source_section,
+                "source_version": row.source_version,
+                "external_document_id": row.external_document_id,
+                "external_task_id": row.external_task_id,
+                "index_status": row.index_status,
+                "index_error": row.index_error,
                 "uploaded_at": row.uploaded_at.isoformat(),
             }
             for row in rows
@@ -2425,20 +2598,15 @@ def generate_resources(
         knowledge_point_id=point.id,
         knowledge_point_name=point.name,
     )
-    evidence: list[dict] = []
-    rag_client = PunditRAGClient()
-    if rag_client.configured:
-        try:
-            evidence = rag_client.search(
-                f"{point.name} {plan.weakest_dimension_label}",
-                module.knowledge_base_id,
-                module.id,
-                knowledge_point_ids=[point.id],
-            )
-        except IntegrationUnavailable as exc:
-            degradation.append(f"PunditRAG：{exc}")
-    else:
-        degradation.append("PunditRAG未配置")
+    evidence, rag_error = search_official_evidence(
+        db,
+        query=f"{point.name} {plan.weakest_dimension_label}",
+        knowledge_base_id=module.knowledge_base_id,
+        module_id=module.id,
+        knowledge_point_ids=[point.id],
+    )
+    if rag_error:
+        degradation.append(f"PunditRAG：{rag_error}")
 
     sources = [item.get("metadata", {}) for item in evidence]
     generated, generation_error = ResourceGenerationAgent().generate(plan, evidence)
