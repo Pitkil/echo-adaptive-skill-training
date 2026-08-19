@@ -1,0 +1,203 @@
+{
+  "version": "1.0",
+  "description": "ECHO 项目 12 个知识点的官方材料清单",
+  "created_at": "2026-08-19",
+  "last_updated": "2026-08-19",
+  "total_materials": 13,
+  "materials": [
+    {
+      "material_id": "MS-SK-CONCEPTS-KERNEL",
+      "title": "Understanding the kernel in Semantic Kernel",
+      "type": "Microsoft Learn 文档",
+      "url": "https://learn.microsoft.com/ar-sa/semantic-kernel/concepts/kernel",
+      "version": "2023-07-12",
+      "module_id": "M1",
+      "knowledge_point_ids": ["M1-KP1"],
+      "section": "全文",
+      "local_file": "",
+      "sha256": "",
+      "import_status": "pending"
+    },
+    {
+      "material_id": "MS-SK-TRAINING-BUILD-KERNEL",
+      "title": "Build your kernel - Training",
+      "type": "Microsoft Learn 培训模块",
+      "url": "https://learn.microsoft.com/en-us/training/modules/build-your-kernel",
+      "version": "2025-05-27",
+      "module_id": "M1",
+      "knowledge_point_ids": ["M1-KP1"],
+      "section": "全文",
+      "local_file": "",
+      "sha256": "",
+      "import_status": "pending"
+    },
+    {
+      "material_id": "MS-SK-CONCEPTS-COMPONENTS",
+      "title": "Semantic Kernel Components",
+      "type": "Microsoft Learn 文档",
+      "url": "https://learn.microsoft.com/ar-sa/semantic-kernel/concepts/semantic-kernel-components",
+      "version": "2024-11-15",
+      "module_id": "M1",
+      "knowledge_point_ids": ["M1-KP1", "M1-KP2"],
+      "section": "全文",
+      "local_file": "",
+      "sha256": "",
+      "import_status": "pending"
+    },
+    {
+      "material_id": "MS-SK-TRAINING-NATIVE-PLUGINS",
+      "title": "Understand native plugins - Training",
+      "type": "Microsoft Learn 培训模块",
+      "url": "https://learn.microsoft.com/en-my/training/modules/give-your-ai-agent-skills/2-understand-native-plugins",
+      "version": "2025-01-24",
+      "module_id": "M1",
+      "knowledge_point_ids": ["M1-KP3"],
+      "section": "全文",
+      "local_file": "",
+      "sha256": "",
+      "import_status": "pending"
+    },
+    {
+      "material_id": "MS-SK-CONCEPTS-PLUGINS",
+      "title": "Create plugins for Semantic Kernel",
+      "type": "Microsoft Learn 文档",
+      "url": "https://learn.microsoft.com/en-us/semantic-kernel/concepts/plugins",
+      "version": "2025-01-24",
+      "module_id": "M1",
+      "knowledge_point_ids": ["M1-KP3"],
+      "section": "全文",
+      "local_file": "",
+      "sha256": "",
+      "import_status": "pending"
+    },
+    {
+      "material_id": "MS-SK-TRAINING-PROMPT-TEMPLATES",
+      "title": "Prompt templates - Training",
+      "type": "Microsoft Learn 培训模块",
+      "url": "https://learn.microsoft.com/en-us/training/modules/create-plugins-semantic-kernel/3-use-semantic-kernel-prompt-templates?pivots=csharp",
+      "version": "2025-01-24",
+      "module_id": "M1",
+      "knowledge_point_ids": ["M1-KP2"],
+      "section": "全文",
+      "local_file": "",
+      "sha256": "",
+      "import_status": "pending"
+    },
+    {
+      "material_id": "MS-SK-AGENT-ARCHITECTURE",
+      "title": "Semantic Kernel Agent Architecture",
+      "type": "Microsoft Learn 文档",
+      "url": "https://learn.microsoft.com/th-th/semantic-kernel/Frameworks/agent/agent-architecture",
+      "version": "2024-09-13",
+      "module_id": "M2",
+      "knowledge_point_ids": ["M2-KP1", "M2-KP2", "M2-KP4"],
+      "section": "全文",
+      "local_file": "",
+      "sha256": "",
+      "import_status": "pending"
+    },
+    {
+      "material_id": "MS-SK-AGENT-PYTHON-API",
+      "title": "Agent Class - Python API",
+      "type": "Microsoft Learn API 参考",
+      "url": "https://learn.microsoft.com/en-us/python/api/semantic-kernel/semantic_kernel.agents.agent.agent",
+      "version": "2025-04-04",
+      "module_id": "M2",
+      "knowledge_point_ids": ["M2-KP1"],
+      "section": "全文",
+      "local_file": "",
+      "sha256": "",
+      "import_status": "pending"
+    },
+    {
+      "material_id": "MS-SK-AGENT-CONCURRENT",
+      "title": "Concurrent Agent Orchestration",
+      "type": "Microsoft Learn 文档",
+      "url": "https://learn.microsoft.com/th-th/semantic-kernel/Frameworks/agent/agent-orchestration/concurrent",
+      "version": "2025-05-19",
+      "module_id": "M2",
+      "knowledge_point_ids": ["M2-KP4"],
+      "section": "全文",
+      "local_file": "",
+      "sha256": "",
+      "import_status": "pending"
+    },
+    {
+      "material_id": "MS-SK-PROCESS-OVERVIEW",
+      "title": "Overview of the Process Framework",
+      "type": "Microsoft Learn 文档",
+      "url": "https://learn.microsoft.com/en-sg/semantic-kernel/frameworks/process/process-framework",
+      "version": "2024-09-28",
+      "module_id": "M3",
+      "knowledge_point_ids": ["M3-KP1", "M3-KP4"],
+      "section": "全文",
+      "local_file": "",
+      "sha256": "",
+      "import_status": "pending"
+    },
+    {
+      "material_id": "MS-SK-PROCESS-FIRST",
+      "title": "How-To: Create your first Process",
+      "type": "Microsoft Learn 示例教程",
+      "url": "https://learn.microsoft.com/en-us/semantic-kernel/frameworks/process/examples/example-first-process",
+      "version": "2025-01-13",
+      "module_id": "M3",
+      "knowledge_point_ids": ["M3-KP1"],
+      "section": "全文",
+      "local_file": "",
+      "sha256": "",
+      "import_status": "pending"
+    },
+    {
+      "material_id": "MS-SK-OBSERVABILITY",
+      "title": "Observability in Semantic Kernel",
+      "type": "Microsoft Learn 文档",
+      "url": "https://learn.microsoft.com/ar-sa/semantic-kernel/concepts/enterprise-readiness/observability/",
+      "version": "2024-09-11",
+      "module_id": "M3",
+      "knowledge_point_ids": ["M3-KP2", "M3-KP4"],
+      "section": "全文",
+      "local_file": "",
+      "sha256": "",
+      "import_status": "pending"
+    },
+    {
+      "material_id": "MS-SK-SAFETY-RELIABILITY",
+      "title": "Safety and reliability in Semantic Kernel - Training",
+      "type": "Microsoft Learn 培训模块",
+      "url": "https://learn.microsoft.com/en-us/semantic-kernel/concepts/enterprise-readiness/observability/?pivots=programming-language-csharp",
+      "version": "2025-01-24",
+      "module_id": "M3",
+      "knowledge_point_ids": ["M3-KP3"],
+      "section": "全文",
+      "local_file": "",
+      "sha256": "",
+      "import_status": "pending"
+    }
+  ],
+  "coverage": {
+    "M1": {
+      "knowledge_points": 4,
+      "materials": 6,
+      "status": "covered"
+    },
+    "M2": {
+      "knowledge_points": 4,
+      "materials": 3,
+      "status": "covered"
+    },
+    "M3": {
+      "knowledge_points": 4,
+      "materials": 4,
+      "status": "covered"
+    },
+    "total_knowledge_points": 12,
+    "total_materials": 13
+  },
+  "import_notes": [
+    "local_file 和 sha256 由导入程序生成，导入后填写",
+    "import_status 当前为 pending，导入成功后更新为 imported",
+    "M2 的 '记忆与相关内容检索' 知识点由 Agent Architecture 文档覆盖",
+    "M3 的 '部署与质量评测' 知识点由 Process Framework 和 Observability 文档联合覆盖"
+  ]
+}
