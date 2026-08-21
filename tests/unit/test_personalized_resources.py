@@ -12,6 +12,7 @@ from database import (
     StudentQuestionHistory,
     TrainingModule,
     TrainingProgram,
+    Upload,
     User,
     UserRole,
 )
@@ -47,6 +48,7 @@ class FakePunditRAGClient:
         knowledge_base_id,
         module_id,
         *,
+        external_knowledge_base_id=None,
         trace_id=None,
         knowledge_point_ids=None,
         top_k=None,
@@ -58,9 +60,7 @@ class FakePunditRAGClient:
                     "and recommends validating the smallest runnable implementation first."
                 ),
                 "metadata": {
-                    "source_title": "Microsoft Learn",
-                    "source_url": "https://learn.microsoft.com/",
-                    "source_section": "Official guidance",
+                    "external_document_id": "pundit-document-1",
                 },
             }
         ]
@@ -144,6 +144,25 @@ def test_resource_generation_uses_profile_memory_and_blind_spot(monkeypatch) -> 
             )
             for index in range(2)
         ]
+    )
+    module.knowledge_base.external_ref = "pundit-kb-1"
+    db.add(
+        Upload(
+            user_id=learner.id,
+            module_id=module.id,
+            knowledge_base_id=module.knowledge_base_id,
+            filename="semantic-kernel.md",
+            filepath="data/test/semantic-kernel.md",
+            file_type="text/markdown",
+            file_size=128,
+            source_title="Microsoft Learn Semantic Kernel",
+            source_url="https://learn.microsoft.com/semantic-kernel/overview/",
+            source_section="Overview",
+            source_version="2026-08-19",
+            external_document_id="pundit-document-1",
+            external_task_id="pundit-task-1",
+            index_status="completed",
+        )
     )
     db.commit()
     db.refresh(learner)

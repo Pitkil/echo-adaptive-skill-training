@@ -4,20 +4,36 @@
 
 ## 基于多路召回与混合向量的可追溯 RAG 检索引擎
 
+ECHO 对学习者和管理端继续提供版本化 `/v1` 接口，但
+`apps/api/integrations/punditrag.py` 必须适配 PunditRAG 的两个原生服务：
+
+- 导入服务（默认 `http://127.0.0.1:8000`）：`/knowledge-bases`、`/upload`、
+  `/status/{task_id}` 和 `/knowledge-bases/{kb_id}/documents`。
+- 查询服务（默认 `http://127.0.0.1:8001`）：`/query` 和 `/health`。
+
+业务数据库中的整数 `knowledge_base_id` 不能直接当作 PunditRAG 的 `kb_id`。
+主系统必须把 PunditRAG 返回的字符串 `kb_id` 保存到 `KnowledgeBase.external_ref`，
+上传和检索均使用该映射。未建立映射时，材料上传流程先在 PunditRAG 创建知识库并保存映射。
+
 ### 检索
 
-`POST /v1/retrieval/search`
+ECHO 内部检索调用会转换为 PunditRAG `POST /query`：
 
 ```json
 {
   "query": "如何评估混合检索？",
-  "knowledge_base_id": 1,
-  "module_id": 2,
-  "knowledge_point_ids": [5],
-  "trace_id": "trace-001",
-  "top_k": 5
+  "session_id": "trace-001",
+  "scope_mode": "knowledge_base",
+  "kb_ids": ["PunditRAG 返回的 kb_id"],
+  "document_ids": [],
+  "is_stream": false,
+  "enable_web_search": false
 }
 ```
+
+`enable_web_search` 固定为 `false`，避免把未审核网页混入官方课程证据。PunditRAG
+响应中的 `sources` 由适配器转换为 ECHO 的检索结果；PunditRAG 生成的 `answer` 不作为
+ECHO 的最终回复或标准答案。
 
 每个结果必须包含非空 `text`。为了让出处真正可查，元数据必须包含：
 
@@ -29,13 +45,22 @@
 - `version` 或获取日期
 - `score`：本次检索相关程度
 
-缺少官方链接或章节的结果可以用于内部排查，不能作为正式资源的引用。
+缺少官方链接、章节、版本或本地材料登记记录的结果可以用于内部排查，不能作为正式资源的引用。
+正式链接只接受 `learn.microsoft.com`，或 `github.com/microsoft/semantic-kernel` 官方仓库路径。
 
 ### 文档入库
 
-`POST /v1/knowledge-bases/{knowledge_base_id}/documents`
+ECHO 对外接口为 `POST /v1/knowledge-bases/{knowledge_base_id}/documents`，内部转换为
+PunditRAG `POST /upload`。
 
-表单字段：`file`、`module_id`、`trace_id`。返回文档编号、任务编号和入库状态。
+ECHO 表单字段：`document`、`module_id`、`source_title`、`source_url`、
+`source_section` 和 `source_version`。主系统生成 `trace_id`，把文件以 PunditRAG 所需的
+`files` 字段上传，并保存返回的 `document_id` 与 `task_id`。
+
+PunditRAG 接受上传只表示异步任务已排队，不能立即标记为 `indexed`。主系统通过
+`GET /status/{task_id}` 同步 `pending`、`processing`、`completed` 或 `failed`；只有
+`completed` 可显示为已索引。外部服务不可用时保留本地文件和明确降级原因，但不得伪造
+外部文档编号、任务编号或成功状态。
 
 ## SimpleMem
 

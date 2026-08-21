@@ -17,11 +17,16 @@ def test_content_import_ui_exposes_two_separate_workflows() -> None:
     assert 'data-import-tab="materials"' in html
     assert 'data-import-tab="quizzes"' in html
     assert 'id="material-module-select"' in html
+    assert 'id="knowledge-source-title"' in html
+    assert 'id="knowledge-source-url"' in html
+    assert 'id="knowledge-source-section"' in html
+    assert 'id="knowledge-source-version"' in html
     assert 'id="quiz-module-select"' in html
     assert 'id="quiz-knowledge-select"' in html
     assert 'id="quiz-preview-section"' in html
     assert 'id="confirm-quiz-import"' in html
     assert "/v1/quiz-imports/preview" in script
+    assert 'data.append("source_url", sourceUrl)' in script
     assert "/confirm" in script
 
 

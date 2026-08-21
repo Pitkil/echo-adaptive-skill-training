@@ -214,6 +214,14 @@ class Upload(Base):
     filepath = Column(String(500), nullable=False)
     file_type = Column(String(50), nullable=False)
     file_size = Column(Integer, nullable=False)
+    source_title = Column(String(255), nullable=True)
+    source_url = Column(String(500), nullable=True)
+    source_section = Column(String(255), nullable=True)
+    source_version = Column(String(120), nullable=True)
+    external_document_id = Column(String(128), nullable=True, index=True)
+    external_task_id = Column(String(128), nullable=True, index=True)
+    index_status = Column(String(30), nullable=False, default="stored")
+    index_error = Column(Text, nullable=True)
     uploaded_at = Column(DateTime, nullable=False, default=datetime.now)
 
     owner = relationship("User", back_populates="uploads")
@@ -467,6 +475,7 @@ def init_db() -> None:
     _ensure_quiz_history_columns()
     _ensure_micro_job_columns()
     _ensure_micro_event_columns()
+    _ensure_upload_rag_columns()
 
 
 def _ensure_quiz_metadata_columns() -> None:
@@ -596,4 +605,29 @@ def _ensure_micro_event_columns() -> None:
                         "ALTER TABLE micro_representation_events "
                         "MODIFY COLUMN id VARCHAR(100) NOT NULL"
                     )
+                )
+
+
+def _ensure_upload_rag_columns() -> None:
+    """Add traceable PunditRAG fields to existing upload records."""
+
+    inspector = inspect(engine)
+    if "uploads" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("uploads")}
+    additions = {
+        "source_title": "VARCHAR(255)",
+        "source_url": "VARCHAR(500)",
+        "source_section": "VARCHAR(255)",
+        "source_version": "VARCHAR(120)",
+        "external_document_id": "VARCHAR(128)",
+        "external_task_id": "VARCHAR(128)",
+        "index_status": "VARCHAR(30) DEFAULT 'stored'",
+        "index_error": "TEXT",
+    }
+    with engine.begin() as connection:
+        for column_name, definition in additions.items():
+            if column_name not in existing:
+                connection.execute(
+                    text(f"ALTER TABLE uploads ADD COLUMN {column_name} {definition}")
                 )

@@ -672,14 +672,25 @@
     async function uploadKnowledge() {
         const file = $("#knowledge-file").files[0];
         const module = moduleFromSelect("#material-module-select");
+        const sourceTitle = $("#knowledge-source-title").value.trim();
+        const sourceUrl = $("#knowledge-source-url").value.trim();
+        const sourceSection = $("#knowledge-source-section").value.trim();
+        const sourceVersion = $("#knowledge-source-version").value.trim();
         if (!file || !module) return toast("请选择知识库文档");
+        if (!sourceTitle || !sourceUrl || !sourceSection || !sourceVersion) {
+            return toast("请完整填写资料名称、官方链接、相关章节和版本信息");
+        }
         const data = new FormData();
         data.append("module_id", String(module.id));
+        data.append("source_title", sourceTitle);
+        data.append("source_url", sourceUrl);
+        data.append("source_section", sourceSection);
+        data.append("source_version", sourceVersion);
         data.append("document", file);
         try {
             const response = await api(`/v1/knowledge-bases/${module.knowledge_base_id}/documents`, {method: "POST", body: data});
             const payload = await response.json();
-            $("#knowledge-status").textContent = payload.degradation || `文档状态：${payload.status}`;
+            $("#knowledge-status").textContent = payload.degradation || `索引任务状态：${payload.status}`;
             await loadKnowledgeDocuments();
         } catch (error) {
             $("#knowledge-status").textContent = error.message;
@@ -693,8 +704,8 @@
             const response = await api(`/v1/knowledge-bases/${module.knowledge_base_id}/documents?module_id=${module.id}`);
             const payload = await response.json();
             renderRecords("#knowledge-list", payload.items, "当前模块尚未上传知识文档", (item) => ({
-                title: item.filename,
-                detail: `${formatBytes(item.file_size)} · ${new Date(item.uploaded_at).toLocaleString()}`,
+                title: item.source_title || item.filename,
+                detail: `${item.index_status || "stored"} · ${item.source_section || "未登记章节"} · ${item.source_version || "未登记版本"} · ${item.index_error || formatBytes(item.file_size)}`,
             }));
         } catch (error) {
             $("#knowledge-status").textContent = error.message;

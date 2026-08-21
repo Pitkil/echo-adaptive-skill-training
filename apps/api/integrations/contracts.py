@@ -45,11 +45,16 @@ class RetrievalMetadata(BaseModel):
     source: str | None = None
     filename: str | None = None
     chapter: str | None = None
+    source_title: str | None = None
+    source_url: str | None = None
+    source_section: str | None = None
     knowledge_base_id: int
     module_id: int
     knowledge_point_ids: list[int] = Field(default_factory=list)
     chunk_id: str | None = None
     version: str | None = None
+    external_knowledge_base_id: str | None = None
+    external_document_id: str | None = None
 
 
 class RetrievalHit(BaseModel):
@@ -271,3 +276,57 @@ def normalize_retrieval_payload(payload: Any) -> list[dict[str, Any]]:
 
     hits = [RetrievalHit.model_validate(item) for item in raw_items]
     return [hit.model_dump(exclude_none=True) for hit in hits]
+
+
+def normalize_punditrag_query_payload(
+    payload: Any,
+    *,
+    knowledge_base_id: int,
+    module_id: int,
+    knowledge_point_ids: list[int] | None = None,
+) -> list[dict[str, Any]]:
+    """Convert PunditRAG `/query` sources into ECHO retrieval hits."""
+
+    if not isinstance(payload, dict):
+        raise ValueError("PunditRAG query response must be an object.")
+    raw_sources = payload.get("sources", [])
+    if not isinstance(raw_sources, list):
+        raise ValueError("PunditRAG query response sources must be a list.")
+
+    items: list[dict[str, Any]] = []
+    for position, source in enumerate(raw_sources, start=1):
+        if not isinstance(source, dict):
+            raise ValueError("PunditRAG source must be an object.")
+        source_text = str(source.get("content") or source.get("text") or "").strip()
+        if not source_text:
+            continue
+        external_document_id = str(source.get("document_id") or "").strip() or None
+        part = source.get("part")
+        chunk_id = (
+            f"{external_document_id}:{part}"
+            if external_document_id and part is not None
+            else external_document_id or str(source.get("index") or position)
+        )
+        title = str(source.get("file_title") or source.get("title") or "").strip() or None
+        section = str(source.get("parent_title") or source.get("title") or "").strip() or None
+        items.append(
+            {
+                "text": source_text,
+                "score": source.get("score"),
+                "metadata": {
+                    "source_title": title,
+                    "source_url": source.get("url"),
+                    "source_section": section,
+                    "filename": title,
+                    "chapter": section,
+                    "knowledge_base_id": knowledge_base_id,
+                    "module_id": module_id,
+                    "knowledge_point_ids": knowledge_point_ids or [],
+                    "chunk_id": chunk_id,
+                    "external_knowledge_base_id": source.get("kb_id"),
+                    "external_document_id": external_document_id,
+                    "search_rank": source.get("search_rank"),
+                },
+            }
+        )
+    return normalize_retrieval_payload({"items": items})

@@ -13,7 +13,8 @@ services:
       DB_TYPE: sqlite
       SQLITE_PATH: /workspace/data/echo.db
       UPLOAD_DIR: /workspace/data/uploads
-      PUNDITRAG_BASE_URL: ${PUNDITRAG_DOCKER_BASE_URL:-http://host.docker.internal:8000}
+      PUNDITRAG_IMPORT_BASE_URL: ${PUNDITRAG_DOCKER_IMPORT_BASE_URL:-http://host.docker.internal:8000}
+      PUNDITRAG_QUERY_BASE_URL: ${PUNDITRAG_DOCKER_QUERY_BASE_URL:-http://host.docker.internal:8001}
       SIMPLEMEM_BASE_URL: ${SIMPLEMEM_DOCKER_BASE_URL:-http://host.docker.internal:8020}
       MICRO_REPRESENTATION_BASE_URL: ${MICRO_REPRESENTATION_DOCKER_BASE_URL:-http://host.docker.internal:8030}
     ports:
