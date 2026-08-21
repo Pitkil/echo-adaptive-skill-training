@@ -1,86 +1,48 @@
 {
-  "version": "b-micro-cases-v1",
+  "version": "b-micro-cases-v2",
   "purpose": "成员 B 微表征接口、权限、汇总和降级的冻结差异案例；不包含真实音频，不用于检测准确率指标。",
   "cases": [
     {
-      "case_id": "B-MICRO-01",
-      "learner_profile": "P1",
-      "module": "M1",
-      "source_type": "learner_voice",
-      "scenario": "学习者授权提交本人单轮录音，检测器返回已确认犹豫事件",
-      "expected": ["创建任务", "保存可定位时间点", "交给学习画像作为辅助证据", "不修改U/A/R"]
+      "case_id": "B-MICRO-01", "learner_profile": "P1", "module": "M1", "source_type": "learner_voice", "scenario": "学习者授权提交本人单轮录音，检测器返回低于确认阈值的犹豫事件", "consent_granted": true, "speaker_status": "learner_self",
+      "input_events": [{"event_type": "hesitation", "confidence": 0.62, "start_ms": 1200, "end_ms": 1800}], "expected_retained_events": [{"event_type": "hesitation", "status": "pending_confirmation"}], "expected_filtered_events": [], "enters_personal_profile": false, "evidence_to_c": [],
+      "summary_to_a": {"signals_by_type": {"hesitation": 1}, "total_signal_count": 1, "total_pause_ms": 600, "pending_confirmation_count": 1, "trend": "unavailable"}, "expected_failure_reason": null, "retryable": false, "coverage_tags": ["learner_voice", "low_confidence", "pending_confirmation", "no_mirt_update"], "expected": ["创建任务", "事件待确认", "不进入个人画像", "不修改U/A/R"]
     },
     {
-      "case_id": "B-MICRO-02",
-      "learner_profile": "P2",
-      "module": "M2",
-      "source_type": "learner_voice",
-      "scenario": "学习者未授权录音分析",
-      "expected": ["拒绝请求", "不保存音频", "不创建检测任务"]
+      "case_id": "B-MICRO-02", "learner_profile": "P2", "module": "M2", "source_type": "learner_voice", "scenario": "学习者未授权录音分析", "consent_granted": false, "speaker_status": "learner_self",
+      "input_events": [], "expected_retained_events": [], "expected_filtered_events": [], "enters_personal_profile": false, "evidence_to_c": [], "summary_to_a": {"signals_by_type": {}, "total_signal_count": 0, "total_pause_ms": 0, "pending_confirmation_count": 0, "trend": "unavailable"}, "expected_failure_reason": "consent_required", "retryable": false, "coverage_tags": ["learner_voice", "unauthorized", "privacy_boundary"], "expected": ["拒绝请求", "不保存音频", "不创建检测任务"]
     },
     {
-      "case_id": "B-MICRO-03",
-      "learner_profile": "P3",
-      "module": "M3",
-      "source_type": "learner_voice",
-      "scenario": "同一业务范围重复提交相同录音",
-      "expected": ["返回原任务", "不重复上传检测器", "不重复统计"]
+      "case_id": "B-MICRO-03", "learner_profile": "P3", "module": "M3", "source_type": "learner_voice", "scenario": "同一业务范围重复提交相同录音", "consent_granted": true, "speaker_status": "learner_self",
+      "input_events": [], "expected_retained_events": [], "expected_filtered_events": [], "enters_personal_profile": false, "evidence_to_c": [], "summary_to_a": {"signals_by_type": {}, "total_signal_count": 0, "total_pause_ms": 0, "pending_confirmation_count": 0, "trend": "unchanged"}, "expected_failure_reason": null, "retryable": false, "coverage_tags": ["learner_voice", "duplicate", "idempotency"], "expected": ["返回原任务", "不重复上传检测器", "不重复统计"]
     },
     {
-      "case_id": "B-MICRO-04",
-      "learner_profile": "P1",
-      "module": "M2",
-      "source_type": "mentor_recording",
-      "scenario": "讲师上传多人录音但未确认说话人",
-      "expected": ["learner_id为空", "事件只进入课次统计", "不进入个人画像"]
+      "case_id": "B-MICRO-04", "learner_profile": "P1", "module": "M2", "source_type": "mentor_recording", "scenario": "讲师上传多人录音但未确认说话人", "consent_granted": true, "speaker_status": "unconfirmed",
+      "input_events": [{"event_type": "thinking_pause", "confidence": 0.91, "start_ms": 3000, "end_ms": 5100}], "expected_retained_events": [{"event_type": "thinking_pause", "status": "session_only"}], "expected_filtered_events": [], "enters_personal_profile": false, "evidence_to_c": [], "summary_to_a": {"signals_by_type": {"thinking_pause": 1}, "total_signal_count": 1, "total_pause_ms": 2100, "pending_confirmation_count": 1, "trend": "unavailable"}, "expected_failure_reason": null, "retryable": false, "coverage_tags": ["mentor_recording", "speaker_unconfirmed", "session_only"], "expected": ["learner_id为空", "事件只进入课次统计", "不进入个人画像"]
     },
     {
-      "case_id": "B-MICRO-05",
-      "learner_profile": "P2",
-      "module": "M3",
-      "source_type": "mentor_recording",
-      "scenario": "讲师确认说话人并绑定同组织学习者",
-      "expected": ["保存确认事件", "课次汇总包含事件", "允许作为个人辅助证据"]
+      "case_id": "B-MICRO-05", "learner_profile": "P2", "module": "M3", "source_type": "mentor_recording", "scenario": "讲师确认说话人并绑定同组织学习者，后半段信号增加", "consent_granted": true, "speaker_status": "confirmed",
+      "input_events": [{"event_type": "hesitation", "confidence": 0.88, "start_ms": 4000, "end_ms": 4700}, {"event_type": "self_correction", "confidence": 0.93, "start_ms": 35000, "end_ms": 36000}, {"event_type": "thinking_pause", "confidence": 0.9, "start_ms": 45000, "end_ms": 48000}], "expected_retained_events": [{"event_type": "hesitation", "status": "confirmed"}, {"event_type": "self_correction", "status": "confirmed"}, {"event_type": "thinking_pause", "status": "confirmed"}], "expected_filtered_events": [], "enters_personal_profile": true, "evidence_to_c": ["hesitation", "self_correction", "thinking_pause"],
+      "summary_to_a": {"signals_by_type": {"hesitation": 1, "self_correction": 1, "thinking_pause": 1}, "total_signal_count": 3, "total_pause_ms": 3700, "pending_confirmation_count": 0, "trend": "increased_in_second_half"}, "expected_failure_reason": null, "retryable": false, "coverage_tags": ["mentor_recording", "speaker_confirmed", "time_change", "personal_auxiliary_evidence"], "expected": ["保存确认事件", "课次汇总包含事件", "允许作为个人辅助证据"]
     },
     {
-      "case_id": "B-MICRO-06",
-      "learner_profile": "P3",
-      "module": "M1",
-      "source_type": "mentor_recording",
-      "scenario": "事件声明的学习者与检测任务不一致",
-      "expected": ["整批拒绝", "不部分写入", "记录同步失败原因"]
+      "case_id": "B-MICRO-06", "learner_profile": "P3", "module": "M1", "source_type": "mentor_recording", "scenario": "事件声明的学习者与检测任务不一致", "consent_granted": true, "speaker_status": "confirmed",
+      "input_events": [{"event_type": "guessing", "confidence": 0.89, "start_ms": 900, "end_ms": 1400}], "expected_retained_events": [], "expected_filtered_events": [{"event_type": "guessing", "reason": "learner_mismatch"}], "enters_personal_profile": false, "evidence_to_c": [], "summary_to_a": {"signals_by_type": {}, "total_signal_count": 0, "total_pause_ms": 0, "pending_confirmation_count": 0, "trend": "unavailable"}, "expected_failure_reason": "learner_mismatch", "retryable": false, "coverage_tags": ["mentor_recording", "atomic_rejection", "learner_mismatch"], "expected": ["整批拒绝", "不部分写入", "记录同步失败原因"]
     },
     {
-      "case_id": "B-MICRO-07",
-      "learner_profile": "P1",
-      "module": "M3",
-      "source_type": "learner_voice",
-      "scenario": "检测服务连接失败后学习者查询任务",
-      "expected": ["任务保持awaiting_detector", "返回明确降级原因", "允许安全重试"]
+      "case_id": "B-MICRO-07", "learner_profile": "P1", "module": "M3", "source_type": "learner_voice", "scenario": "检测服务连接失败后学习者查询任务", "consent_granted": true, "speaker_status": "learner_self",
+      "input_events": [], "expected_retained_events": [], "expected_filtered_events": [], "enters_personal_profile": false, "evidence_to_c": [], "summary_to_a": {"signals_by_type": {}, "total_signal_count": 0, "total_pause_ms": 0, "pending_confirmation_count": 0, "trend": "unavailable"}, "expected_failure_reason": "detector_unavailable", "retryable": true, "coverage_tags": ["learner_voice", "service_unavailable", "degraded", "retryable"], "expected": ["任务保持awaiting_detector", "返回明确降级原因", "允许安全重试"]
     },
     {
-      "case_id": "B-MICRO-08",
-      "learner_profile": "P2",
-      "module": "M1",
-      "source_type": "mentor_recording",
-      "scenario": "检测完成且合法返回空事件",
-      "expected": ["事件同步状态为synced", "信号总数为0", "不伪造检测事件"]
+      "case_id": "B-MICRO-08", "learner_profile": "P2", "module": "M1", "source_type": "mentor_recording", "scenario": "检测完成且合法返回空事件", "consent_granted": true, "speaker_status": "confirmed",
+      "input_events": [], "expected_retained_events": [], "expected_filtered_events": [], "enters_personal_profile": false, "evidence_to_c": [], "summary_to_a": {"signals_by_type": {}, "total_signal_count": 0, "total_pause_ms": 0, "pending_confirmation_count": 0, "trend": "unchanged"}, "expected_failure_reason": null, "retryable": false, "coverage_tags": ["mentor_recording", "legal_empty_result", "no_fabrication"], "expected": ["事件同步状态为synced", "信号总数为0", "不伪造检测事件"]
     },
     {
-      "case_id": "B-MICRO-09",
-      "learner_profile": "P3",
-      "module": "M2",
-      "source_type": "mentor_recording",
-      "scenario": "一批录音中部分任务缺少audio_duration_ms",
-      "expected": ["保留有效事件统计", "前后趋势不可用", "返回明确降级原因"]
+      "case_id": "B-MICRO-09", "learner_profile": "P3", "module": "M2", "source_type": "mentor_recording", "scenario": "一批录音中部分任务缺少audio_duration_ms", "consent_granted": true, "speaker_status": "confirmed",
+      "input_events": [{"event_type": "thinking_pause", "confidence": 0.87, "start_ms": 2200, "end_ms": 4300}], "expected_retained_events": [{"event_type": "thinking_pause", "status": "confirmed"}], "expected_filtered_events": [], "enters_personal_profile": true, "evidence_to_c": ["thinking_pause"], "summary_to_a": {"signals_by_type": {"thinking_pause": 1}, "total_signal_count": 1, "total_pause_ms": 2100, "pending_confirmation_count": 0, "trend": "unavailable"}, "expected_failure_reason": "missing_audio_duration_for_trend", "retryable": false, "coverage_tags": ["mentor_recording", "missing_duration", "partial_degradation"], "expected": ["保留有效事件统计", "前后趋势不可用", "返回明确降级原因"]
     },
     {
-      "case_id": "B-MICRO-10",
-      "learner_profile": "P1",
-      "module": "M1",
-      "source_type": "mentor_recording",
-      "scenario": "不同讲师在同一业务范围提交相同录音",
-      "expected": ["不创建第二个检测任务", "后上传者看不到原任务详情", "不重复计入汇总"]
+      "case_id": "B-MICRO-10", "learner_profile": "P1", "module": "M1", "source_type": "mentor_recording", "scenario": "不同讲师在同一业务范围提交相同录音", "consent_granted": true, "speaker_status": "confirmed",
+      "input_events": [], "expected_retained_events": [], "expected_filtered_events": [], "enters_personal_profile": false, "evidence_to_c": [], "summary_to_a": {"signals_by_type": {}, "total_signal_count": 0, "total_pause_ms": 0, "pending_confirmation_count": 0, "trend": "unchanged"}, "expected_failure_reason": null, "retryable": false, "coverage_tags": ["mentor_recording", "cross_actor_duplicate", "privacy_boundary", "idempotency"], "expected": ["不创建第二个检测任务", "后上传者看不到原任务详情", "不重复计入汇总"]
     }
   ]
 }

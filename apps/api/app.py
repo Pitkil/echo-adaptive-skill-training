@@ -34,6 +34,7 @@ from catalog import (
 from config import Config
 from database import (
     ChatSession,
+    EvidenceStatus,
     GeneratedResource,
     KnowledgeBase,
     KnowledgePoint,
@@ -358,6 +359,7 @@ class SessionMicroEventItem(BaseModel):
     start_ms: int
     end_ms: int
     confidence: float
+    summary: str
     transcript: str | None
     evidence_uri: str | None
     evidence_status: str
@@ -365,6 +367,28 @@ class SessionMicroEventItem(BaseModel):
 
 class SessionMicroEvents(BaseModel):
     items: list[SessionMicroEventItem]
+
+
+MICRO_EVENT_LABELS = {
+    "hesitation": "犹豫",
+    "guessing": "猜测",
+    "thinking_pause": "思考停顿",
+    "uncertainty": "不确定",
+    "self_correction": "自我修正",
+    "other": "其他微表征",
+}
+
+
+def build_micro_event_summary(event_type: str, evidence_status: str) -> str:
+    """Return a deterministic behavior summary without inventing spoken words."""
+
+    label = MICRO_EVENT_LABELS.get(event_type, "未知微表征")
+    status_text = {
+        EvidenceStatus.CONFIRMED.value: "已确认",
+        EvidenceStatus.PENDING.value: "待人工确认",
+        EvidenceStatus.REJECTED.value: "已忽略",
+    }.get(evidence_status, "状态未知")
+    return f"检测到{label}信号，{status_text}"
 
 
 def ensure_catalog(db: Session) -> None:
@@ -2258,6 +2282,7 @@ def session_micro_events(
                 "start_ms": row.start_ms,
                 "end_ms": row.end_ms,
                 "confidence": row.confidence,
+                "summary": build_micro_event_summary(row.event_type, row.evidence_status),
                 "transcript": row.transcript,
                 "evidence_uri": row.evidence_uri,
                 "evidence_status": row.evidence_status,

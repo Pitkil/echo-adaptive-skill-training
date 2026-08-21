@@ -1,0 +1,420 @@
+"""Expose the existing SpeechProject detector through the ECHO v1 HTTP contract.
+
+Run this module with the Python environment from SpeechProject because that
+environment owns the detector's PyTorch, FAISS, and audio dependencies.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import threading
+import uuid
+import wave
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Annotated, Any, Literal
+
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel, Field
+
+SERVICE_VERSION = "speechproject-prototype-v1"
+DEFAULT_SPEECH_PROJECT_ROOT = Path(r"D:\SpeechProject")
+DEFAULT_JOB_STORE = Path(__file__).resolve().parents[2] / "data" / "micro-detector-real" / "jobs.json"
+SEGMENT_DURATION_SECONDS = 30
+LABEL_MAP = {
+    "犹豫": "hesitation",
+    "猜测": "guessing",
+    "思考停顿": "thinking_pause",
+}
+
+
+class DetectionJob(BaseModel):
+    job_id: str = Field(min_length=1, max_length=100)
+    status: Literal["queued", "processing", "completed", "failed"]
+    error_message: str | None = None
+    audio_duration_ms: int | None = Field(default=None, gt=0)
+
+
+class DetectionEvent(BaseModel):
+    event_id: str = Field(min_length=1, max_length=100)
+    job_id: str = Field(min_length=1, max_length=100)
+    organization_id: int
+    learner_id: int | None = None
+    session_id: int | None = None
+    module_id: int
+    knowledge_point_id: int | None = None
+    source_type: Literal["learner_voice", "mentor_recording"]
+    event_type: Literal["hesitation", "guessing", "thinking_pause"]
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(gt=0)
+    confidence: float = Field(ge=0, le=1)
+    evidence_uri: str | None = None
+    speaker_mapping_confirmed: bool = False
+
+
+class StoredJob(BaseModel):
+    result: DetectionJob
+    scope: dict[str, Any]
+    events: list[DetectionEvent] = Field(default_factory=list)
+
+
+_jobs: dict[str, StoredJob] = {}
+_jobs_lock = threading.Lock()
+
+
+def _job_store_path() -> Path:
+    return Path(os.getenv("MICRO_DETECTOR_JOB_STORE", str(DEFAULT_JOB_STORE))).resolve()
+
+
+def _persist_jobs_locked() -> None:
+    """Atomically persist detector results without storing raw audio."""
+
+    destination = _job_store_path()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_suffix(destination.suffix + ".tmp")
+    payload = {
+        "schema_version": "1.0",
+        "detector_version": SERVICE_VERSION,
+        "jobs": {
+            job_id: stored.model_dump(mode="json")
+            for job_id, stored in sorted(_jobs.items())
+        },
+    }
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(destination)
+
+
+def _restore_jobs() -> None:
+    """Restore completed jobs and fail interrupted work explicitly after restart."""
+
+    source = _job_store_path()
+    with _jobs_lock:
+        _jobs.clear()
+        if not source.is_file():
+            return
+        payload = json.loads(source.read_text(encoding="utf-8"))
+        raw_jobs = payload.get("jobs")
+        if not isinstance(raw_jobs, dict):
+            raise RuntimeError("micro detector job store has invalid jobs payload")
+        for job_id, raw in raw_jobs.items():
+            stored = StoredJob.model_validate(raw)
+            if stored.result.job_id != job_id:
+                raise RuntimeError("micro detector job store contains mismatched job_id")
+            if stored.result.status in {"queued", "processing"}:
+                stored.result = stored.result.model_copy(
+                    update={
+                        "status": "failed",
+                        "error_message": "detector restarted before job completion; resubmit safely",
+                    }
+                )
+            _jobs[job_id] = stored
+        _persist_jobs_locked()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    _restore_jobs()
+    yield
+
+
+app = FastAPI(
+    title="ECHO SpeechProject Micro Detector",
+    version=SERVICE_VERSION,
+    lifespan=lifespan,
+)
+
+
+def _speech_project_root() -> Path:
+    return Path(os.getenv("SPEECH_PROJECT_ROOT", str(DEFAULT_SPEECH_PROJECT_ROOT))).resolve()
+
+
+def _load_detector_dependencies() -> tuple[Any, Any, Any]:
+    root = _speech_project_root()
+    pipeline_path = root / "pipeline.py"
+    if not pipeline_path.is_file():
+        raise RuntimeError(f"SpeechProject pipeline not found: {pipeline_path}")
+    if os.getenv("MICRO_DETECTOR_OFFLINE_MODE", "true").casefold() == "true":
+        # Competition demos must not depend on a live model-hub request. The
+        # model is provisioned once, then Transformers reads its local cache.
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+    root_text = str(root)
+    if root_text not in sys.path:
+        sys.path.insert(0, root_text)
+    from detection_utils import merge_events
+    from pipeline import _run_detection
+    from step3 import extract_embeddings_batch
+
+    return extract_embeddings_batch, _run_detection, merge_events
+
+
+def _segment_audio(input_path: Path, output_dir: Path) -> list[tuple[Path, int]]:
+    """Convert audio to 16 kHz WAV segments and retain original time offsets."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_pattern = output_dir / "segment_%04d.wav"
+    command = [
+        "ffmpeg",
+        "-y",
+        "-v",
+        "error",
+        "-i",
+        str(input_path),
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        "-sample_fmt",
+        "s16",
+        "-f",
+        "segment",
+        "-segment_time",
+        str(SEGMENT_DURATION_SECONDS),
+        "-reset_timestamps",
+        "1",
+        str(output_pattern),
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        reason = (result.stderr or "ffmpeg audio conversion failed").strip()
+        raise RuntimeError(reason[:500])
+    segments = sorted(output_dir.glob("segment_*.wav"))
+    if not segments:
+        raise RuntimeError("audio conversion produced no segments")
+    return [
+        (segment, index * SEGMENT_DURATION_SECONDS * 1000)
+        for index, segment in enumerate(segments)
+    ]
+
+
+def _restore_original_timeline(
+    raw_results: list[dict[str, Any]],
+    segment_offsets: dict[str, int],
+    merge_events: Any,
+    source_name: str,
+) -> list[dict[str, Any]]:
+    """Translate segment-local event times back to the original recording."""
+
+    restored = []
+    for raw in raw_results:
+        segment_name = str(raw.get("file", ""))
+        if segment_name not in segment_offsets:
+            raise RuntimeError(f"detector returned an unknown audio segment: {segment_name}")
+        offset_seconds = segment_offsets[segment_name] / 1000
+        restored.append(
+            {
+                **raw,
+                "file": source_name,
+                "start": float(raw["start"]) + offset_seconds,
+                "end": float(raw["end"]) + offset_seconds,
+            }
+        )
+    return merge_events(restored)
+
+
+def _run_time_aligned_pipeline(input_path: Path) -> list[dict[str, Any]]:
+    """Detect events while preserving offsets across long-recording segments."""
+
+    extract_embeddings_batch, run_detection, merge_events = _load_detector_dependencies()
+    with tempfile.TemporaryDirectory(prefix="echo-micro-analysis-") as temp_name:
+        work_dir = Path(temp_name)
+        segments = _segment_audio(input_path, work_dir / "segments")
+        embedding_dir = work_dir / "embeddings"
+        extract_embeddings_batch(
+            [segment for segment, _ in segments],
+            embedding_dir,
+            batch_size=4,
+        )
+        final: dict[str, Any] | None = None
+        for progress in run_detection(embedding_dir, 0.51, input_path):
+            if progress.get("stage") == "error":
+                raise RuntimeError(str(progress.get("msg") or "detector pipeline failed"))
+            if progress.get("stage") == "done":
+                final = progress
+        if final is None:
+            raise RuntimeError("detector pipeline returned no final result")
+        offsets = {segment.name: offset for segment, offset in segments}
+        return _restore_original_timeline(
+            final.get("results") or [],
+            offsets,
+            merge_events,
+            input_path.name,
+        )
+
+
+def _wav_duration_ms(path: Path) -> int | None:
+    if path.suffix.casefold() != ".wav":
+        return None
+    try:
+        with wave.open(str(path), "rb") as audio:
+            duration = round(audio.getnframes() / audio.getframerate() * 1000)
+    except (EOFError, wave.Error, ZeroDivisionError):
+        return None
+    return duration if duration > 0 else None
+
+
+def _update_job(job_id: str, **changes: Any) -> None:
+    with _jobs_lock:
+        stored = _jobs[job_id]
+        stored.result = stored.result.model_copy(update=changes)
+        _persist_jobs_locked()
+
+
+def _detect(job_id: str, audio_path: Path) -> None:
+    _update_job(job_id, status="processing", error_message=None)
+    try:
+        with _jobs_lock:
+            scope = dict(_jobs[job_id].scope)
+        raw_results = _run_time_aligned_pipeline(audio_path)
+
+        events = []
+        for index, raw in enumerate(raw_results, start=1):
+            event_type = LABEL_MAP.get(str(raw.get("label")))
+            if event_type is None:
+                continue
+            start_ms = max(0, round(float(raw["start"]) * 1000))
+            end_ms = round(float(raw["end"]) * 1000)
+            if end_ms <= start_ms:
+                continue
+            events.append(
+                DetectionEvent(
+                    event_id=f"{job_id}-event-{index}",
+                    job_id=job_id,
+                    organization_id=scope["organization_id"],
+                    learner_id=scope.get("learner_id"),
+                    session_id=scope.get("session_id"),
+                    module_id=scope["module_id"],
+                    knowledge_point_id=scope.get("knowledge_point_id"),
+                    source_type=scope["source_type"],
+                    event_type=event_type,
+                    start_ms=start_ms,
+                    end_ms=end_ms,
+                    confidence=float(raw["score"]),
+                    evidence_uri=f"detector://{job_id}/{index}",
+                    speaker_mapping_confirmed=scope["speaker_mapping_confirmed"],
+                )
+            )
+        with _jobs_lock:
+            stored = _jobs[job_id]
+            stored.events = events
+            stored.result = stored.result.model_copy(
+                update={"status": "completed", "error_message": None}
+            )
+            _persist_jobs_locked()
+    except (ImportError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        _update_job(job_id, status="failed", error_message=str(exc)[:500])
+    finally:
+        audio_path.unlink(missing_ok=True)
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    pipeline = _speech_project_root() / "pipeline.py"
+    prototype = _speech_project_root() / "prototypes" / "behavior_prototypes.pt"
+    if not pipeline.is_file() or not prototype.is_file():
+        raise HTTPException(status_code=503, detail="SpeechProject detector assets unavailable")
+    return {"status": "ok", "mode": "real", "detector_version": SERVICE_VERSION}
+
+
+@app.post("/v1/detection/jobs", response_model=DetectionJob)
+async def create_job(
+    background_tasks: BackgroundTasks,
+    audio: Annotated[UploadFile, File()],
+    trace_id: Annotated[str, Form(min_length=1, max_length=64)],
+    organization_id: Annotated[int, Form(gt=0)],
+    program_id: Annotated[int, Form(gt=0)],
+    module_id: Annotated[int, Form(gt=0)],
+    source_type: Annotated[Literal["learner_voice", "mentor_recording"], Form()],
+    consent_granted: Annotated[bool, Form()],
+    learner_id: Annotated[int | None, Form(gt=0)] = None,
+    session_id: Annotated[int | None, Form(gt=0)] = None,
+    knowledge_point_id: Annotated[int | None, Form(gt=0)] = None,
+    speaker_mapping_confirmed: Annotated[bool, Form()] = False,
+) -> DetectionJob:
+    if not consent_granted:
+        raise HTTPException(status_code=422, detail="consent_granted must be true")
+    if source_type == "learner_voice" and learner_id is None:
+        raise HTTPException(status_code=422, detail="learner voice requires learner_id")
+    if source_type == "mentor_recording" and speaker_mapping_confirmed != (learner_id is not None):
+        raise HTTPException(
+            status_code=422,
+            detail="mentor learner_id requires confirmed speaker mapping",
+        )
+
+    suffix = Path(audio.filename or "recording.wav").suffix.casefold()
+    if suffix not in {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".webm"}:
+        raise HTTPException(status_code=415, detail="unsupported audio format")
+    temp_root = Path(tempfile.gettempdir()) / "echo-micro-detector"
+    temp_root.mkdir(parents=True, exist_ok=True)
+    audio_path = temp_root / f"{uuid.uuid4().hex}{suffix}"
+    try:
+        with audio_path.open("wb") as target:
+            while chunk := await audio.read(1024 * 1024):
+                target.write(chunk)
+    finally:
+        await audio.close()
+    if audio_path.stat().st_size == 0:
+        audio_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail="audio file is empty")
+
+    job_id = f"speech-{uuid.uuid4().hex}"
+    result = DetectionJob(
+        job_id=job_id,
+        status="queued",
+        audio_duration_ms=_wav_duration_ms(audio_path),
+    )
+    scope = {
+        "trace_id": trace_id,
+        "organization_id": organization_id,
+        "learner_id": learner_id,
+        "session_id": session_id,
+        "module_id": module_id,
+        "program_id": program_id,
+        "knowledge_point_id": knowledge_point_id,
+        "source_type": source_type,
+        "speaker_mapping_confirmed": speaker_mapping_confirmed,
+    }
+    try:
+        with _jobs_lock:
+            _jobs[job_id] = StoredJob(result=result, scope=scope)
+            _persist_jobs_locked()
+    except OSError as exc:
+        with _jobs_lock:
+            _jobs.pop(job_id, None)
+        audio_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail="failed to persist detection job") from exc
+    background_tasks.add_task(_detect, job_id, audio_path)
+    return result
+
+
+@app.get("/v1/detection/jobs/{job_id}", response_model=DetectionJob)
+def get_job(job_id: str) -> DetectionJob:
+    with _jobs_lock:
+        stored = _jobs.get(job_id)
+        if stored is None:
+            raise HTTPException(status_code=404, detail="detection job not found")
+        return stored.result.model_copy(deep=True)
+
+
+@app.get("/v1/detection/jobs/{job_id}/events")
+def get_events(job_id: str) -> dict[str, list[DetectionEvent]]:
+    with _jobs_lock:
+        stored = _jobs.get(job_id)
+        if stored is None:
+            raise HTTPException(status_code=404, detail="detection job not found")
+        if stored.result.status != "completed":
+            raise HTTPException(status_code=409, detail="detection job is not completed")
+        return {"items": [event.model_copy(deep=True) for event in stored.events]}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="127.0.0.1", port=8030)
