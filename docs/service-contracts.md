@@ -162,6 +162,9 @@ ECHO 保留任务事实并按外部服务不可用路径明确降级。
 
 任务状态固定为 `queued`、`processing`、`completed` 或 `failed`。创建任务和状态查询响应
 必须包含非空 `job_id` 和任务状态；失败时同时返回 `error_message`。
+检测器能够确定录音时长时，同时返回正整数 `audio_duration_ms`。`completed` 响应缺少该字段时，
+ECHO 可以保存事件，但课次汇总必须把前后半段趋势标为不可用并说明原因，不能用最后一个事件
+的时间代替录音时长。
 
 ECHO 保存的本地音频通过 `multipart/form-data` 流式上传，文件字段名为 `audio`，其余字段与
 `MicroDetectionRequest` 一致，但不得把 `file:///` 本机绝对路径发送给检测服务。检测服务
@@ -184,21 +187,29 @@ ECHO 分别保存检测状态与事件同步状态。创建检测任务直接返
 ECHO 主系统对外入口：
 
 - `POST /v1/micro/detection-jobs`：学习者单轮音频
+- `GET /v1/micro/learners`：讲师或系统管理员读取同组织有效学习者的最小绑定选项（仅 `id`、`username`）
 - `POST /v1/micro/mentor-batches`：讲师批量录音
 - `GET /v1/micro/mentor-batches/{batch_id}`：批量任务和课次汇总
 - `GET /v1/micro/detection-jobs/{job_id}`：任务状态
-- `POST /v1/micro/detection-jobs/{job_id}/events`：检测服务使用独立服务密钥回传事件
+- `POST /v1/micro/detection-jobs/{job_id}/events`：检测服务使用独立服务密钥回传事件；请求可同时
+  携带正整数 `audio_duration_ms`
 - `GET /v1/sessions/{session_id}/micro-events`：会话证据
 
 讲师批量上传响应包含稳定的 `batch_id`、去重后的 `job_ids` 和 `accepted` 数量。同一批次中
 完全相同的录音只关联并统计一次。`GET /v1/micro/mentor-batches/{batch_id}` 仅允许批次创建者
 和同组织系统管理员访问，返回每个任务的检测/同步状态，以及以下课次汇总：各类信号次数、
 信号总数、犹豫与思考停顿的总时长、待确认数量，并按录音时间中点比较前后半段信号数量。
+单轮音频入口只接受当前学习者自己的 `learner_voice`；讲师录音统一使用批量入口。
+讲师录音的 `learner_id` 与 `speaker_mapping_confirmed` 必须同时存在或同时为空，不一致时拒绝请求。
+前端确认说话人后必须从 `GET /v1/micro/learners` 返回的同组织有效学习者中明确选择一人；
+未确认时清空 `learner_id`，录音只进入课次统计。
 
 事件类型固定为犹豫、猜测、思考停顿、不确定、自我修正和其他。事件包含模块、知识点、
 来源、开始和结束时间、可信程度、短转写、证据地址和说话人确认状态。
 
 课次汇总包含各类信号次数、总停顿时间、前后半段变化、待确认数量和已忽略数量。
+前后半段按每段录音自己的 `audio_duration_ms` 分界；缺少时长时返回明确的趋势降级状态，
+不得根据最后一个事件时间推测录音长度。已忽略事件不计入信号次数、停顿时间和前后半段趋势。
 同一录音重复提交时返回原任务编号，不重复分析和重复计入课次汇总。
 
 未授权录音不创建任务。讲师多人录音未确认说话人时，`learner_id` 必须为空，

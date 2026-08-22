@@ -35,6 +35,7 @@ from catalog import (
 from config import Config
 from database import (
     ChatSession,
+    EvidenceStatus,
     GeneratedResource,
     KnowledgeBase,
     KnowledgePoint,
@@ -87,7 +88,9 @@ from integrations.http_client import (
     IntegrationUnavailable,
 )
 from integrations.micro_representation import MicroRepresentationClient
+from integrations.micro_summary import build_mentor_batch_summary
 from integrations.micro_sync import (
+    apply_micro_audio_duration,
     apply_micro_job_creation_result,
     persist_micro_events,
     synchronize_micro_job,
@@ -272,6 +275,12 @@ class QuizImportConfirm(BaseModel):
 
 class MicroEventBatch(BaseModel):
     items: list[MicroEventContract]
+    audio_duration_ms: int | None = Field(default=None, gt=0)
+
+
+class MicroLearnerOption(BaseModel):
+    id: int
+    username: str
 
 
 class MentorBatchResult(BaseModel):
@@ -294,6 +303,98 @@ class MicroJobSubmissionResult(BaseModel):
     source_type: str
     is_duplicate: bool = False
     retry_scheduled: bool = False
+
+
+class MicroBatchJobStatus(BaseModel):
+    job_id: str
+    status: str
+    events_sync_status: str
+    error_message: str | None = None
+    audio_duration_ms: int | None = None
+
+
+class MicroBatchTrend(BaseModel):
+    is_available: bool
+    first_half_count: int | None
+    second_half_count: int | None
+    change: int | None
+    degradation_reason: str | None
+
+
+class MicroBatchSummary(BaseModel):
+    signals_by_type: dict[str, int]
+    total_signal_count: int
+    total_pause_ms: int
+    pending_confirmation_count: int
+    ignored_count: int
+    trend: MicroBatchTrend
+
+
+class MentorBatchDetail(BaseModel):
+    batch_id: str
+    module_id: int
+    session_id: int | None
+    knowledge_point_id: int | None
+    created_at: datetime
+    jobs: list[MicroBatchJobStatus]
+    summary: MicroBatchSummary
+
+
+class MicroJobDetail(BaseModel):
+    job_id: str
+    echo_job_id: str
+    status: str
+    external_job_id: str | None
+    detector_job_id: str | None
+    events_sync_status: str
+    events_sync_error: str | None
+    events_synced_at: datetime | None
+    audio_duration_ms: int | None
+    error_message: str | None
+    degradation: str | None
+
+
+class MicroEventIngestResult(BaseModel):
+    accepted: int
+    status: str
+
+
+class SessionMicroEventItem(BaseModel):
+    event_id: str
+    event_type: str
+    start_ms: int
+    end_ms: int
+    confidence: float
+    summary: str
+    transcript: str | None
+    evidence_uri: str | None
+    evidence_status: str
+
+
+class SessionMicroEvents(BaseModel):
+    items: list[SessionMicroEventItem]
+
+
+MICRO_EVENT_LABELS = {
+    "hesitation": "犹豫",
+    "guessing": "猜测",
+    "thinking_pause": "思考停顿",
+    "uncertainty": "不确定",
+    "self_correction": "自我修正",
+    "other": "其他微表征",
+}
+
+
+def build_micro_event_summary(event_type: str, evidence_status: str) -> str:
+    """Return a deterministic behavior summary without inventing spoken words."""
+
+    label = MICRO_EVENT_LABELS.get(event_type, "未知微表征")
+    status_text = {
+        EvidenceStatus.CONFIRMED.value: "已确认",
+        EvidenceStatus.PENDING.value: "待人工确认",
+        EvidenceStatus.REJECTED.value: "已忽略",
+    }.get(evidence_status, "状态未知")
+    return f"检测到{label}信号，{status_text}"
 
 
 def ensure_catalog(db: Session) -> None:
@@ -1901,10 +2002,11 @@ def create_micro_job(
 ):
     if not consent_granted:
         raise HTTPException(status_code=400, detail="未获得录音分析授权")
-    if source_type is MicroSource.LEARNER_VOICE:
-        learner_id = user.id
-    elif user.role not in {UserRole.MENTOR.value, UserRole.SYSTEM_ADMIN.value}:
-        raise HTTPException(status_code=403, detail="只有讲师/导师可以上传培训录音")
+    if source_type is not MicroSource.LEARNER_VOICE:
+        raise HTTPException(status_code=422, detail="讲师录音必须使用批量录音接口")
+    if user.role != UserRole.LEARNER.value:
+        raise HTTPException(status_code=403, detail="只有学习者可以提交单轮语音")
+    learner_id = user.id
     creation = create_micro_job_record(
         db,
         user=user,
@@ -1948,6 +2050,27 @@ def create_micro_job(
     }
 
 
+@app.get("/v1/micro/learners", response_model=list[MicroLearnerOption])
+def list_micro_learners(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """List active learners eligible for confirmed mentor speaker binding."""
+
+    if user.role not in {UserRole.MENTOR.value, UserRole.SYSTEM_ADMIN.value}:
+        raise HTTPException(status_code=403, detail="仅讲师、导师或系统管理员可选择学习者")
+    return (
+        db.query(User)
+        .filter(
+            User.organization_id == user.organization_id,
+            User.role == UserRole.LEARNER.value,
+            User.status == "active",
+        )
+        .order_by(User.username, User.id)
+        .all()
+    )
+
+
 @app.post("/v1/micro/mentor-batches", response_model=MentorBatchResult)
 def create_mentor_batch(
     background_tasks: BackgroundTasks,
@@ -1965,6 +2088,11 @@ def create_mentor_batch(
         raise HTTPException(status_code=403, detail="仅讲师、导师或系统管理员可批量上传")
     if not consent_granted:
         raise HTTPException(status_code=400, detail="未获得录音分析授权")
+    if speaker_mapping_confirmed != (learner_id is not None):
+        raise HTTPException(
+            status_code=422,
+            detail="learner_id 与说话人确认状态不一致",
+        )
     bound_learner_id = learner_id if speaker_mapping_confirmed else None
     if not audio_files:
         raise HTTPException(status_code=422, detail="at least one audio file is required")
@@ -2063,7 +2191,7 @@ def create_mentor_batch(
     )
 
 
-@app.get("/v1/micro/mentor-batches/{batch_id}")
+@app.get("/v1/micro/mentor-batches/{batch_id}", response_model=MentorBatchDetail)
 def get_mentor_batch(
     batch_id: str,
     db: Session = Depends(get_db),
@@ -2100,18 +2228,6 @@ def get_mentor_batch(
         .order_by(MicroRepresentationEvent.start_ms)
         .all()
     ) if job_ids else []
-    signals_by_type: dict[str, int] = {}
-    total_pause_ms = 0
-    pending_confirmation_count = 0
-    for event in events:
-        signals_by_type[event.event_type] = signals_by_type.get(event.event_type, 0) + 1
-        if event.event_type in {"hesitation", "thinking_pause"}:
-            total_pause_ms += max(event.end_ms - event.start_ms, 0)
-        if event.evidence_status != "confirmed":
-            pending_confirmation_count += 1
-    midpoint_ms = max((event.end_ms for event in events), default=0) / 2
-    first_half_count = sum(event.start_ms < midpoint_ms for event in events)
-    second_half_count = len(events) - first_half_count
     return {
         "batch_id": batch.id,
         "module_id": batch.module_id,
@@ -2124,21 +2240,12 @@ def get_mentor_batch(
                 "status": job.status,
                 "events_sync_status": job.events_sync_status,
                 "error_message": job.error_message,
+                "audio_duration_ms": job.audio_duration_ms,
             }
             for link in links
             if (job := jobs_by_id.get(link.job_id)) is not None
         ],
-        "summary": {
-            "signals_by_type": signals_by_type,
-            "total_signal_count": len(events),
-            "total_pause_ms": total_pause_ms,
-            "pending_confirmation_count": pending_confirmation_count,
-            "trend": {
-                "first_half_count": first_half_count,
-                "second_half_count": second_half_count,
-                "change": second_half_count - first_half_count,
-            },
-        },
+        "summary": build_mentor_batch_summary(jobs_by_id, events),
     }
 
 
@@ -2181,7 +2288,7 @@ def queue_awaiting_micro_job_retry(
     return True
 
 
-@app.get("/v1/micro/detection-jobs/{job_id}")
+@app.get("/v1/micro/detection-jobs/{job_id}", response_model=MicroJobDetail)
 def get_micro_job(
     job_id: str,
     background_tasks: BackgroundTasks,
@@ -2234,12 +2341,16 @@ def get_micro_job(
         "events_sync_status": job.events_sync_status,
         "events_sync_error": job.events_sync_error,
         "events_synced_at": job.events_synced_at,
+        "audio_duration_ms": job.audio_duration_ms,
         "error_message": job.error_message,
         "degradation": degradation,
     }
 
 
-@app.post("/v1/micro/detection-jobs/{job_id}/events")
+@app.post(
+    "/v1/micro/detection-jobs/{job_id}/events",
+    response_model=MicroEventIngestResult,
+)
 def ingest_micro_events(
     job_id: str,
     batch: MicroEventBatch,
@@ -2250,16 +2361,33 @@ def ingest_micro_events(
     job = db.query(MicroDetectionJob).filter_by(id=job_id).first()
     if job is None:
         raise HTTPException(status_code=404, detail="检测任务不存在")
+    if not job.external_job_id:
+        raise HTTPException(status_code=409, detail="检测任务尚未绑定外部任务编号")
+    if job.status == "failed":
+        raise HTTPException(status_code=409, detail="失败的检测任务不能接收事件回调")
     try:
+        apply_micro_audio_duration(job, batch.audio_duration_ms)
         accepted = persist_micro_events(
             db,
             job,
             batch.items,
-            expected_event_job_id=job.external_job_id or "",
+            expected_event_job_id=job.external_job_id,
         )
-    except IntegrationUnavailable as exc:
+    except IntegrationContractError as exc:
+        db.rollback()
+        failed_job = db.query(MicroDetectionJob).filter_by(id=job_id).first()
+        if failed_job is not None:
+            failed_job.status = "failed"
+            failed_job.error_message = str(exc)
+            failed_job.events_sync_status = "failed"
+            failed_job.events_sync_error = str(exc)
+            db.commit()
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except IntegrationUnavailable as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     job.status = "completed"
+    job.error_message = None
     job.events_sync_status = "synced"
     job.events_sync_error = None
     job.events_synced_at = datetime.now(UTC)
@@ -2267,7 +2395,7 @@ def ingest_micro_events(
     return {"accepted": accepted, "status": job.status}
 
 
-@app.get("/v1/sessions/{session_id}/micro-events")
+@app.get("/v1/sessions/{session_id}/micro-events", response_model=SessionMicroEvents)
 def session_micro_events(
     session_id: int,
     db: Session = Depends(get_db),
@@ -2288,6 +2416,7 @@ def session_micro_events(
                 "start_ms": row.start_ms,
                 "end_ms": row.end_ms,
                 "confidence": row.confidence,
+                "summary": build_micro_event_summary(row.event_type, row.evidence_status),
                 "transcript": row.transcript,
                 "evidence_uri": row.evidence_uri,
                 "evidence_status": row.evidence_status,

@@ -14,6 +14,7 @@ SERVICE_ROOT = Path(__file__).resolve().parents[2] / "services" / "micro_detecto
 sys.path.insert(0, str(SERVICE_ROOT))
 
 from micro_detector.app import _jobs, app  # noqa: E402
+from micro_detector.schemas import DetectionEvent, DetectionJob  # noqa: E402
 
 
 def request_fields(**overrides: object) -> dict[str, object]:
@@ -49,6 +50,25 @@ def test_health_identifies_mock_mode() -> None:
     }
 
 
+def test_mock_response_models_enforce_the_shared_contract() -> None:
+    with pytest.raises(ValueError, match="error_message"):
+        DetectionJob(job_id="failed-job", status="failed")
+    with pytest.raises(ValueError, match="end_ms"):
+        DetectionEvent(
+            event_id="e" * 100,
+            job_id="detector-job",
+            organization_id=1,
+            learner_id=7,
+            module_id=2,
+            source_type="learner_voice",
+            event_type="hesitation",
+            start_ms=20,
+            end_ms=10,
+            confidence=0.8,
+            speaker_mapping_confirmed=True,
+        )
+
+
 def test_uploaded_audio_completes_contract_and_is_idempotent() -> None:
     client = TestClient(app)
     first = client.post(
@@ -64,6 +84,7 @@ def test_uploaded_audio_completes_contract_and_is_idempotent() -> None:
 
     assert first.status_code == 200
     assert second.json() == first.json()
+    assert first.json()["audio_duration_ms"] == 4000
     job_id = first.json()["job_id"]
     assert client.get(f"/v1/detection/jobs/{job_id}").json()["status"] == "completed"
     events = client.get(f"/v1/detection/jobs/{job_id}/events").json()["items"]
@@ -79,6 +100,7 @@ def test_unconfirmed_mentor_speaker_is_not_bound_to_learner() -> None:
         json={
             **request_fields(
                 source_type="mentor_recording",
+                learner_id=None,
                 speaker_mapping_confirmed=False,
             ),
             "audio_uri": "https://media.example/lesson.wav",
@@ -138,6 +160,7 @@ def test_echo_adapter_and_mock_service_share_the_multipart_contract(
     detector_job_id = created["job_id"]
 
     assert created["status"] == "completed"
+    assert created["audio_duration_ms"] == 4000
     assert client.get_job(detector_job_id)["job_id"] == detector_job_id
     events = client.get_events(detector_job_id)
     assert len(events) == 1

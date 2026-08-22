@@ -16,6 +16,7 @@ from database import (
 from integrations.contracts import MicroRepresentationEvent as MicroEventContract
 from integrations.http_client import IntegrationUnavailable
 from integrations.micro_sync import (
+    apply_micro_audio_duration,
     apply_micro_job_creation_result,
     persist_micro_events,
     synchronize_micro_job,
@@ -129,7 +130,11 @@ def test_completed_job_persists_events_idempotently() -> None:
         ),
     ]
     client = FakeDetectorClient(
-        {"job_id": job.external_job_id, "status": "completed"},
+        {
+            "job_id": job.external_job_id,
+            "status": "completed",
+            "audio_duration_ms": 4000,
+        },
         events,
     )
 
@@ -141,6 +146,7 @@ def test_completed_job_persists_events_idempotently() -> None:
     assert first == 2
     assert second == 0
     assert db.query(MicroRepresentationEvent).count() == 2
+    assert job.audio_duration_ms == 4000
     assert db.get(MicroRepresentationEvent, "event-001").evidence_status == EvidenceStatus.CONFIRMED.value
     assert db.get(MicroRepresentationEvent, "event-002").evidence_status == EvidenceStatus.PENDING.value
 
@@ -157,7 +163,11 @@ def test_create_response_completed_immediately_imports_events() -> None:
         db,
         job,
         client,
-        {"job_id": "detector-direct", "status": "completed"},
+        {
+            "job_id": "detector-direct",
+            "status": "completed",
+            "audio_duration_ms": 4000,
+        },
     )
     db.commit()
 
@@ -165,6 +175,43 @@ def test_create_response_completed_immediately_imports_events() -> None:
     assert job.status == "completed"
     assert job.events_sync_status == "synced"
     assert job.events_synced_at is not None
+    assert job.audio_duration_ms == 4000
+
+
+def test_event_outside_recording_duration_is_rejected() -> None:
+    db, job, organization, learner, module, point = make_job_context()
+    job.audio_duration_ms = 1500
+    event = make_event(job, organization, learner, module, point, end_ms=1800)
+
+    with pytest.raises(IntegrationUnavailable, match="recording duration"):
+        persist_micro_events(
+            db,
+            job,
+            [event],
+            expected_event_job_id=job.external_job_id,
+        )
+
+    assert db.query(MicroRepresentationEvent).count() == 0
+
+
+def test_recording_duration_cannot_change_after_it_is_stored() -> None:
+    db, job, *_ = make_job_context()
+
+    apply_micro_audio_duration(job, 4000)
+
+    with pytest.raises(IntegrationUnavailable, match="conflicts"):
+        apply_micro_audio_duration(job, 3500)
+    assert job.audio_duration_ms == 4000
+    db.close()
+
+
+@pytest.mark.parametrize("duration_ms", [0, -1, True, 1.5, "4000"])
+def test_recording_duration_requires_a_positive_integer(duration_ms) -> None:
+    db, job, *_ = make_job_context()
+
+    with pytest.raises(IntegrationUnavailable, match="positive integer"):
+        apply_micro_audio_duration(job, duration_ms)
+    db.close()
 
 
 def test_completed_job_with_empty_events_is_still_marked_synced() -> None:

@@ -332,6 +332,7 @@ class MicroDetectionJob(Base):
     events_sync_status = Column(String(20), nullable=False, default="pending")
     events_sync_error = Column(Text, nullable=True)
     events_synced_at = Column(DateTime, nullable=True)
+    audio_duration_ms = Column(Integer, nullable=True)
     audio_sha256 = Column(String(64), nullable=True, index=True)
     dedupe_key = Column(String(64), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.now)
@@ -375,7 +376,7 @@ class MicroMentorBatchJob(Base):
 class MicroRepresentationEvent(Base):
     __tablename__ = "micro_representation_events"
 
-    id = Column(String(64), primary_key=True)
+    id = Column(String(100), primary_key=True)
     job_id = Column(String(64), ForeignKey("micro_detection_jobs.id"), nullable=False, index=True)
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     learner_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
@@ -537,6 +538,7 @@ def _ensure_micro_job_columns() -> None:
         "events_sync_status": "VARCHAR(20) DEFAULT 'pending' NOT NULL",
         "events_sync_error": "TEXT",
         "events_synced_at": "DATETIME",
+        "audio_duration_ms": "INTEGER",
         "audio_sha256": "VARCHAR(64)",
         "dedupe_key": "VARCHAR(64)",
     }
@@ -568,7 +570,7 @@ def _ensure_micro_job_columns() -> None:
 
 
 def _ensure_micro_event_columns() -> None:
-    """Add explicit speaker confirmation to existing micro events."""
+    """Keep micro event identity and speaker fields compatible with the v1 contract."""
 
     inspector = inspect(engine)
     if "micro_representation_events" not in inspector.get_table_names():
@@ -590,6 +592,20 @@ def _ensure_micro_event_columns() -> None:
                     "SET speaker_mapping_confirmed = 1 WHERE learner_id IS NOT NULL"
                 )
             )
+    if engine.dialect.name == "mysql":
+        id_column = next(
+            column
+            for column in inspect(engine).get_columns("micro_representation_events")
+            if column["name"] == "id"
+        )
+        if getattr(id_column["type"], "length", None) != 100:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE micro_representation_events "
+                        "MODIFY COLUMN id VARCHAR(100) NOT NULL"
+                    )
+                )
 
 
 def _ensure_upload_rag_columns() -> None:

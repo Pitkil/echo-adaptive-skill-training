@@ -28,6 +28,7 @@ class StoredJob:
 
 _jobs: dict[str, StoredJob] = {}
 _MAX_MOCK_AUDIO_BYTES = 25 * 1024 * 1024
+_MOCK_AUDIO_DURATION_MS = 4000
 
 
 def _create_completed_job(metadata: DetectionMetadata, audio_identity: bytes) -> DetectionJob:
@@ -56,7 +57,11 @@ def _create_completed_job(metadata: DetectionMetadata, audio_identity: bytes) ->
         evidence_uri=f"mock://detection-jobs/{job_id}",
         speaker_mapping_confirmed=metadata.speaker_mapping_confirmed,
     )
-    result = DetectionJob(job_id=job_id, status="completed")
+    result = DetectionJob(
+        job_id=job_id,
+        status="completed",
+        audio_duration_ms=_MOCK_AUDIO_DURATION_MS,
+    )
     _jobs[job_id] = StoredJob(result=result, events=(event,))
     return result
 
@@ -74,7 +79,7 @@ async def create_job(request: Request) -> DetectionJob:
             audio = form.get("audio")
             if not isinstance(audio, UploadFile):
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=422,
                     detail="audio file is required",
                 )
             metadata = DetectionMetadata.model_validate(
@@ -92,7 +97,7 @@ async def create_job(request: Request) -> DetectionJob:
                 audio_hash.update(chunk)
             if size == 0:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=422,
                     detail="audio is empty",
                 )
             return _create_completed_job(metadata, audio_hash.digest())
@@ -101,7 +106,7 @@ async def create_job(request: Request) -> DetectionJob:
         return _create_completed_job(payload, payload.audio_uri.encode())
     except ValidationError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail=exc.errors(include_url=False, include_context=False),
         ) from exc
 
