@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -219,13 +220,17 @@ def _restore_original_timeline(
     return merge_events(restored)
 
 
-def _run_time_aligned_pipeline(input_path: Path) -> list[dict[str, Any]]:
+def _run_time_aligned_pipeline(input_path: Path) -> tuple[list[dict[str, Any]], int]:
     """Detect events while preserving offsets across long-recording segments."""
 
     extract_embeddings_batch, run_detection, merge_events = _load_detector_dependencies()
     with tempfile.TemporaryDirectory(prefix="echo-micro-analysis-") as temp_name:
         work_dir = Path(temp_name)
         segments = _segment_audio(input_path, work_dir / "segments")
+        segment_durations = [_wav_duration_ms(segment) for segment, _ in segments]
+        if any(duration is None for duration in segment_durations):
+            raise RuntimeError("converted audio segment duration is unavailable")
+        audio_duration_ms = sum(duration for duration in segment_durations if duration is not None)
         embedding_dir = work_dir / "embeddings"
         extract_embeddings_batch(
             [segment for segment, _ in segments],
@@ -241,11 +246,14 @@ def _run_time_aligned_pipeline(input_path: Path) -> list[dict[str, Any]]:
         if final is None:
             raise RuntimeError("detector pipeline returned no final result")
         offsets = {segment.name: offset for segment, offset in segments}
-        return _restore_original_timeline(
-            final.get("results") or [],
-            offsets,
-            merge_events,
-            input_path.name,
+        return (
+            _restore_original_timeline(
+                final.get("results") or [],
+                offsets,
+                merge_events,
+                input_path.name,
+            ),
+            audio_duration_ms,
         )
 
 
@@ -268,11 +276,11 @@ def _update_job(job_id: str, **changes: Any) -> None:
 
 
 def _detect(job_id: str, audio_path: Path) -> None:
-    _update_job(job_id, status="processing", error_message=None)
     try:
+        _update_job(job_id, status="processing", error_message=None)
         with _jobs_lock:
             scope = dict(_jobs[job_id].scope)
-        raw_results = _run_time_aligned_pipeline(audio_path)
+        raw_results, audio_duration_ms = _run_time_aligned_pipeline(audio_path)
 
         events = []
         for index, raw in enumerate(raw_results, start=1):
@@ -280,7 +288,7 @@ def _detect(job_id: str, audio_path: Path) -> None:
             if event_type is None:
                 continue
             start_ms = max(0, round(float(raw["start"]) * 1000))
-            end_ms = round(float(raw["end"]) * 1000)
+            end_ms = min(round(float(raw["end"]) * 1000), audio_duration_ms)
             if end_ms <= start_ms:
                 continue
             events.append(
@@ -305,21 +313,39 @@ def _detect(job_id: str, audio_path: Path) -> None:
             stored = _jobs[job_id]
             stored.events = events
             stored.result = stored.result.model_copy(
-                update={"status": "completed", "error_message": None}
+                update={
+                    "status": "completed",
+                    "error_message": None,
+                    "audio_duration_ms": audio_duration_ms,
+                }
             )
             _persist_jobs_locked()
     except (ImportError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
-        _update_job(job_id, status="failed", error_message=str(exc)[:500])
+        try:
+            _update_job(job_id, status="failed", error_message=str(exc)[:500])
+        except (KeyError, OSError):
+            pass
     finally:
         audio_path.unlink(missing_ok=True)
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    pipeline = _speech_project_root() / "pipeline.py"
-    prototype = _speech_project_root() / "prototypes" / "behavior_prototypes.pt"
-    if not pipeline.is_file() or not prototype.is_file():
-        raise HTTPException(status_code=503, detail="SpeechProject detector assets unavailable")
+    root = _speech_project_root()
+    required_assets = [
+        root / "pipeline.py",
+        root / "detection_utils.py",
+        root / "step3.py",
+        root / "prototypes" / "behavior_prototypes.pt",
+    ]
+    missing_assets = [str(path) for path in required_assets if not path.is_file()]
+    if missing_assets:
+        raise HTTPException(
+            status_code=503,
+            detail=f"SpeechProject detector assets unavailable: {', '.join(missing_assets)}",
+        )
+    if shutil.which("ffmpeg") is None:
+        raise HTTPException(status_code=503, detail="ffmpeg executable is unavailable")
     return {"status": "ok", "mode": "real", "detector_version": SERVICE_VERSION}
 
 

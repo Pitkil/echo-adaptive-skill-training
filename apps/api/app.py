@@ -278,6 +278,11 @@ class MicroEventBatch(BaseModel):
     audio_duration_ms: int | None = Field(default=None, gt=0)
 
 
+class MicroLearnerOption(BaseModel):
+    id: int
+    username: str
+
+
 class MentorBatchResult(BaseModel):
     batch_id: str
     job_ids: list[str]
@@ -2043,6 +2048,27 @@ def create_micro_job(
         "is_duplicate": not creation.is_created,
         "retry_scheduled": retry_scheduled,
     }
+
+
+@app.get("/v1/micro/learners", response_model=list[MicroLearnerOption])
+def list_micro_learners(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """List active learners eligible for confirmed mentor speaker binding."""
+
+    if user.role not in {UserRole.MENTOR.value, UserRole.SYSTEM_ADMIN.value}:
+        raise HTTPException(status_code=403, detail="仅讲师、导师或系统管理员可选择学习者")
+    return (
+        db.query(User)
+        .filter(
+            User.organization_id == user.organization_id,
+            User.role == UserRole.LEARNER.value,
+            User.status == "active",
+        )
+        .order_by(User.username, User.id)
+        .all()
+    )
 
 
 @app.post("/v1/micro/mentor-batches", response_model=MentorBatchResult)

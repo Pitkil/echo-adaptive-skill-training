@@ -10,6 +10,7 @@
         modules: [],
         moduleId: null,
         knowledgePoints: [],
+        microLearners: [],
         quizPreviewId: null,
         sessionId: null,
         authMode: "login",
@@ -102,6 +103,7 @@
         state.modules = [];
         state.moduleId = null;
         state.knowledgePoints = [];
+        state.microLearners = [];
         state.quizPreviewId = null;
         state.sessionId = null;
         resetPrivilegedViews();
@@ -119,6 +121,9 @@
         $("#quiz-preview-list").innerHTML = "";
         $("#quiz-preview-section").classList.add("hidden");
         $("#quiz-import-status").textContent = "选择模块、知识点和题库文件后开始识别。";
+        $("#mentor-learner-select").innerHTML = '<option value="">请先确认说话人</option>';
+        $("#speaker-confirmed").checked = false;
+        syncSpeakerBindingControl();
     }
 
     async function enterApp() {
@@ -135,6 +140,7 @@
             node.classList.toggle("hidden", state.role !== "system_admin");
         });
         await loadCatalog();
+        await loadMicroLearners();
         await Promise.all([restoreLatestSession(), checkHealth()]);
         await Promise.all([loadInsight(), loadResources()]);
         iconRefresh();
@@ -652,10 +658,14 @@
         if (!$("#mentor-consent").checked) return toast("请先确认录音分析授权");
         const files = Array.from($("#mentor-audio-files").files);
         if (!files.length) return toast("请选择至少一个录音文件");
+        const speakerConfirmed = $("#speaker-confirmed").checked;
+        const learnerId = $("#mentor-learner-select").value;
+        if (speakerConfirmed && !learnerId) return toast("请选择已确认的学习者");
         const data = new FormData();
         data.append("module_id", String(state.moduleId));
         data.append("consent_granted", "true");
-        data.append("speaker_mapping_confirmed", String($("#speaker-confirmed").checked));
+        data.append("speaker_mapping_confirmed", String(speakerConfirmed));
+        if (speakerConfirmed) data.append("learner_id", learnerId);
         files.forEach((file) => data.append("audio_files", file));
         try {
             const response = await api("/v1/micro/mentor-batches", {method: "POST", body: data});
@@ -667,6 +677,36 @@
         } catch (error) {
             $("#mentor-job-status").textContent = error.message;
         }
+    }
+
+    function syncSpeakerBindingControl() {
+        const confirmed = $("#speaker-confirmed").checked;
+        const select = $("#mentor-learner-select");
+        select.disabled = !confirmed || !state.microLearners.length;
+        if (!confirmed) select.value = "";
+    }
+
+    async function loadMicroLearners() {
+        if (!["mentor", "system_admin"].includes(state.role)) {
+            state.microLearners = [];
+            syncSpeakerBindingControl();
+            return;
+        }
+        try {
+            const response = await api("/v1/micro/learners");
+            state.microLearners = await response.json();
+            $("#mentor-learner-select").innerHTML = [
+                '<option value="">请选择学习者</option>',
+                ...state.microLearners.map((learner) => (
+                    `<option value="${learner.id}">${escapeHtml(learner.username)}</option>`
+                )),
+            ].join("");
+        } catch (error) {
+            state.microLearners = [];
+            $("#mentor-learner-select").innerHTML = '<option value="">学员列表加载失败</option>';
+            $("#mentor-job-status").textContent = error.message;
+        }
+        syncSpeakerBindingControl();
     }
 
     async function uploadKnowledge() {
@@ -951,6 +991,7 @@
         $("#record-button").addEventListener("click", startOrStopRecording);
         $("#upload-learner-audio").addEventListener("click", uploadLearnerAudio);
         $("#upload-mentor-audio").addEventListener("click", uploadMentorAudio);
+        $("#speaker-confirmed").addEventListener("change", syncSpeakerBindingControl);
         $("#upload-knowledge").addEventListener("click", uploadKnowledge);
         $("#material-module-select").addEventListener("change", loadKnowledgeDocuments);
         $("#quiz-module-select").addEventListener("change", () => {
