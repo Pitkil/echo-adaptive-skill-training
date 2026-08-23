@@ -226,11 +226,23 @@ ECHO 主系统对外入口：
 - `evidence_and_blind_spots`：有作答依据的知识盲区、已掌握知识点、相关题目、得分、时间、
   已确认微表征、长期记忆摘要和判断可靠程度。
 - `path_and_resources`：推荐难度、下一知识点、推荐内容形式、推荐辅导方式、学习顺序、
-  推荐原因和证据来源。
+  推荐原因和证据来源；同时包含 `learner_profile` 和 `primary_content_decision`。
+
+`learner_profile` 只根据已判分作答、U/A/R、正确率和有作答证据的盲区归入 P1、P2 或 P3。
+无可判分作答时 `type` 必须为 `null` 且 `evidence_status` 为 `insufficient`，不得根据长期记忆或
+微表征猜测能力类型。三类画像向内容生成方提供不同的 `explanation_depth`、`step_detail` 和
+`support_level`，固定样例见 `docs/member-c/learner-profile-samples.json`。
+
+`primary_content_decision` 每轮只允许一个主要动作。未完成前测时返回
+`action=complete_pretest`、`resource_count=0`；证据足够时返回 `action=generate_resource`、唯一
+`resource_type`、`resource_count=1` 和 `selection_policy=single_most_needed`。三种资源是系统能力
+范围，不表示每次同时生成三份。成员 A 的生成编排必须按该唯一决定生成和校验当前资源。
 
 MIRT 更新接口只接受有效题目和唯一 `attempt_id`。重复编号必须返回原状态，不重复更新。
 只有作答证据支持的知识点才能标为盲区。微表征和长期记忆不能直接修改 U/A/R。
 大模型只负责把上述结果写成易懂文字；无证据时返回“暂不能判断”，模型不可用时使用固定模板。
+成员 C 的 10 组跨会话长期记忆差异案例见 `docs/member-c/memory-difference-cases.json`，所有案例
+均要求长期记忆和微表征不直接改变 U/A/R。
 
 ## 联调规则
 

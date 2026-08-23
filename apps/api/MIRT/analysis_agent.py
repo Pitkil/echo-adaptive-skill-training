@@ -29,6 +29,26 @@ CONTENT_FORMAT_BY_DIMENSION = {
     "A": "practice_guide",
     "R": "staged_test",
 }
+LEARNER_PROFILE_REQUIREMENTS = {
+    "P1": {
+        "label": "基础巩固型",
+        "explanation_depth": "concept_first",
+        "step_detail": "detailed",
+        "support_level": "high",
+    },
+    "P2": {
+        "label": "理论转实践型",
+        "explanation_depth": "application_focused",
+        "step_detail": "moderate",
+        "support_level": "medium",
+    },
+    "P3": {
+        "label": "工程进阶型",
+        "explanation_depth": "architecture_and_tradeoffs",
+        "step_detail": "high_level",
+        "support_level": "low",
+    },
+}
 
 
 class LearnerInsightService:
@@ -360,6 +380,12 @@ class LearnerInsightService:
             for dimension in ("U", "A", "R")
         }
         weakest_dimension = min(ability_values, key=ability_values.get) if attempts else None
+        learner_profile = self._classify_learner_profile(
+            attempts=attempts,
+            ability_values=ability_values,
+            average_accuracy=average_accuracy,
+            blind_spots=blind_spots,
+        )
 
         if attempts == 0:
             recommended_difficulty = "foundation"
@@ -415,6 +441,7 @@ class LearnerInsightService:
             )
 
         return {
+            "learner_profile": learner_profile,
             "recommended_difficulty": recommended_difficulty,
             "next_knowledge_point": next_point,
             "recommended_content_format": content_format,
@@ -425,10 +452,77 @@ class LearnerInsightService:
             "primary_content_decision": {
                 "action": "complete_pretest" if attempts == 0 else "generate_resource",
                 "content_format": content_format,
+                "resource_type": content_format if attempts else None,
+                "resource_count": 0 if attempts == 0 else 1,
+                "selection_policy": "single_most_needed",
                 "knowledge_point_id": (
                     next_point["knowledge_point_id"] if next_point is not None else None
                 ),
                 "difficulty": recommended_difficulty,
+            },
+        }
+
+    @staticmethod
+    def _classify_learner_profile(
+        *,
+        attempts: int,
+        ability_values: dict[str, float],
+        average_accuracy: float | None,
+        blind_spots: list[dict],
+    ) -> dict:
+        """Classify the three fixed demo profiles using scored evidence only."""
+
+        if attempts == 0:
+            return {
+                "type": None,
+                "label": "待完成前测",
+                "reason": "尚无可判分作答，不能归入 P1、P2 或 P3。",
+                "evidence_status": "insufficient",
+                "content_requirements": {},
+            }
+
+        minimum_ability = min(ability_values.values())
+        average_ability = sum(ability_values.values()) / len(ability_values)
+        is_strong_and_stable = (
+            minimum_ability >= 0.8
+            and average_accuracy is not None
+            and average_accuracy >= 0.8
+            and not blind_spots
+        )
+        application_gap = ability_values["U"] - ability_values["A"]
+        is_theory_to_practice = (
+            ability_values["U"] >= 0.3
+            and ability_values["A"] == minimum_ability
+            and application_gap >= 0.3
+        )
+
+        if is_strong_and_stable:
+            profile_type = "P3"
+            reason = "三项能力和正确率均较高，且没有作答支持的知识盲区。"
+        elif is_theory_to_practice:
+            profile_type = "P2"
+            reason = "理解能力已有基础，但应用能力明显较弱，需要从理论转向实践。"
+        else:
+            profile_type = "P1"
+            reason_parts = ["当前能力仍需基础巩固"]
+            if average_accuracy is not None and average_accuracy < 0.6:
+                reason_parts.append("近期正确率低于 60%")
+            if blind_spots:
+                reason_parts.append(f"存在 {len(blind_spots)} 个有作答证据的知识盲区")
+            if average_ability < 0.3:
+                reason_parts.append("三项能力平均值低于 0.3")
+            reason = "；".join(reason_parts) + "。"
+
+        requirements = LEARNER_PROFILE_REQUIREMENTS[profile_type]
+        return {
+            "type": profile_type,
+            "label": requirements["label"],
+            "reason": reason,
+            "evidence_status": "supported",
+            "content_requirements": {
+                key: value
+                for key, value in requirements.items()
+                if key != "label"
             },
         }
 
@@ -512,8 +606,16 @@ class LearnerInsightService:
             )
         next_point = recommendation["next_knowledge_point"]
         next_point_name = next_point["name"] if next_point is not None else "暂未确定"
+        learner_profile = recommendation["learner_profile"]
+        if learner_profile["type"] is None:
+            profile_text = "当前尚不能确定 P1、P2 或 P3 画像。"
+        else:
+            profile_text = (
+                f"当前画像为 {learner_profile['type']}（{learner_profile['label']}），"
+                f"依据为：{learner_profile['reason']}"
+            )
         path_text = (
-            f"推荐难度为 {recommendation['recommended_difficulty']}，"
+            f"{profile_text}推荐难度为 {recommendation['recommended_difficulty']}，"
             f"下一知识点为“{next_point_name}”，"
             f"内容形式为 {recommendation['recommended_content_format']}，"
             f"辅导方式为 {recommendation['recommended_tutoring_method']}。"

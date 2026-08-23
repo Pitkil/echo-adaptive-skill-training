@@ -231,11 +231,19 @@ def test_learning_insight_has_fixed_sections_and_traceable_recommendation() -> N
     assert all(item["occurred_at"] for item in blind_spot["evidence"])
 
     path_view = profile["views"]["path_and_resources"]
+    assert path_view["learner_profile"]["type"] == "P1"
+    assert path_view["learner_profile"]["evidence_status"] == "supported"
     assert path_view["recommended_difficulty"] == "foundation"
     assert path_view["next_knowledge_point"]["knowledge_point_id"] == weak_point.id
     assert path_view["recommended_content_format"] == "practice_guide"
     assert path_view["recommended_tutoring_method"] == "step_by_step_with_checkpoints"
     assert path_view["primary_content_decision"]["action"] == "generate_resource"
+    assert path_view["primary_content_decision"]["resource_type"] == "practice_guide"
+    assert path_view["primary_content_decision"]["resource_count"] == 1
+    assert (
+        path_view["primary_content_decision"]["selection_policy"]
+        == "single_most_needed"
+    )
     assert {item["source_type"] for item in path_view["evidence_sources"]} >= {
         "scored_attempt",
         "confirmed_micro_event",
@@ -245,6 +253,7 @@ def test_learning_insight_has_fixed_sections_and_traceable_recommendation() -> N
 
     assert profile["narrative_report"]["source"] == "deterministic_template"
     assert "知识盲区" in profile["narrative_report"]["evidence_and_blind_spots"]
+    assert "P1（基础巩固型）" in profile["narrative_report"]["path_and_resources"]
     assert next_point.id != path_view["next_knowledge_point"]["knowledge_point_id"]
 
 
@@ -263,8 +272,43 @@ def test_learning_insight_does_not_invent_ability_or_blind_spots_without_attempt
     assert path_view["primary_content_decision"] == {
         "action": "complete_pretest",
         "content_format": "diagnostic_pretest",
+        "resource_type": None,
+        "resource_count": 0,
+        "selection_policy": "single_most_needed",
         "knowledge_point_id": first_point.id,
         "difficulty": "foundation",
     }
+    assert path_view["learner_profile"]["type"] is None
+    assert path_view["learner_profile"]["evidence_status"] == "insufficient"
     assert "暂不能判断" in profile["narrative_report"]["ability_and_trend"]
     assert "暂不能判断" in profile["narrative_report"]["evidence_and_blind_spots"]
+    assert "尚不能确定 P1、P2 或 P3" in profile["narrative_report"]["path_and_resources"]
+
+
+def test_three_fixed_learner_profiles_produce_distinct_supported_requirements() -> None:
+    classifier = LearnerInsightService._classify_learner_profile
+
+    p1 = classifier(
+        attempts=4,
+        ability_values={"U": -0.4, "A": -0.8, "R": -0.2},
+        average_accuracy=0.4,
+        blind_spots=[{"knowledge_point_id": 1}],
+    )
+    p2 = classifier(
+        attempts=6,
+        ability_values={"U": 0.7, "A": 0.1, "R": 0.5},
+        average_accuracy=0.7,
+        blind_spots=[],
+    )
+    p3 = classifier(
+        attempts=8,
+        ability_values={"U": 1.0, "A": 0.9, "R": 0.8},
+        average_accuracy=0.875,
+        blind_spots=[],
+    )
+
+    assert [p1["type"], p2["type"], p3["type"]] == ["P1", "P2", "P3"]
+    assert p1["content_requirements"]["support_level"] == "high"
+    assert p2["content_requirements"]["explanation_depth"] == "application_focused"
+    assert p3["content_requirements"]["step_detail"] == "high_level"
+    assert len({p1["reason"], p2["reason"], p3["reason"]}) == 3
