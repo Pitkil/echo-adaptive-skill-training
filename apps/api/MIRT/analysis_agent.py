@@ -29,6 +29,26 @@ CONTENT_FORMAT_BY_DIMENSION = {
     "A": "practice_guide",
     "R": "staged_test",
 }
+LEARNER_PROFILE_REQUIREMENTS = {
+    "P1": {
+        "label": "基础巩固型",
+        "explanation_depth": "concept_first",
+        "step_detail": "detailed",
+        "support_level": "high",
+    },
+    "P2": {
+        "label": "理论转实践型",
+        "explanation_depth": "application_focused",
+        "step_detail": "moderate",
+        "support_level": "medium",
+    },
+    "P3": {
+        "label": "工程进阶型",
+        "explanation_depth": "architecture_and_tradeoffs",
+        "step_detail": "high_level",
+        "support_level": "low",
+    },
+}
 
 
 class LearnerInsightService:
@@ -59,6 +79,7 @@ class LearnerInsightService:
             "updated_at": ability.updated_at.isoformat() if ability else None,
         }
         blind_spots, mastered = self._knowledge_point_status(user_id, module_id)
+        scored_evidence = self._scored_assessment_evidence(user_id, module_id)
         micro = self._micro_evidence(user_id, module_id)
         difficulty = self._difficulty_match(user_id, module_id, ability)
         path = self._learning_path(module_id, blind_spots, mastered)
@@ -69,12 +90,13 @@ class LearnerInsightService:
         )
         recent = build_daily_series(self.db, user_id, module_id, days=30)
         average_accuracy = self._average_accuracy(recent)
+        profile_accuracy = self._scored_evidence_accuracy(scored_evidence)
         accuracy_trend = self._period_accuracy_trend(recent)
         recommendation = self._build_recommendation(
             ability_payload=ability_payload,
-            average_accuracy=average_accuracy,
+            profile_accuracy=profile_accuracy,
+            scored_evidence=scored_evidence,
             blind_spots=blind_spots,
-            mastered=mastered,
             learning_path=path,
             micro=micro,
             memory_items=memory_items or [],
@@ -95,6 +117,7 @@ class LearnerInsightService:
                     "ability_trend": self._ability_dimension_trend(ability_payload),
                     "daily_series": recent,
                     "average_accuracy": average_accuracy,
+                    "profile_accuracy": profile_accuracy,
                     "accuracy_trend": accuracy_trend,
                 },
                 "evidence_and_blind_spots": {
@@ -167,6 +190,32 @@ class LearnerInsightService:
             elif total >= 2 and accuracy is not None and accuracy >= 0.8:
                 mastered.append(payload)
         return blind_spots, mastered
+
+    def _scored_assessment_evidence(self, user_id: int, module_id: int) -> list[dict]:
+        """Return lifetime MIRT-scored attempts used to classify the learner profile."""
+
+        rows = (
+            self.db.query(StudentQuestionHistory, Quiz)
+            .join(Quiz, StudentQuestionHistory.question_id == Quiz.id)
+            .filter(
+                StudentQuestionHistory.user_id == user_id,
+                Quiz.module_id == module_id,
+                Quiz.counts_for_mirt.is_(True),
+            )
+            .order_by(StudentQuestionHistory.created_at, StudentQuestionHistory.id)
+            .all()
+        )
+        return [
+            {
+                "attempt_id": history.attempt_id,
+                "question_id": quiz.id,
+                "knowledge_point_id": quiz.knowledge_point_id,
+                "score": round(float(history.score), 4),
+                "is_correct": bool(history.is_correct),
+                "occurred_at": history.created_at.isoformat(),
+            }
+            for history, quiz in rows
+        ]
 
     def _micro_evidence(self, user_id: int, module_id: int) -> dict:
         events = (
@@ -279,6 +328,13 @@ class LearnerInsightService:
         return round(correct / attempts, 4) if attempts else None
 
     @staticmethod
+    def _scored_evidence_accuracy(evidence: list[dict]) -> float | None:
+        if not evidence:
+            return None
+        correct = sum(1 for item in evidence if item["is_correct"])
+        return round(correct / len(evidence), 4)
+
+    @staticmethod
     def _period_accuracy_trend(series: list[dict], window_days: int = 7) -> dict:
         def summarize(items: list[dict]) -> dict:
             attempts = sum(item["attempt_count"] for item in items)
@@ -333,6 +389,7 @@ class LearnerInsightService:
         blind_spots: list[dict],
         micro: dict,
         memory_items: list[dict],
+        scored_evidence_count: int,
     ) -> str:
         reasons = []
         if blind_spots:
@@ -341,38 +398,48 @@ class LearnerInsightService:
             reasons.append("存在已确认的犹豫或自我修正证据")
         if memory_items:
             reasons.append("长期记忆中存在相关误区或有效学习偏好")
-        return "；".join(reasons) if reasons else "当前证据较少，先完成模块前测建立基线。"
+        if reasons:
+            return "；".join(reasons)
+        if scored_evidence_count:
+            return f"依据 {scored_evidence_count} 次累计可评分作答形成当前建议"
+        return "当前证据较少，先完成模块前测建立基线。"
 
     def _build_recommendation(
         self,
         *,
         ability_payload: dict,
-        average_accuracy: float | None,
+        profile_accuracy: float | None,
+        scored_evidence: list[dict],
         blind_spots: list[dict],
-        mastered: list[dict],
         learning_path: list[dict],
         micro: dict,
         memory_items: list[dict],
     ) -> dict:
-        attempts = int(ability_payload["attempt_count"])
+        attempts = len(scored_evidence)
         ability_values = {
             dimension: float(ability_payload[dimension])
             for dimension in ("U", "A", "R")
         }
         weakest_dimension = min(ability_values, key=ability_values.get) if attempts else None
+        learner_profile = self._classify_learner_profile(
+            ability_values=ability_values,
+            profile_accuracy=profile_accuracy,
+            blind_spots=blind_spots,
+            scored_evidence=scored_evidence,
+        )
 
         if attempts == 0:
             recommended_difficulty = "foundation"
             content_format = "diagnostic_pretest"
         elif min(ability_values.values()) < -0.5 or (
-            average_accuracy is not None and average_accuracy < 0.6
+            profile_accuracy is not None and profile_accuracy < 0.6
         ):
             recommended_difficulty = "foundation"
             content_format = CONTENT_FORMAT_BY_DIMENSION[weakest_dimension]
         elif (
             min(ability_values.values()) >= 0.8
-            and average_accuracy is not None
-            and average_accuracy >= 0.8
+            and profile_accuracy is not None
+            and profile_accuracy >= 0.8
             and not blind_spots
         ):
             recommended_difficulty = "advanced"
@@ -401,13 +468,17 @@ class LearnerInsightService:
             tutoring_method = "guided_explanation_with_self_check"
 
         evidence_sources = self._recommendation_evidence_sources(
-            blind_spots=blind_spots,
-            mastered=mastered,
+            scored_evidence=scored_evidence,
             micro=micro,
             memory_items=memory_items,
             next_point=next_point,
         )
-        reason = self._recommendation_reason(blind_spots, micro, memory_items)
+        reason = self._recommendation_reason(
+            blind_spots,
+            micro,
+            memory_items,
+            scored_evidence_count=attempts,
+        )
         if weakest_dimension is not None:
             reason += (
                 f"；当前最弱维度为{DIMENSION_LABELS[weakest_dimension]}，"
@@ -415,6 +486,7 @@ class LearnerInsightService:
             )
 
         return {
+            "learner_profile": learner_profile,
             "recommended_difficulty": recommended_difficulty,
             "next_knowledge_point": next_point,
             "recommended_content_format": content_format,
@@ -425,6 +497,9 @@ class LearnerInsightService:
             "primary_content_decision": {
                 "action": "complete_pretest" if attempts == 0 else "generate_resource",
                 "content_format": content_format,
+                "resource_type": content_format if attempts else None,
+                "resource_count": 0 if attempts == 0 else 1,
+                "selection_policy": "single_most_needed",
                 "knowledge_point_id": (
                     next_point["knowledge_point_id"] if next_point is not None else None
                 ),
@@ -433,27 +508,118 @@ class LearnerInsightService:
         }
 
     @staticmethod
+    def _classify_learner_profile(
+        *,
+        ability_values: dict[str, float],
+        profile_accuracy: float | None,
+        blind_spots: list[dict],
+        scored_evidence: list[dict],
+    ) -> dict:
+        """Classify the three fixed demo profiles using scored evidence only."""
+
+        attempts = len(scored_evidence)
+        evidence_refs = [
+            {
+                "source_type": "scored_attempt",
+                "source_id": item["attempt_id"],
+                "question_id": item["question_id"],
+                "knowledge_point_id": item["knowledge_point_id"],
+                "score": item["score"],
+                "is_correct": item["is_correct"],
+                "occurred_at": item["occurred_at"],
+            }
+            for item in scored_evidence[-10:]
+        ]
+        if attempts == 0 or not evidence_refs:
+            return {
+                "type": None,
+                "label": "待完成前测",
+                "reason": "尚无可判分作答，不能归入 P1、P2 或 P3。",
+                "evidence_status": "insufficient",
+                "evidence_count": 0,
+                "evidence_refs": [],
+                "content_requirements": {},
+            }
+
+        if attempts < 2:
+            return {
+                "type": None,
+                "label": "证据积累中",
+                "reason": "目前只有一次可判分作答，暂不能稳定归入 P1、P2 或 P3。",
+                "evidence_status": "insufficient",
+                "evidence_count": attempts,
+                "evidence_refs": evidence_refs,
+                "content_requirements": {},
+            }
+
+        minimum_ability = min(ability_values.values())
+        average_ability = sum(ability_values.values()) / len(ability_values)
+        is_strong_and_stable = (
+            minimum_ability >= 0.8
+            and profile_accuracy is not None
+            and profile_accuracy >= 0.8
+            and not blind_spots
+        )
+        application_gap = ability_values["U"] - ability_values["A"]
+        is_theory_to_practice = (
+            ability_values["U"] >= 0.3
+            and ability_values["A"] == minimum_ability
+            and application_gap >= 0.3
+        )
+
+        if is_strong_and_stable:
+            profile_type = "P3"
+            reason = "三项能力和正确率均较高，且没有作答支持的知识盲区。"
+        elif is_theory_to_practice:
+            profile_type = "P2"
+            reason = "理解能力已有基础，但应用能力明显较弱，需要从理论转向实践。"
+        else:
+            profile_type = "P1"
+            reason_parts = ["当前能力仍需基础巩固"]
+            if profile_accuracy is not None and profile_accuracy < 0.6:
+                reason_parts.append("累计可评分作答正确率低于 60%")
+            if blind_spots:
+                reason_parts.append(f"存在 {len(blind_spots)} 个有作答证据的知识盲区")
+            if average_ability < 0.3:
+                reason_parts.append("三项能力平均值低于 0.3")
+            reason = "；".join(reason_parts) + "。"
+
+        requirements = LEARNER_PROFILE_REQUIREMENTS[profile_type]
+        return {
+            "type": profile_type,
+            "label": requirements["label"],
+            "reason": reason,
+            "evidence_status": "supported",
+            "evidence_count": attempts,
+            "evidence_refs": evidence_refs,
+            "content_requirements": {
+                key: value
+                for key, value in requirements.items()
+                if key != "label"
+            },
+        }
+
+    @staticmethod
     def _recommendation_evidence_sources(
         *,
-        blind_spots: list[dict],
-        mastered: list[dict],
+        scored_evidence: list[dict],
         micro: dict,
         memory_items: list[dict],
         next_point: dict | None,
     ) -> list[dict]:
-        sources: list[dict] = []
-        for point in [*blind_spots, *mastered]:
-            for evidence in point.get("evidence", []):
-                sources.append(
-                    {
-                        "source_type": "scored_attempt",
-                        "source_id": evidence["attempt_id"],
-                        "knowledge_point_id": point["knowledge_point_id"],
-                        "score": evidence["score"],
-                        "occurred_at": evidence["occurred_at"],
-                    }
-                )
-        for item in micro.get("items", [])[:3]:
+        sources: list[dict] = [
+            {
+                "source_type": "scored_attempt",
+                "source_id": item["attempt_id"],
+                "question_id": item["question_id"],
+                "knowledge_point_id": item["knowledge_point_id"],
+                "score": item["score"],
+                "is_correct": item["is_correct"],
+                "occurred_at": item["occurred_at"],
+            }
+            for item in scored_evidence[-6:]
+        ]
+        for item in micro.get("items", [])[:2]:
             sources.append(
                 {
                     "source_type": "confirmed_micro_event",
@@ -462,7 +628,7 @@ class LearnerInsightService:
                     "confidence": item["confidence"],
                 }
             )
-        for index, item in enumerate(memory_items[:3]):
+        for index, item in enumerate(memory_items[:2]):
             sources.append(
                 {
                     "source_type": "long_term_memory",
@@ -512,8 +678,16 @@ class LearnerInsightService:
             )
         next_point = recommendation["next_knowledge_point"]
         next_point_name = next_point["name"] if next_point is not None else "暂未确定"
+        learner_profile = recommendation["learner_profile"]
+        if learner_profile["type"] is None:
+            profile_text = "当前尚不能确定 P1、P2 或 P3 画像。"
+        else:
+            profile_text = (
+                f"当前画像为 {learner_profile['type']}（{learner_profile['label']}），"
+                f"依据为：{learner_profile['reason']}"
+            )
         path_text = (
-            f"推荐难度为 {recommendation['recommended_difficulty']}，"
+            f"{profile_text}推荐难度为 {recommendation['recommended_difficulty']}，"
             f"下一知识点为“{next_point_name}”，"
             f"内容形式为 {recommendation['recommended_content_format']}，"
             f"辅导方式为 {recommendation['recommended_tutoring_method']}。"

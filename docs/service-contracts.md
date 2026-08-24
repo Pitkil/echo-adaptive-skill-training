@@ -222,15 +222,31 @@ ECHO 主系统对外入口：
 
 响应固定包含：
 
-- `ability_and_trend`：能力现状和变化趋势，包括每个模块的 U/A/R、正确率和与上一时间段相比的变化。
+- `ability_and_trend`：能力现状和变化趋势，包括每个模块的 U/A/R、最近 30 天正确率、用于画像
+  分类的累计可评分作答正确率 `profile_accuracy`，以及与上一时间段相比的变化。
 - `evidence_and_blind_spots`：有作答依据的知识盲区、已掌握知识点、相关题目、得分、时间、
   已确认微表征、长期记忆摘要和判断可靠程度。
 - `path_and_resources`：推荐难度、下一知识点、推荐内容形式、推荐辅导方式、学习顺序、
-  推荐原因和证据来源。
+  推荐原因和证据来源；同时包含 `learner_profile` 和 `primary_content_decision`。
+
+`learner_profile` 只根据允许更新 MIRT 的已判分作答、U/A/R、累计正确率和有作答证据的盲区
+归入 P1、P2 或 P3。分类使用的作答次数、正确率和证据必须来自同一组累计作答，不能因最近
+30 天没有新作答而改变画像。少于两次可判分作答时 `type` 必须为 `null` 且
+`evidence_status` 为 `insufficient`，不得根据长期记忆或微表征猜测能力类型。证据足够时返回
+`evidence_count` 和 `evidence_refs`；每条引用至少包含作答编号、题目编号、知识点、得分、
+是否正确和作答时间。三类画像向内容生成方提供不同的 `explanation_depth`、`step_detail` 和
+`support_level`，固定样例见 `docs/member-c/learner-profile-samples.json`。
+
+`primary_content_decision` 每轮只允许一个主要动作。未完成前测时返回
+`action=complete_pretest`、`resource_count=0`；证据足够时返回 `action=generate_resource`、唯一
+`resource_type`、`resource_count=1` 和 `selection_policy=single_most_needed`。三种资源是系统能力
+范围，不表示每次同时生成三份。成员 A 的生成编排必须按该唯一决定生成和校验当前资源。
 
 MIRT 更新接口只接受有效题目和唯一 `attempt_id`。重复编号必须返回原状态，不重复更新。
 只有作答证据支持的知识点才能标为盲区。微表征和长期记忆不能直接修改 U/A/R。
 大模型只负责把上述结果写成易懂文字；无证据时返回“暂不能判断”，模型不可用时使用固定模板。
+成员 C 的 10 组跨会话长期记忆差异案例见 `docs/member-c/memory-difference-cases.json`，所有案例
+均要求长期记忆和微表征不直接改变 U/A/R。
 
 ## 联调规则
 

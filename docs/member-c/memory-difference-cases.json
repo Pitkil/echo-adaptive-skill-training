@@ -1,0 +1,117 @@
+{
+  "version": "1.1",
+  "total_cases": 10,
+  "description": "覆盖 P1、P2、P3 和 M1、M2、M3 的跨会话长期记忆差异案例。",
+  "cases": [
+    {
+      "case_id": "C-MEM-01",
+      "learner_profile": "P1",
+      "module_id": "M1",
+      "memory_type": "misconception",
+      "session_ids": [101, 102],
+      "scenario": "两个不同会话中两次真实错误作答支持同一插件误区。",
+      "execution": {"operation": "create", "content": "混淆插件与智能体", "knowledge_point_id": 11, "evidence_knowledge_point_ids": [11, 11], "misconception_keys": ["plugin-agent", "plugin-agent"]},
+      "evidence_identity": ["attempt:P1-M1-A01", "attempt:P1-M1-A02"],
+      "expected": {"status": "completed", "outcome": "created", "mirt_unchanged": true}
+    },
+    {
+      "case_id": "C-MEM-02",
+      "learner_profile": "P2",
+      "module_id": "M1",
+      "memory_type": "learning_preference",
+      "session_ids": [201, 202],
+      "scenario": "两个会话均确认完整代码示例有助于从理论转向实践。",
+      "execution": {"operation": "create", "content": "完整代码示例更有效", "preference_keys": ["example_format", "example_format"], "result_values": ["complete_code", "complete_code"], "confirmed": [true, true]},
+      "evidence_identity": ["preference:example_format:201", "preference:example_format:202"],
+      "expected": {"status": "completed", "outcome": "created", "mirt_unchanged": true}
+    },
+    {
+      "case_id": "C-MEM-03",
+      "learner_profile": "P3",
+      "module_id": "M2",
+      "memory_type": "intervention_outcome",
+      "session_ids": [301, 302],
+      "scenario": "两个会话中的架构权衡检查均带来已确认的正向结果。",
+      "execution": {"operation": "create", "content": "架构权衡检查有效", "intervention_types": ["architecture_tradeoff", "architecture_tradeoff"], "result_values": ["positive", "positive"], "confirmed": [true, true]},
+      "evidence_identity": ["intervention:P3-M2-I01", "intervention:P3-M2-I02"],
+      "expected": {"status": "completed", "outcome": "created", "mirt_unchanged": true}
+    },
+    {
+      "case_id": "C-MEM-04",
+      "learner_profile": "P1",
+      "module_id": "M2",
+      "memory_type": "misconception",
+      "session_ids": [401, 402],
+      "scenario": "同一个 attempt_id 被包装成两个 reference_id，不能重复计数。",
+      "execution": {"operation": "create", "content": "混淆线程状态与长期记忆", "knowledge_point_id": 21, "evidence_knowledge_point_ids": [21, 21], "misconception_keys": ["thread-memory", "thread-memory"]},
+      "evidence_identity": ["attempt:P1-M2-A01", "attempt:P1-M2-A01"],
+      "expected": {"status": "rejected", "outcome": "insufficient_distinct_evidence", "mirt_unchanged": true}
+    },
+    {
+      "case_id": "C-MEM-05",
+      "learner_profile": "P2",
+      "module_id": "M2",
+      "memory_type": "misconception",
+      "session_ids": [501, 502],
+      "scenario": "两次错误作答属于不同知识点，不能形成同一稳定误区。",
+      "execution": {"operation": "create", "content": "混淆智能体协作边界", "knowledge_point_id": 22, "evidence_knowledge_point_ids": [22, 23], "misconception_keys": ["agent-boundary", "agent-boundary"]},
+      "evidence_identity": ["attempt:P2-M2-A01", "attempt:P2-M2-A02"],
+      "expected": {"status": "rejected", "outcome": "knowledge_point_mismatch", "mirt_unchanged": true}
+    },
+    {
+      "case_id": "C-MEM-06",
+      "learner_profile": "P3",
+      "module_id": "M3",
+      "memory_type": "learning_preference",
+      "session_ids": [601, 602],
+      "scenario": "两个会话对同一内容形式给出相反偏好，进入拒绝而非稳定记忆。",
+      "execution": {"operation": "create", "content": "偏好特定讲解详细度", "preference_keys": ["detail_level", "detail_level"], "result_values": ["high_detail", "concise"], "confirmed": [true, true]},
+      "evidence_identity": ["preference:detail_level:601", "preference:detail_level:602"],
+      "expected": {"status": "rejected", "outcome": "contradictory_evidence", "mirt_unchanged": true}
+    },
+    {
+      "case_id": "C-MEM-07",
+      "learner_profile": "P1",
+      "module_id": "M3",
+      "memory_type": "intervention_outcome",
+      "session_ids": [701, 702],
+      "scenario": "第二次干预结果尚未确认，不能形成长期干预效果。",
+      "execution": {"operation": "create", "content": "检查点式提示有效", "intervention_types": ["checkpoint_prompt", "checkpoint_prompt"], "result_values": ["positive", "positive"], "confirmed": [true, false]},
+      "evidence_identity": ["intervention:P1-M3-I01", "intervention:P1-M3-I02"],
+      "expected": {"status": "rejected", "outcome": "unconfirmed_result", "mirt_unchanged": true}
+    },
+    {
+      "case_id": "C-MEM-08",
+      "learner_profile": "P2",
+      "module_id": "M3",
+      "memory_type": "learning_preference",
+      "session_ids": [801, 802],
+      "scenario": "同一稳定候选被再次提交，幂等 upsert 不新增第二条记忆。",
+      "execution": {"operation": "create_twice", "content": "分步检查点更有效", "preference_keys": ["checkpoint_style", "checkpoint_style"], "result_values": ["step_checkpoints", "step_checkpoints"], "confirmed": [true, true]},
+      "evidence_identity": ["preference:checkpoint_style:801", "preference:checkpoint_style:802"],
+      "expected": {"status": "completed", "outcome": "unchanged", "mirt_unchanged": true}
+    },
+    {
+      "case_id": "C-MEM-09",
+      "learner_profile": "P3",
+      "module_id": "M1",
+      "memory_type": "intervention_outcome",
+      "session_ids": [901, 902],
+      "scenario": "使用其他用户的 memory_id 发起修改，授权失败且不执行变更。",
+      "execution": {"operation": "update_forbidden", "content": "故障注入复盘有效", "intervention_types": ["failure_review", "failure_review"], "result_values": ["positive", "positive"], "confirmed": [true, true]},
+      "evidence_identity": ["intervention:P3-M1-I01", "intervention:P3-M1-I02"],
+      "expected": {"status": "degraded", "outcome": "scope_forbidden", "mirt_unchanged": true}
+    },
+    {
+      "case_id": "C-MEM-10",
+      "learner_profile": "P1",
+      "module_id": "M2",
+      "memory_type": "misconception",
+      "session_ids": [1001, 1002],
+      "scenario": "SimpleMem 不可用时返回已验证 memory_record 供业务数据库审计。",
+      "execution": {"operation": "create_unavailable", "content": "混淆群聊与智能体流程", "knowledge_point_id": 24, "evidence_knowledge_point_ids": [24, 24], "misconception_keys": ["groupchat-process", "groupchat-process"]},
+      "evidence_identity": ["attempt:P1-M2-A11", "attempt:P1-M2-A12"],
+      "expected": {"status": "degraded", "outcome": "audit_record_retained", "mirt_unchanged": true}
+    }
+  ]
+}
