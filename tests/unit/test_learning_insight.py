@@ -100,6 +100,21 @@ def make_learning_context():
     return db, organization, user, module, weak_point, next_point, weak_quiz, next_quiz
 
 
+def make_scored_evidence(prefix: str, attempts: int, accuracy: float) -> list[dict]:
+    correct_count = round(attempts * accuracy)
+    return [
+        {
+            "attempt_id": f"{prefix}-{index + 1}",
+            "question_id": 100 + index,
+            "knowledge_point_id": 1,
+            "score": 1.0 if index < correct_count else 0.0,
+            "is_correct": index < correct_count,
+            "occurred_at": f"2026-01-{index + 1:02d}T09:00:00",
+        }
+        for index in range(attempts)
+    ]
+
+
 def test_learning_insight_has_fixed_sections_and_traceable_recommendation() -> None:
     (
         db,
@@ -289,22 +304,22 @@ def test_three_fixed_learner_profiles_produce_distinct_supported_requirements() 
     classifier = LearnerInsightService._classify_learner_profile
 
     p1 = classifier(
-        attempts=4,
         ability_values={"U": -0.4, "A": -0.8, "R": -0.2},
-        average_accuracy=0.4,
+        profile_accuracy=0.5,
         blind_spots=[{"knowledge_point_id": 1}],
+        scored_evidence=make_scored_evidence("p1", 4, 0.5),
     )
     p2 = classifier(
-        attempts=6,
         ability_values={"U": 0.7, "A": 0.1, "R": 0.5},
-        average_accuracy=0.7,
+        profile_accuracy=0.6667,
         blind_spots=[],
+        scored_evidence=make_scored_evidence("p2", 6, 0.6667),
     )
     p3 = classifier(
-        attempts=8,
         ability_values={"U": 1.0, "A": 0.9, "R": 0.8},
-        average_accuracy=0.875,
+        profile_accuracy=0.875,
         blind_spots=[],
+        scored_evidence=make_scored_evidence("p3", 8, 0.875),
     )
 
     assert [p1["type"], p2["type"], p3["type"]] == ["P1", "P2", "P3"]
@@ -312,3 +327,62 @@ def test_three_fixed_learner_profiles_produce_distinct_supported_requirements() 
     assert p2["content_requirements"]["explanation_depth"] == "application_focused"
     assert p3["content_requirements"]["step_detail"] == "high_level"
     assert len({p1["reason"], p2["reason"], p3["reason"]}) == 3
+    assert all(item["evidence_refs"] for item in (p1, p2, p3))
+
+
+def test_profile_uses_lifetime_scored_evidence_when_recent_window_is_empty() -> None:
+    db, _, user, module, _, _, weak_quiz, _ = make_learning_context()
+    old_time = datetime.now() - timedelta(days=60)
+    db.add(
+        LearnerAbility(
+            user_id=user.id,
+            module_id=module.id,
+            U=1.0,
+            A=0.9,
+            R=0.8,
+            attempt_count=8,
+        )
+    )
+    db.add_all(
+        [
+            StudentQuestionHistory(
+                attempt_id=f"old-strong-{index}",
+                user_id=user.id,
+                question_id=weak_quiz.id,
+                submitted_answer="correct",
+                is_correct=True,
+                score=1.0,
+                created_at=old_time + timedelta(minutes=index),
+            )
+            for index in range(8)
+        ]
+    )
+    db.commit()
+
+    profile = LearnerInsightService(db).build_profile(user.id, module.id)
+    ability_view = profile["views"]["ability_and_trend"]
+    path_view = profile["views"]["path_and_resources"]
+
+    assert ability_view["average_accuracy"] is None
+    assert ability_view["profile_accuracy"] == 1.0
+    assert path_view["learner_profile"]["type"] == "P3"
+    assert path_view["learner_profile"]["evidence_count"] == 8
+    assert len(path_view["learner_profile"]["evidence_refs"]) == 8
+    assert {item["source_type"] for item in path_view["evidence_sources"]} >= {
+        "scored_attempt",
+        "curriculum",
+    }
+
+
+def test_single_scored_attempt_is_not_reported_as_supported_profile() -> None:
+    result = LearnerInsightService._classify_learner_profile(
+        ability_values={"U": 0.7, "A": 0.1, "R": 0.5},
+        profile_accuracy=1.0,
+        blind_spots=[],
+        scored_evidence=make_scored_evidence("single", 1, 1.0),
+    )
+
+    assert result["type"] is None
+    assert result["evidence_status"] == "insufficient"
+    assert result["evidence_count"] == 1
+    assert len(result["evidence_refs"]) == 1
