@@ -47,7 +47,13 @@ def _record(
 
 @pytest.fixture
 def client(tmp_path):
-    with TestClient(create_app(tmp_path / "simplemem.db", api_key="")) as test_client:
+    with TestClient(
+        create_app(
+            tmp_path / "simplemem.db",
+            api_key="",
+            allow_insecure_dev=True,
+        )
+    ) as test_client:
         yield test_client
 
 
@@ -127,7 +133,9 @@ def test_search_and_authorization_never_cross_user_scope(client) -> None:
 def test_update_delete_and_restart_persistence(tmp_path) -> None:
     database_path = tmp_path / "persistent.db"
     record = _record("reasoning")
-    with TestClient(create_app(database_path, api_key="")) as first_client:
+    with TestClient(
+        create_app(database_path, api_key="", allow_insecure_dev=True)
+    ) as first_client:
         memory_id = first_client.post("/v1/memories", json=record).json()["memory_id"]
         updated = {
             **record,
@@ -138,7 +146,9 @@ def test_update_delete_and_restart_persistence(tmp_path) -> None:
         response = first_client.patch(f"/v1/memories/{memory_id}", json=updated)
         assert response.json()["status"] == "updated"
 
-    with TestClient(create_app(database_path, api_key="")) as second_client:
+    with TestClient(
+        create_app(database_path, api_key="", allow_insecure_dev=True)
+    ) as second_client:
         search = second_client.post(
             "/v1/memories/search",
             json={
@@ -156,6 +166,8 @@ def test_update_delete_and_restart_persistence(tmp_path) -> None:
             json=_scope(),
         )
         assert deleted.json()["status"] == "deleted"
+        assert second_client.post("/v1/memories", json=record).status_code == 409
+        assert second_client.post("/v1/memories", json=updated).status_code == 409
         assert second_client.post(
             "/v1/memories/search",
             json={
@@ -218,3 +230,161 @@ def test_optional_service_api_key_protects_v1_endpoints(tmp_path) -> None:
     assert missing.status_code == 401
     assert accepted.status_code == 200
     assert accepted.json()["status"] == "created"
+
+
+def test_service_rejects_empty_key_unless_insecure_development_is_explicit(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("SIMPLEMEM_ALLOW_INSECURE_DEV", raising=False)
+    application = create_app(tmp_path / "closed.db", api_key="")
+
+    with pytest.raises(RuntimeError, match="SIMPLEMEM_API_KEY must be non-empty"):
+        with TestClient(application):
+            pass
+
+
+def test_insecure_development_rejects_non_loopback_binding(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SIMPLEMEM_HOST", "0.0.0.0")
+    application = create_app(
+        tmp_path / "network-exposed.db",
+        api_key="",
+        allow_insecure_dev=True,
+    )
+
+    with pytest.raises(RuntimeError, match="must bind SIMPLEMEM_HOST to a loopback"):
+        with TestClient(application):
+            pass
+
+
+def test_deleted_idempotency_key_replay_returns_conflict_and_stays_inactive(client) -> None:
+    record = _record("deleted-replay", content="Learner confuses kernel and plugin.")
+    created = client.post("/v1/memories", json=record).json()
+    deleted = client.request(
+        "DELETE",
+        f"/v1/memories/{created['memory_id']}",
+        json=_scope(),
+    )
+
+    replayed = client.post("/v1/memories", json=record)
+    search = client.post(
+        "/v1/memories/search",
+        json={
+            **_scope(),
+            "intent": "learner_diagnosis",
+            "query": "kernel plugin",
+            "limit": 8,
+        },
+    )
+
+    assert deleted.status_code == 200
+    assert replayed.status_code == 409
+    assert replayed.json()["conflict_memory_ids"] == [created["memory_id"]]
+    assert "inactive deleted memory" in replayed.json()["detail"]
+    assert search.json()["items"] == []
+
+
+def test_merged_source_idempotency_key_replay_returns_canonical_conflict(client) -> None:
+    first_record = _record(
+        "merged-replay-first",
+        content="Learner benefits from diagrams.",
+        memory_type="learning_preference",
+    )
+    second_record = _record(
+        "merged-replay-second",
+        content="Learner benefits from annotated examples.",
+        memory_type="learning_preference",
+    )
+    first = client.post("/v1/memories", json=first_record).json()
+    second = client.post("/v1/memories", json=second_record).json()
+    consolidated = client.post("/v1/memories/consolidate", json=_scope()).json()
+
+    first_replay = client.post("/v1/memories", json=first_record)
+    second_replay = client.post("/v1/memories", json=second_record)
+
+    assert first_replay.status_code == 409
+    assert second_replay.status_code == 409
+    assert set(first_replay.json()["conflict_memory_ids"]) == {
+        first["memory_id"],
+        consolidated["merged_memory_id"],
+    }
+    assert set(second_replay.json()["conflict_memory_ids"]) == {
+        second["memory_id"],
+        consolidated["merged_memory_id"],
+    }
+
+
+def test_search_filters_unrelated_misconceptions_before_intent_boost(client) -> None:
+    created = client.post(
+        "/v1/memories",
+        json=_record(
+            "plugin-misconception",
+            content="Learner confuses plugins with agents.",
+        ),
+    ).json()
+
+    unrelated = client.post(
+        "/v1/memories/search",
+        json={
+            **_scope(),
+            "intent": "learner_diagnosis",
+            "query": "quantum entanglement",
+            "limit": 8,
+        },
+    )
+    related = client.post(
+        "/v1/memories/search",
+        json={
+            **_scope(),
+            "intent": "learner_diagnosis",
+            "query": "plugins agents",
+            "limit": 8,
+        },
+    )
+
+    assert unrelated.status_code == 200
+    assert unrelated.json()["items"] == []
+    assert [item["memory_id"] for item in related.json()["items"]] == [
+        created["memory_id"]
+    ]
+
+    topic_scoped = client.post(
+        "/v1/memories/search",
+        json={
+            **_scope(),
+            "intent": "learner_diagnosis",
+            "query": "5",
+            "limit": 8,
+        },
+    )
+    assert [item["memory_id"] for item in topic_scoped.json()["items"]] == [
+        created["memory_id"]
+    ]
+
+
+def test_guidance_keeps_explicit_cross_topic_preference_fallback(client) -> None:
+    preference = client.post(
+        "/v1/memories",
+        json=_record(
+            "diagram-preference",
+            content="Learner benefits from diagrams.",
+            memory_type="learning_preference",
+        ),
+    ).json()
+
+    search = client.post(
+        "/v1/memories/search",
+        json={
+            **_scope(),
+            "intent": "echo_guidance",
+            "query": "quantum entanglement",
+            "limit": 8,
+        },
+    )
+
+    assert [item["memory_id"] for item in search.json()["items"]] == [
+        preference["memory_id"]
+    ]

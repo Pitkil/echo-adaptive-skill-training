@@ -36,8 +36,9 @@ services:
       SIMPLEMEM_PORT: 8020
       SIMPLEMEM_DB_PATH: /data/simplemem.db
       SIMPLEMEM_API_KEY: ${SIMPLEMEM_API_KEY:-}
-    ports:
-      - "${SIMPLEMEM_PORT:-8020}:8020"
+      SIMPLEMEM_ALLOW_INSECURE_DEV: "false"
+    expose:
+      - "8020"
     volumes:
       - simplemem-data:/data
     restart: unless-stopped

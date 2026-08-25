@@ -36,6 +36,7 @@ def create_app(
     database_path: str | Path | None = None,
     *,
     api_key: str | None = None,
+    allow_insecure_dev: bool | None = None,
 ) -> FastAPI:
     configured_path = Path(
         database_path or os.getenv("SIMPLEMEM_DB_PATH", "data/simplemem.db")
@@ -43,9 +44,29 @@ def create_app(
     configured_api_key = (
         os.getenv("SIMPLEMEM_API_KEY", "") if api_key is None else api_key
     ).strip()
+    configured_host = os.getenv("SIMPLEMEM_HOST", "127.0.0.1").strip().casefold()
+    configured_allow_insecure_dev = (
+        _environment_flag("SIMPLEMEM_ALLOW_INSECURE_DEV", default=False)
+        if allow_insecure_dev is None
+        else allow_insecure_dev
+    )
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        if not configured_api_key and not configured_allow_insecure_dev:
+            raise RuntimeError(
+                "SIMPLEMEM_API_KEY must be non-empty unless "
+                "SIMPLEMEM_ALLOW_INSECURE_DEV=true is explicitly enabled"
+            )
+        if (
+            not configured_api_key
+            and configured_allow_insecure_dev
+            and configured_host not in {"127.0.0.1", "localhost", "::1"}
+        ):
+            raise RuntimeError(
+                "unauthenticated SimpleMem development must bind SIMPLEMEM_HOST "
+                "to a loopback address"
+            )
         application.state.store = SimpleMemStore(configured_path)
         yield
 
@@ -57,6 +78,7 @@ def create_app(
     )
     application.state.store = None
     application.state.api_key = configured_api_key
+    application.state.allow_insecure_dev = configured_allow_insecure_dev
 
     @application.exception_handler(MemoryNotFoundError)
     async def memory_not_found(_request: Request, exc: MemoryNotFoundError) -> JSONResponse:
@@ -175,6 +197,18 @@ def _require_api_key(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid SimpleMem API key",
         )
+
+
+def _environment_flag(name: str, *, default: bool) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    normalized = raw_value.strip().casefold()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise RuntimeError(f"{name} must be a boolean value")
 
 
 app = create_app()

@@ -22,7 +22,11 @@ class AsgiJsonClient:
 
 
 def test_echo_client_round_trips_against_real_simplemem_service(tmp_path) -> None:
-    application = create_app(tmp_path / "simplemem.db", api_key="")
+    application = create_app(
+        tmp_path / "simplemem.db",
+        api_key="",
+        allow_insecure_dev=True,
+    )
     with TestClient(application) as service_client:
         echo_client = SimpleMemClient("http://simplemem.test")
         echo_client.http = AsgiJsonClient(service_client)

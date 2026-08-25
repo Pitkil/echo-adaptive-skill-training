@@ -66,8 +66,14 @@ PunditRAG 接受上传只表示异步任务已排队，不能立即标记为 `in
 
 本仓库的可部署实现位于 `services/simplemem`，默认监听 `8020`。服务使用 SQLite 持久化记忆、
 合并来源和变更审计；检索会先强制应用组织、用户、项目和模块作用域，再按词项相关度、
-完整短语、可靠程度和检索意图排序。当 `SIMPLEMEM_API_KEY` 非空时，所有 `/v1` 请求必须使用
-`X-SimpleMem-API-Key`；`/health` 保持公开供编排器检查。
+完整短语、可靠程度和检索意图排序。服务默认要求非空 `SIMPLEMEM_API_KEY`，所有 `/v1` 请求必须
+使用 `X-SimpleMem-API-Key`；`/health` 保持公开供编排器检查。只有显式设置
+`SIMPLEMEM_ALLOW_INSECURE_DEV=true` 的回环开发进程可以无密钥启动，生产 Compose 不向宿主机
+发布 `8020`。
+
+误区记忆只有在查询词项或完整短语命中内容、知识点编号或元数据值后才能参与排序，可靠程度和意图加权不能
+单独让零相关误区进入结果。学习偏好可以在 `echo_guidance` 与 `resource_generation` 中作为明确的
+跨主题兜底；干预效果只可以在 `echo_guidance` 中跨主题兜底。
 
 ### 三类记忆
 
@@ -119,9 +125,11 @@ PunditRAG 接受上传只表示异步任务已排队，不能立即标记为 `in
 - `conflict_key`：作用域、记忆类型和语义领域的 SHA-256，不包含结论内容。
 
 响应固定返回 `status`（`created`、`updated`、`unchanged` 或 `conflict`）、
-`idempotency_key` 和 `memory_id`。同一 `idempotency_key` 再次请求只能返回 `updated` 或
-`unchanged`，不得新增记录。同一 `conflict_key` 下出现不同 `idempotency_key` 时返回
-`conflict` 和 `conflict_memory_ids`，新结论不得同时成为活跃记忆。
+`idempotency_key` 和 `memory_id`。同一活跃记忆的 `idempotency_key` 再次请求只能返回 `updated`
+或 `unchanged`，不得新增记录；若该键属于已经删除或合并的非活跃记录，服务返回 HTTP 409 和
+冲突记录编号，不得报告成功或自动重新激活。更新记忆后仍永久保留历史幂等键归属，旧请求不能
+通过先换键再删除的方式重新创建。同一 `conflict_key` 下出现不同 `idempotency_key`
+时返回 `conflict` 和 `conflict_memory_ids`，新结论不得同时成为活跃记忆。
 
 ### 修改、删除和合并
 

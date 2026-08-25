@@ -69,6 +69,16 @@ ON memories(organization_id, user_id, program_id, module_id, state);
 CREATE INDEX IF NOT EXISTS ix_memories_scope_knowledge
 ON memories(organization_id, user_id, program_id, module_id, knowledge_point_id, state);
 
+CREATE TABLE IF NOT EXISTS memory_idempotency_keys (
+    idempotency_key TEXT PRIMARY KEY,
+    memory_id TEXT NOT NULL,
+    first_seen_at TEXT NOT NULL,
+    FOREIGN KEY (memory_id) REFERENCES memories(memory_id)
+);
+
+CREATE INDEX IF NOT EXISTS ix_memory_idempotency_keys_memory
+ON memory_idempotency_keys(memory_id);
+
 CREATE TABLE IF NOT EXISTS memory_events (
     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
     operation TEXT NOT NULL,
@@ -112,6 +122,12 @@ class SimpleMemStore:
         with self._connection() as connection:
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(_SCHEMA)
+            connection.execute(
+                """INSERT OR IGNORE INTO memory_idempotency_keys (
+                       idempotency_key, memory_id, first_seen_at
+                   )
+                   SELECT idempotency_key, memory_id, created_at FROM memories"""
+            )
 
     def health(self) -> None:
         with self._connection() as connection:
@@ -122,12 +138,28 @@ class SimpleMemStore:
         with self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
-                "SELECT * FROM memories WHERE idempotency_key = ?",
+                """SELECT memories.* FROM memory_idempotency_keys
+                   JOIN memories USING (memory_id)
+                   WHERE memory_idempotency_keys.idempotency_key = ?""",
                 (record.idempotency_key,),
             ).fetchone()
             if existing is not None:
                 self._assert_record_identity(existing, record)
-                if existing["state"] != "active" or self._same_record(existing, record):
+                if existing["state"] != "active":
+                    conflict_ids = [existing["memory_id"]]
+                    if existing["merged_into_id"]:
+                        conflict_ids.append(existing["merged_into_id"])
+                    raise MemoryConflictError(
+                        "idempotency_key belongs to an inactive "
+                        f"{existing['state']} memory",
+                        memory_ids=conflict_ids,
+                    )
+                if existing["idempotency_key"] != record.idempotency_key:
+                    raise MemoryConflictError(
+                        "idempotency_key is a superseded historical key for this memory",
+                        memory_ids=[existing["memory_id"]],
+                    )
+                if self._same_record(existing, record):
                     status = "unchanged"
                 else:
                     self._update_row(connection, existing["memory_id"], record)
@@ -181,13 +213,25 @@ class SimpleMemStore:
             connection.execute("BEGIN IMMEDIATE")
             row = self._authorized_row(connection, memory_id, record)
             idempotency_owner = connection.execute(
-                "SELECT memory_id FROM memories WHERE idempotency_key = ? AND memory_id <> ?",
-                (record.idempotency_key, memory_id),
+                """SELECT memory_id FROM memory_idempotency_keys
+                   WHERE idempotency_key = ?""",
+                (record.idempotency_key,),
             ).fetchone()
-            if idempotency_owner is not None:
+            if (
+                idempotency_owner is not None
+                and idempotency_owner["memory_id"] != memory_id
+            ):
                 raise MemoryConflictError(
                     "idempotency_key belongs to another memory",
                     memory_ids=[idempotency_owner["memory_id"]],
+                )
+            if (
+                idempotency_owner is not None
+                and record.idempotency_key != row["idempotency_key"]
+            ):
+                raise MemoryConflictError(
+                    "historical idempotency_key cannot replace the current key",
+                    memory_ids=[memory_id],
                 )
             conflict_owners = connection.execute(
                 """SELECT memory_id FROM memories
@@ -251,10 +295,11 @@ class SimpleMemStore:
                     "candidate_count": len(rows),
                 },
             )
-        scored = [
-            (self._retrieval_score(row, query, intent), row)
-            for row in rows
-        ]
+        scored = []
+        for row in rows:
+            score = self._retrieval_score(row, query, intent)
+            if score is not None:
+                scored.append((score, row))
         scored.sort(key=lambda item: (item[0], item[1]["occurred_at"]), reverse=True)
         return [self._search_item(row, score) for score, row in scored[:limit]]
 
@@ -400,6 +445,12 @@ class SimpleMemStore:
                 now,
             ),
         )
+        connection.execute(
+            """INSERT INTO memory_idempotency_keys (
+                   idempotency_key, memory_id, first_seen_at
+               ) VALUES (?, ?, ?)""",
+            (record.idempotency_key, memory_id, now),
+        )
 
     @staticmethod
     def _update_row(
@@ -407,6 +458,12 @@ class SimpleMemStore:
         memory_id: str,
         record: MemoryRecord,
     ) -> None:
+        connection.execute(
+            """INSERT OR IGNORE INTO memory_idempotency_keys (
+                   idempotency_key, memory_id, first_seen_at
+               ) VALUES (?, ?, ?)""",
+            (record.idempotency_key, memory_id, _now()),
+        )
         connection.execute(
             """UPDATE memories SET
                 organization_id = ?, user_id = ?, program_id = ?, module_id = ?,
@@ -469,14 +526,31 @@ class SimpleMemStore:
         row: sqlite3.Row,
         query: str,
         intent: MemoryIntent,
-    ) -> float:
+    ) -> float | None:
         normalized_query = " ".join(query.casefold().split())
-        metadata_text = _json(json.loads(row["metadata_json"])).casefold()
+        metadata_values = [
+            row["knowledge_point_id"],
+            *json.loads(row["metadata_json"]).values(),
+        ]
+        metadata_text = " ".join(
+            str(value) for value in metadata_values if value is not None
+        ).casefold()
         haystack = f"{row['content'].casefold()} {metadata_text}"
         query_terms = _terms(normalized_query)
         content_terms = _terms(haystack)
-        overlap = len(query_terms & content_terms) / max(1, len(query_terms))
+        matched_terms = query_terms & content_terms
         phrase = 1.0 if normalized_query in haystack else 0.0
+        memory_type = MemoryType(row["memory_type"])
+        allows_scope_fallback = (
+            memory_type == MemoryType.LEARNING_PREFERENCE
+            and intent in {MemoryIntent.ECHO_GUIDANCE, MemoryIntent.RESOURCE_GENERATION}
+        ) or (
+            memory_type == MemoryType.INTERVENTION_OUTCOME
+            and intent == MemoryIntent.ECHO_GUIDANCE
+        )
+        if not matched_terms and phrase == 0.0 and not allows_scope_fallback:
+            return None
+        overlap = len(matched_terms) / max(1, len(query_terms))
         intent_boosts = {
             MemoryIntent.LEARNER_DIAGNOSIS: {MemoryType.MISCONCEPTION: 0.14},
             MemoryIntent.ECHO_GUIDANCE: {
@@ -488,7 +562,7 @@ class SimpleMemStore:
                 MemoryType.MISCONCEPTION: 0.07,
             },
         }
-        boost = intent_boosts[intent].get(MemoryType(row["memory_type"]), 0.0)
+        boost = intent_boosts[intent].get(memory_type, 0.0)
         return overlap * 0.58 + phrase * 0.2 + float(row["confidence"]) * 0.15 + boost
 
     @staticmethod
