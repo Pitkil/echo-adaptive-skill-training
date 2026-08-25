@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 SERVICE_VERSION = "echo-wavlm-prototype-v2"
 DEFAULT_JOB_STORE = Path(__file__).resolve().parents[2] / "data" / "micro-detector-real" / "jobs.json"
 SEGMENT_DURATION_SECONDS = 30
+DEFAULT_MAX_AUDIO_BYTES = 100 * 1024 * 1024
 LABEL_MAP = {
     "犹豫": "hesitation",
     "猜测": "guessing",
@@ -63,6 +64,17 @@ _jobs_lock = threading.Lock()
 
 def _job_store_path() -> Path:
     return Path(os.getenv("MICRO_DETECTOR_JOB_STORE", str(DEFAULT_JOB_STORE))).resolve()
+
+
+def _max_audio_bytes() -> int:
+    raw_value = os.getenv("MICRO_DETECTOR_MAX_AUDIO_BYTES", str(DEFAULT_MAX_AUDIO_BYTES))
+    try:
+        max_audio_bytes = int(raw_value)
+    except ValueError as exc:
+        raise RuntimeError("MICRO_DETECTOR_MAX_AUDIO_BYTES must be a positive integer") from exc
+    if max_audio_bytes <= 0:
+        raise RuntimeError("MICRO_DETECTOR_MAX_AUDIO_BYTES must be a positive integer")
+    return max_audio_bytes
 
 
 def _persist_jobs_locked() -> None:
@@ -352,13 +364,20 @@ async def create_job(
     temp_root = Path(tempfile.gettempdir()) / "echo-micro-detector"
     temp_root.mkdir(parents=True, exist_ok=True)
     audio_path = temp_root / f"{uuid.uuid4().hex}{suffix}"
+    received_bytes = 0
     try:
         with audio_path.open("wb") as target:
             while chunk := await audio.read(1024 * 1024):
+                received_bytes += len(chunk)
+                if received_bytes > _max_audio_bytes():
+                    raise HTTPException(status_code=413, detail="audio file is too large")
                 target.write(chunk)
+    except (HTTPException, OSError, RuntimeError):
+        audio_path.unlink(missing_ok=True)
+        raise
     finally:
         await audio.close()
-    if audio_path.stat().st_size == 0:
+    if received_bytes == 0:
         audio_path.unlink(missing_ok=True)
         raise HTTPException(status_code=422, detail="audio file is empty")
 
