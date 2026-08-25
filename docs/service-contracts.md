@@ -64,6 +64,17 @@ PunditRAG 接受上传只表示异步任务已排队，不能立即标记为 `in
 
 ## SimpleMem
 
+本仓库的可部署实现位于 `services/simplemem`，默认监听 `8020`。服务使用 SQLite 持久化记忆、
+合并来源和变更审计；检索会先强制应用组织、用户、项目和模块作用域，再按词项相关度、
+完整短语、可靠程度和检索意图排序。服务默认要求非空 `SIMPLEMEM_API_KEY`，所有 `/v1` 请求必须
+使用 `X-SimpleMem-API-Key`；`/health` 保持公开供编排器检查。只有显式设置
+`SIMPLEMEM_ALLOW_INSECURE_DEV=true` 的回环开发进程可以无密钥启动，生产 Compose 不向宿主机
+发布 `8020`。
+
+误区记忆只有在查询词项或完整短语命中内容、知识点编号或元数据值后才能参与排序，可靠程度和意图加权不能
+单独让零相关误区进入结果。学习偏好可以在 `echo_guidance` 与 `resource_generation` 中作为明确的
+跨主题兜底；干预效果只可以在 `echo_guidance` 中跨主题兜底。
+
 ### 三类记忆
 
 - `misconception`
@@ -114,9 +125,11 @@ PunditRAG 接受上传只表示异步任务已排队，不能立即标记为 `in
 - `conflict_key`：作用域、记忆类型和语义领域的 SHA-256，不包含结论内容。
 
 响应固定返回 `status`（`created`、`updated`、`unchanged` 或 `conflict`）、
-`idempotency_key` 和 `memory_id`。同一 `idempotency_key` 再次请求只能返回 `updated` 或
-`unchanged`，不得新增记录。同一 `conflict_key` 下出现不同 `idempotency_key` 时返回
-`conflict` 和 `conflict_memory_ids`，新结论不得同时成为活跃记忆。
+`idempotency_key` 和 `memory_id`。同一活跃记忆的 `idempotency_key` 再次请求只能返回 `updated`
+或 `unchanged`，不得新增记录；若该键属于已经删除或合并的非活跃记录，服务返回 HTTP 409 和
+冲突记录编号，不得报告成功或自动重新激活。更新记忆后仍永久保留历史幂等键归属，旧请求不能
+通过先换键再删除的方式重新创建。同一 `conflict_key` 下出现不同 `idempotency_key`
+时返回 `conflict` 和 `conflict_memory_ids`，新结论不得同时成为活跃记忆。
 
 ### 修改、删除和合并
 
@@ -222,15 +235,31 @@ ECHO 主系统对外入口：
 
 响应固定包含：
 
-- `ability_and_trend`：能力现状和变化趋势，包括每个模块的 U/A/R、正确率和与上一时间段相比的变化。
+- `ability_and_trend`：能力现状和变化趋势，包括每个模块的 U/A/R、最近 30 天正确率、用于画像
+  分类的累计可评分作答正确率 `profile_accuracy`，以及与上一时间段相比的变化。
 - `evidence_and_blind_spots`：有作答依据的知识盲区、已掌握知识点、相关题目、得分、时间、
   已确认微表征、长期记忆摘要和判断可靠程度。
 - `path_and_resources`：推荐难度、下一知识点、推荐内容形式、推荐辅导方式、学习顺序、
-  推荐原因和证据来源。
+  推荐原因和证据来源；同时包含 `learner_profile` 和 `primary_content_decision`。
+
+`learner_profile` 只根据允许更新 MIRT 的已判分作答、U/A/R、累计正确率和有作答证据的盲区
+归入 P1、P2 或 P3。分类使用的作答次数、正确率和证据必须来自同一组累计作答，不能因最近
+30 天没有新作答而改变画像。少于两次可判分作答时 `type` 必须为 `null` 且
+`evidence_status` 为 `insufficient`，不得根据长期记忆或微表征猜测能力类型。证据足够时返回
+`evidence_count` 和 `evidence_refs`；每条引用至少包含作答编号、题目编号、知识点、得分、
+是否正确和作答时间。三类画像向内容生成方提供不同的 `explanation_depth`、`step_detail` 和
+`support_level`，固定样例见 `docs/member-c/learner-profile-samples.json`。
+
+`primary_content_decision` 每轮只允许一个主要动作。未完成前测时返回
+`action=complete_pretest`、`resource_count=0`；证据足够时返回 `action=generate_resource`、唯一
+`resource_type`、`resource_count=1` 和 `selection_policy=single_most_needed`。三种资源是系统能力
+范围，不表示每次同时生成三份。成员 A 的生成编排必须按该唯一决定生成和校验当前资源。
 
 MIRT 更新接口只接受有效题目和唯一 `attempt_id`。重复编号必须返回原状态，不重复更新。
 只有作答证据支持的知识点才能标为盲区。微表征和长期记忆不能直接修改 U/A/R。
 大模型只负责把上述结果写成易懂文字；无证据时返回“暂不能判断”，模型不可用时使用固定模板。
+成员 C 的 10 组跨会话长期记忆差异案例见 `docs/member-c/memory-difference-cases.json`，所有案例
+均要求长期记忆和微表征不直接改变 U/A/R。
 
 ## 联调规则
 

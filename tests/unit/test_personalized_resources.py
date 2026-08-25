@@ -29,8 +29,10 @@ from sqlalchemy.pool import StaticPool
 
 class FakeMemoryClient:
     configured = True
+    requests = []
 
     def search(self, request):
+        self.requests.append(request)
         return [
             {
                 "content": "The learner benefits from short steps and explicit checkpoints.",
@@ -84,6 +86,7 @@ def test_draft_resources_do_not_claim_missing_evidence() -> None:
 
 
 def test_resource_generation_uses_profile_memory_and_blind_spot(monkeypatch) -> None:
+    FakeMemoryClient.requests.clear()
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -195,6 +198,9 @@ def test_resource_generation_uses_profile_memory_and_blind_spot(monkeypatch) -> 
     assert all(item.knowledge_point_id == point.id for item in resources)
     assert all(item.difficulty == "foundation" for item in resources)
     assert all(point.name in item.content for item in resources)
+    memory_request = FakeMemoryClient.requests[-1]
+    assert str(point.id) in memory_request.query
+    assert point.name in memory_request.query
 
     app.dependency_overrides.clear()
     db.close()

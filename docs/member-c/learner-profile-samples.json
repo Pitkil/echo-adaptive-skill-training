@@ -1,0 +1,59 @@
+{
+  "version": "1.0",
+  "module_id": "M2",
+  "knowledge_point_id": "M2-KP3",
+  "description": "同一模块与知识点下的 P1、P2、P3 固定学习者画像，用于验证差异化决策。",
+  "profiles": [
+    {
+      "profile_id": "P1",
+      "label": "基础巩固型",
+      "ability": {"U": -0.8, "A": -0.6, "R": -0.4},
+      "attempt_count": 6,
+      "average_accuracy": 0.3333,
+      "blind_spot_count": 2,
+      "evidence_refs": ["P1-M2-A01", "P1-M2-A02", "P1-M2-A03"],
+      "memory_hints": ["容易把向量检索结果当成长期记忆"],
+      "expected": {
+        "profile_type": "P1",
+        "difficulty": "foundation",
+        "resource_type": "custom_note",
+        "resource_count": 1,
+        "support_level": "high"
+      }
+    },
+    {
+      "profile_id": "P2",
+      "label": "理论转实践型",
+      "ability": {"U": 0.7, "A": 0.1, "R": 0.5},
+      "attempt_count": 8,
+      "average_accuracy": 0.75,
+      "blind_spot_count": 0,
+      "evidence_refs": ["P2-M2-A01", "P2-M2-A02", "P2-M2-A03"],
+      "memory_hints": ["完整示例和关键检查点更有效"],
+      "expected": {
+        "profile_type": "P2",
+        "difficulty": "standard",
+        "resource_type": "practice_guide",
+        "resource_count": 1,
+        "support_level": "medium"
+      }
+    },
+    {
+      "profile_id": "P3",
+      "label": "工程进阶型",
+      "ability": {"U": 0.9, "A": 1.0, "R": 0.8},
+      "attempt_count": 8,
+      "average_accuracy": 0.875,
+      "blind_spot_count": 0,
+      "evidence_refs": ["P3-M2-A01", "P3-M2-A02", "P3-M2-A03"],
+      "memory_hints": ["架构权衡和故障场景能提升学习效果"],
+      "expected": {
+        "profile_type": "P3",
+        "difficulty": "advanced",
+        "resource_type": "staged_test",
+        "resource_count": 1,
+        "support_level": "low"
+      }
+    }
+  ]
+}

@@ -4,6 +4,7 @@
 
 ```powershell
 Copy-Item .env.example .env
+# 为 SIMPLEMEM_API_KEY 生成并填写至少 32 字节的随机密钥
 docker compose up --build
 ```
 
@@ -36,6 +37,18 @@ docker compose -f docker-compose.yml -f docker-compose.competition.yml up --buil
 学习者或导师登录令牌代替服务身份。生产部署应通过密钥管理系统注入，不写入 Git。
 
 ECHO API 默认使用 `8000`。基于多路召回与混合向量的可追溯 RAG 检索引擎、SimpleMem、微表征服务分别使用独立地址。
+SimpleMem 服务位于 `services/simplemem`，默认监听 `8020`，使用独立 SQLite 数据库和
+Docker volume。部署环境应设置非空 `SIMPLEMEM_API_KEY`，ECHO 与 SimpleMem 必须使用相同值。
+未设置密钥时 SimpleMem 默认拒绝启动；基础 Compose 只在容器内部网络公开 `8020`，不发布到
+宿主机。仅本机联调且明确接受无鉴权风险时，可以使用回环地址覆盖配置：
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.simplemem-dev.yml up --build
+```
+
+该覆盖配置只把 `8020` 绑定到 `127.0.0.1`，并为 ECHO 与 SimpleMem 配置相同的固定开发服务密钥，
+不得用于共享或生产环境。直接无鉴权启动仍需显式设置 `SIMPLEMEM_ALLOW_INSECURE_DEV=true`，且服务
+会拒绝任何非回环 `SIMPLEMEM_HOST`。
 完整服务不可用时保留事实记录并返回降级原因，不伪造成功状态。
 
 ## 权限

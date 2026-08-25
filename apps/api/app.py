@@ -1272,6 +1272,16 @@ def safe_memories(plan, user: User, query: str) -> tuple[list[dict], str | None]
         return [], str(exc)
 
 
+def _module_memory_query(
+    module: TrainingModule,
+    points: list[KnowledgePoint],
+) -> str:
+    terms = [str(module.id), module.code, module.name]
+    for point in points:
+        terms.extend([str(point.id), point.code, point.name])
+    return " ".join(dict.fromkeys(term.strip() for term in terms if term.strip()))
+
+
 def extract_answer(text: str) -> str:
     normalized = re.sub(r"^(答案是|我的答案是|我选|提交答案)[:：]?", "", text.strip())
     return normalized.strip()
@@ -1700,6 +1710,12 @@ def learning_insight(
     module = db.query(TrainingModule).filter_by(id=module_id).first()
     if module is None:
         raise HTTPException(status_code=404, detail="培训模块不存在")
+    module_points = (
+        db.query(KnowledgePoint)
+        .filter_by(module_id=module.id)
+        .order_by(KnowledgePoint.sequence)
+        .all()
+    )
     if client.configured:
         try:
             memories = client.search(
@@ -1709,7 +1725,7 @@ def learning_insight(
                     program_id=module.program_id,
                     module_id=module.id,
                     intent=MemoryIntent.LEARNER_DIAGNOSIS,
-                    query="当前模块相关的误区、学习偏好和历史干预效果",
+                    query=_module_memory_query(module, module_points),
                 )
             )
         except IntegrationUnavailable as exc:
@@ -2666,6 +2682,20 @@ def generate_resources(
     if module is None:
         raise HTTPException(status_code=404, detail="培训模块不存在")
 
+    points = (
+        db.query(KnowledgePoint)
+        .filter_by(module_id=module.id)
+        .order_by(KnowledgePoint.sequence)
+        .all()
+    )
+    requested_point = (
+        next((item for item in points if item.id == request.knowledge_point_id), None)
+        if request.knowledge_point_id is not None
+        else None
+    )
+    if request.knowledge_point_id is not None and requested_point is None:
+        raise HTTPException(status_code=404, detail="当前模块没有可生成资源的知识点")
+
     degradation: list[str] = []
     memories: list[dict] = []
     memory_client = SimpleMemClient()
@@ -2678,7 +2708,11 @@ def generate_resources(
                     program_id=module.program_id,
                     module_id=module.id,
                     intent=MemoryIntent.RESOURCE_GENERATION,
-                    query="当前模块的稳定误区、学习偏好和有效干预方式",
+                    query=_module_memory_query(
+                        module,
+                        [requested_point] if requested_point is not None else points,
+                    ),
+                    knowledge_point_id=request.knowledge_point_id,
                 )
             )
         except IntegrationUnavailable as exc:
@@ -2693,11 +2727,7 @@ def generate_resources(
     )
     evidence_view = profile["views"]["evidence_and_blind_spots"]
     if request.knowledge_point_id is not None:
-        point = (
-            db.query(KnowledgePoint)
-            .filter_by(id=request.knowledge_point_id, module_id=module.id)
-            .first()
-        )
+        point = requested_point
     else:
         blind_spots = evidence_view["knowledge_blind_spots"]
         mastered_ids = {
@@ -2705,12 +2735,6 @@ def generate_resources(
             for item in evidence_view["mastered_knowledge_points"]
         }
         preferred_id = blind_spots[0]["knowledge_point_id"] if blind_spots else None
-        point_query = (
-            db.query(KnowledgePoint)
-            .filter_by(module_id=module.id)
-            .order_by(KnowledgePoint.sequence)
-        )
-        points = point_query.all()
         point = (
             next((item for item in points if item.id == preferred_id), None)
             if preferred_id is not None
