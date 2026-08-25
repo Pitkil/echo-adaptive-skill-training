@@ -163,6 +163,7 @@ apps/api/
   Quiz/                     选题、判分和题库导入
   integrations/             检索引擎、SimpleMem、微表征接口
   web/                      学习者与管理端前端
+services/simplemem/         SimpleMem 8020 独立服务、持久化与作用域检索
 scripts/                    环境、测试、迁移和管理员脚本
 tests/unit/                 单模块与业务边界测试
 tests/integration/          API 和服务组合测试

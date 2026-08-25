@@ -64,6 +64,11 @@ PunditRAG 接受上传只表示异步任务已排队，不能立即标记为 `in
 
 ## SimpleMem
 
+本仓库的可部署实现位于 `services/simplemem`，默认监听 `8020`。服务使用 SQLite 持久化记忆、
+合并来源和变更审计；检索会先强制应用组织、用户、项目和模块作用域，再按词项相关度、
+完整短语、可靠程度和检索意图排序。当 `SIMPLEMEM_API_KEY` 非空时，所有 `/v1` 请求必须使用
+`X-SimpleMem-API-Key`；`/health` 保持公开供编排器检查。
+
 ### 三类记忆
 
 - `misconception`

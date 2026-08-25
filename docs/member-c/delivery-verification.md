@@ -10,6 +10,8 @@
 - 每轮输出一项 `primary_content_decision`；需要资源时 `resource_count` 固定为 1。
 - 冻结同一 M2 知识点下三类学习者样例，分别选择定制资料、实操指南和阶段测试。
 - 冻结并实际执行 10 组跨会话记忆案例，覆盖三类学习者、三个模块、三类记忆和完整生命周期边界。
+- 已交付 `services/simplemem` 独立服务：8020 FastAPI 入口、SQLite 持久化与审计、作用域授权、
+  幂等冲突、检索、删除和合并，并提供独立 Dockerfile 与 Compose 接入。
 
 ## 固定数据
 
@@ -36,3 +38,5 @@
 - 10 组记忆案例编号唯一，覆盖 P1/P2/P3、M1/M2/M3 和三类记忆；
 - 所有记忆案例都声明 MIRT 不受直接影响。
 - 每组记忆案例都构造真实 `MemoryCandidate` 并运行 `LearnerMemoryService`，核对生命周期状态和结果。
+- `tests/unit/test_simplemem_service.py` 使用真实 SQLite 核对持久化、作用域隔离、幂等、冲突、
+  检索、更新、删除、合并和 API Key；集成测试使用 ECHO 正式客户端完成实际服务往返。

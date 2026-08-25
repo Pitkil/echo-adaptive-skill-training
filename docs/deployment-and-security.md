@@ -23,6 +23,8 @@ docker compose -f docker-compose.yml -f docker-compose.micro-mock.yml --profile 
 学习者或导师登录令牌代替服务身份。生产部署应通过密钥管理系统注入，不写入 Git。
 
 ECHO API 默认使用 `8000`。基于多路召回与混合向量的可追溯 RAG 检索引擎、SimpleMem、微表征服务分别使用独立地址。
+SimpleMem 服务位于 `services/simplemem`，默认监听 `8020`，使用独立 SQLite 数据库和
+Docker volume。部署环境应设置非空 `SIMPLEMEM_API_KEY`，ECHO 与 SimpleMem 必须使用相同值。
 完整服务不可用时保留事实记录并返回降级原因，不伪造成功状态。
 
 ## 权限

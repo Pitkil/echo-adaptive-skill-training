@@ -18,9 +18,11 @@ from .http_client import IntegrationUnavailable, JsonHttpClient
 
 class SimpleMemClient:
     def __init__(self, base_url: str | None = None) -> None:
+        api_key = os.getenv("SIMPLEMEM_API_KEY", "").strip()
         self.http = JsonHttpClient(
             base_url or os.getenv("SIMPLEMEM_BASE_URL", ""),
             timeout_seconds=float(os.getenv("SIMPLEMEM_TIMEOUT_SECONDS", "10")),
+            headers={"X-SimpleMem-API-Key": api_key} if api_key else None,
         )
 
     @property

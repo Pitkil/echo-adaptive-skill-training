@@ -73,5 +73,6 @@ MIRT 以“学习者 + 培训模块”为粒度维护 U/A/R。知识点盲区通
 | `apps/api/Quiz` | 出题、判分、MIRT 更新和幂等 |
 | `apps/api/MIRT` | 成员 C 的能力与综合画像 |
 | `apps/api/integrations` | 基于多路召回与混合向量的可追溯 RAG 检索引擎、SimpleMem、微表征服务适配 |
+| `services/simplemem` | SimpleMem 8020 独立服务、SQLite 长期记忆库、作用域授权与检索 |
 | `apps/api/index.html`、`apps/api/web` | 企业工作台与三个洞察视图 |
 | `tests` | 单元、契约和集成测试 |

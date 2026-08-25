@@ -29,9 +29,15 @@ def _raise_http_error(exc: httpx.HTTPError) -> None:
 
 
 class JsonHttpClient:
-    def __init__(self, base_url: str, timeout_seconds: float = 10.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        timeout_seconds: float = 10.0,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self.headers = dict(headers or {})
 
     @property
     def configured(self) -> bool:
@@ -47,12 +53,15 @@ class JsonHttpClient:
             raise IntegrationTransientError("Integration base URL is not configured.")
 
         try:
-            response = httpx.request(
-                method=method,
-                url=f"{self.base_url}/{path.lstrip('/')}",
-                json=payload,
-                timeout=self.timeout_seconds,
-            )
+            request_options: dict[str, Any] = {
+                "method": method,
+                "url": f"{self.base_url}/{path.lstrip('/')}",
+                "json": payload,
+                "timeout": self.timeout_seconds,
+            }
+            if self.headers:
+                request_options["headers"] = self.headers
+            response = httpx.request(**request_options)
             response.raise_for_status()
             return response.json()
         except httpx.HTTPError as exc:
@@ -73,11 +82,16 @@ class JsonHttpClient:
         if not self.configured:
             raise IntegrationTransientError("Integration base URL is not configured.")
         try:
+            upload_options: dict[str, Any] = {
+                "files": {field_name: (filename, content, content_type)},
+                "data": data,
+                "timeout": self.timeout_seconds,
+            }
+            if self.headers:
+                upload_options["headers"] = self.headers
             response = httpx.post(
                 f"{self.base_url}/{path.lstrip('/')}",
-                files={field_name: (filename, content, content_type)},
-                data=data,
-                timeout=self.timeout_seconds,
+                **upload_options,
             )
             response.raise_for_status()
             return response.json()

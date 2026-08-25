@@ -207,6 +207,21 @@ Mock 服务只用于接口联调，不能作为真实诊断，也不能用于检
 - SimpleMem：`http://127.0.0.1:8020`
 - 微表征检测：`http://127.0.0.1:8030`
 
+仓库已内置可独立运行的 SimpleMem 服务。本地联调时可在另一个终端启动：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\start_simplemem.ps1
+```
+
+macOS / Linux 可执行：
+
+```bash
+PYTHONPATH=services/simplemem SIMPLEMEM_DB_PATH=data/simplemem.db .venv/bin/python -m simplemem
+```
+
+SimpleMem 使用 SQLite 保存长期记忆与变更审计，详细配置和独立部署方式见
+[`services/simplemem/README.md`](services/simplemem/README.md)。
+
 ## 质量检查
 
 ```powershell
