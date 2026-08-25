@@ -183,9 +183,14 @@ powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
 
 ```powershell
 Copy-Item .env.example .env
+# 为 SIMPLEMEM_API_KEY 生成并填写至少 32 字节的随机密钥
 docker compose up --build -d
 docker compose exec echo-api python /workspace/scripts/bootstrap_admin.py --username admin
 ```
+
+基础 Compose 不向宿主机发布 SimpleMem 的 `8020`，ECHO 通过内部容器网络访问它。仅本机
+联调时，显式叠加 `docker-compose.simplemem-dev.yml`；该覆盖只绑定 `127.0.0.1` 并使用固定开发密钥，
+不得用于共享或生产环境。
 
 需要联调不含真实模型的微表征 Mock 服务时使用：
 
@@ -218,6 +223,23 @@ docker compose -f docker-compose.yml -f docker-compose.competition.yml up --buil
 - PunditRAG 查询服务：`http://127.0.0.1:8001`
 - SimpleMem：`http://127.0.0.1:8020`
 - 微表征检测：`http://127.0.0.1:8030`
+
+仓库已内置可独立运行的 SimpleMem 服务。本地联调时可在另一个终端启动：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\start_simplemem.ps1 -AllowInsecureDevelopment
+```
+
+macOS / Linux 可执行：
+
+```bash
+PYTHONPATH=services/simplemem SIMPLEMEM_DB_PATH=data/simplemem.db \
+SIMPLEMEM_HOST=127.0.0.1 SIMPLEMEM_ALLOW_INSECURE_DEV=true \
+.venv/bin/python -m simplemem
+```
+
+SimpleMem 使用 SQLite 保存长期记忆与变更审计，详细配置和独立部署方式见
+[`services/simplemem/README.md`](services/simplemem/README.md)。
 
 ## 质量检查
 

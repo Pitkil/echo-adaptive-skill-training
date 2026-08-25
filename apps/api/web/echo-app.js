@@ -62,9 +62,9 @@
     function setAuthMode(mode) {
         state.authMode = mode;
         const register = mode === "register";
-        $("#auth-title").textContent = register ? "创建学习者账号" : "登录工作台";
-        $("#auth-submit-label").textContent = register ? "创建并登录" : "登录";
-        $("#auth-mode-toggle").textContent = register ? "已有账号？返回登录" : "没有账号？创建学习者账号";
+        $("#auth-title").textContent = register ? "开始你的学习路径" : "欢迎回来";
+        $("#auth-submit-label").textContent = register ? "创建账号" : "继续学习";
+        $("#auth-mode-toggle").textContent = register ? "已有账号？返回登录" : "第一次使用？创建学习账号";
         $("#auth-error").textContent = "";
     }
 

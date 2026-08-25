@@ -111,6 +111,14 @@ def test_simplemem_uses_patch_and_full_scope_for_mutating_operations() -> None:
     )
 
 
+def test_simplemem_client_adds_configured_service_api_key(monkeypatch) -> None:
+    monkeypatch.setenv("SIMPLEMEM_API_KEY", "test-service-key")
+
+    client = SimpleMemClient("http://simplemem.test")
+
+    assert client.http.headers == {"X-SimpleMem-API-Key": "test-service-key"}
+
+
 @pytest.mark.parametrize(
     ("operation", "response"),
     [

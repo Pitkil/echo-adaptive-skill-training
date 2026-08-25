@@ -1,0 +1,11 @@
+services:
+  echo-api:
+    environment:
+      SIMPLEMEM_API_KEY: simplemem-loopback-development-key
+
+  simplemem:
+    environment:
+      SIMPLEMEM_API_KEY: simplemem-loopback-development-key
+      SIMPLEMEM_ALLOW_INSECURE_DEV: "false"
+    ports:
+      - "127.0.0.1:${SIMPLEMEM_PORT:-8020}:8020"

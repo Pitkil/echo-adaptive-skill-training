@@ -6,7 +6,7 @@
     <title>ECHO 企业技能训练系统</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/web/echo-shell.css?v=0.3.0">
     <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
@@ -16,16 +16,16 @@
         <section class="auth-visual" aria-label="ECHO 产品介绍">
             <img src="/web/assets/images/auth-library.jpg" alt="企业知识库与学习工作场景">
             <div class="auth-visual-copy">
-                <p class="eyebrow">ENTERPRISE LEARNING INTELLIGENCE</p>
-                <h1>ECHO</h1>
-                <p>证据驱动的 Semantic Kernel 技能训练与多智能体协同决策系统</p>
+                <p class="eyebrow">ECHO · 企业技能训练</p>
+                <h1>让每一次学习，<br>都有迹可循。</h1>
+                <p>以真实作答为起点，把官方证据、能力变化和下一步建议放在同一条学习路径里。</p>
             </div>
         </section>
         <section class="auth-panel">
             <div class="auth-box">
-                <div class="brand-mark">E</div>
-                <h2 id="auth-title">登录工作台</h2>
-                <p class="muted">进入培训项目、学习画像和智能体决策流程</p>
+                <div class="auth-brand"><div class="brand-mark">E</div><strong>ECHO</strong></div>
+                <h2 id="auth-title">欢迎回来</h2>
+                <p class="muted">继续你的 Semantic Kernel 学习进度</p>
                 <form id="auth-form">
                     <label>账号<input id="auth-username" autocomplete="username" required minlength="2"></label>
                     <label>密码<input id="auth-password" type="password" autocomplete="current-password" required minlength="6"></label>
@@ -41,7 +41,7 @@
         <aside class="sidebar">
             <div class="brand">
                 <div class="brand-mark">E</div>
-                <div><strong>ECHO</strong><span>企业技能训练</span></div>
+                <div><strong>ECHO</strong><span>自适应技能训练</span></div>
             </div>
             <nav class="nav-list" aria-label="主导航">
                 <button class="nav-item active" data-view="workspace"><i data-lucide="messages-square"></i><span>导学工作台</span></button>
@@ -64,7 +64,7 @@
         <main class="main">
             <header class="topbar">
                 <div>
-                    <p class="eyebrow">当前培训项目</p>
+                    <p class="eyebrow">培训计划</p>
                     <h2 id="program-name">Microsoft Semantic Kernel 企业级智能体应用开发</h2>
                 </div>
                 <div class="topbar-actions">
@@ -77,14 +77,14 @@
                 <div class="workspace-grid">
                     <section class="chat-area">
                         <div class="section-heading">
-                            <div><p class="eyebrow">ECHO GUIDANCE</p><h1>导学会话</h1></div>
+                            <div><p class="eyebrow">本次学习</p><h1>与 ECHO 对话</h1></div>
                             <span id="echo-stage" class="stage-badge">E · 唤起</span>
                         </div>
                         <div id="chat-messages" class="chat-messages" aria-live="polite">
                             <div class="empty-state">
                                 <i data-lucide="message-circle-question"></i>
-                                <strong>从一个真实工作问题开始</strong>
-                                <p>系统将按当前模块检索证据，并在每轮只执行一个主要动作。</p>
+                                <strong>说说你正在解决的问题</strong>
+                                <p>我会先确认目标，再根据你的进度给出一个清晰的下一步。</p>
                             </div>
                         </div>
                         <form id="chat-form" class="composer">
@@ -103,13 +103,13 @@
                         </form>
                     </section>
                     <aside class="trace-panel">
-                        <div class="panel-heading"><div><p class="eyebrow">AUDIT TRAIL</p><h2>本轮决策轨迹</h2></div><i data-lucide="route"></i></div>
+                        <div class="panel-heading"><div><p class="eyebrow">幕后依据</p><h2>这轮如何得出</h2></div><i data-lucide="route"></i></div>
                         <ol class="agent-loop">
-                            <li data-agent-step="diagnosis"><span>1</span><div><strong>学情诊断</strong><small>能力、证据与盲区</small></div></li>
-                            <li data-agent-step="retrieval"><span>2</span><div><strong>PunditRAG 取证</strong><small>检索、重排与引用</small></div></li>
-                            <li data-agent-step="generation"><span>3</span><div><strong>资源生成</strong><small>按需生成三类资源</small></div></li>
-                            <li data-agent-step="verification"><span>4</span><div><strong>内容校验</strong><small>事实、覆盖与难度</small></div></li>
-                            <li data-agent-step="decision"><span>5</span><div><strong>决策编排</strong><small>单动作执行并记录</small></div></li>
+                            <li data-agent-step="diagnosis"><span>1</span><div><strong>了解现状</strong><small>查看能力、作答与盲区</small></div></li>
+                            <li data-agent-step="retrieval"><span>2</span><div><strong>查找依据</strong><small>检索 Microsoft 官方资料</small></div></li>
+                            <li data-agent-step="generation"><span>3</span><div><strong>组织内容</strong><small>按当前目标生成回复</small></div></li>
+                            <li data-agent-step="verification"><span>4</span><div><strong>核对可靠性</strong><small>检查事实、出处与难度</small></div></li>
+                            <li data-agent-step="decision"><span>5</span><div><strong>安排下一步</strong><small>本轮只执行一个主要动作</small></div></li>
                         </ol>
                         <div id="trace-detail" class="trace-detail">等待第一轮交互。</div>
                     </aside>
@@ -118,7 +118,7 @@
 
             <section id="view-insight" class="view">
                 <div class="section-heading">
-                    <div><p class="eyebrow">LEARNER PROFILE</p><h1>学习画像与洞察</h1><p>能力模型与辅助证据分层展示，不将微表征直接写入 MIRT。</p></div>
+                    <div><p class="eyebrow">学习档案</p><h1>能力与学习轨迹</h1><p>能力结果与辅助证据分层展示，每条建议都可回到作答依据。</p></div>
                     <button id="refresh-insight" class="icon-button" title="刷新洞察"><i data-lucide="refresh-cw"></i></button>
                 </div>
                 <div class="segmented" role="tablist">
@@ -151,7 +151,7 @@
 
             <section id="view-resources" class="view">
                 <div class="section-heading">
-                    <div><p class="eyebrow">PERSONALIZED RESOURCES</p><h1>个性化资源</h1><p>根据当前画像生成定制学习资料、实操指南和阶段练习。</p></div>
+                    <div><p class="eyebrow">学习资源</p><h1>为当前进度准备</h1><p>资料、实操指南和阶段练习均依据你的作答结果匹配。</p></div>
                     <div class="inline-controls">
                         <div class="resource-recommendation"><span>推荐难度</span><strong id="resource-difficulty-label">画像分析后确定</strong></div>
                         <button id="generate-resources" class="button primary"><i data-lucide="wand-sparkles"></i>生成个性化资源</button>
@@ -162,7 +162,7 @@
             </section>
 
             <section id="view-evidence" class="view">
-                <div class="section-heading"><div><p class="eyebrow">MICRO-REPRESENTATION</p><h1>语音证据</h1><p>学习者单轮语音与讲师批量录音采用同一事件协议。</p></div></div>
+                <div class="section-heading"><div><p class="eyebrow">辅助证据</p><h1>语音与互动记录</h1><p>仅在明确授权后分析，用于调整提示方式，不改写专业能力结果。</p></div></div>
                 <div class="upload-grid">
                     <section class="upload-panel">
                         <div class="panel-heading"><div><h2>学习者单轮录音</h2><span>知识讲解、语音问答、模拟答辩</span></div><i data-lucide="mic"></i></div>
@@ -194,7 +194,7 @@
             <section id="view-content" class="view">
                 <div class="section-heading">
                     <div>
-                        <p class="eyebrow">CONTENT OPERATIONS</p>
+                        <p class="eyebrow">内容管理</p>
                         <h1>课程材料与固定题库</h1>
                         <p>两个入口独立保存：课程材料进入 PunditRAG，固定题目进入 Quiz 题库。</p>
                     </div>
@@ -212,7 +212,7 @@
                     </div>
                     <section class="import-workbench">
                         <div class="workbench-heading">
-                            <div><p class="eyebrow">COURSE MATERIAL</p><h2>上传课程材料</h2></div>
+                            <div><p class="eyebrow">官方资料</p><h2>上传课程材料</h2></div>
                             <span class="step-state">按模块建立索引</span>
                         </div>
                         <div class="import-form-grid material-form-grid">
@@ -244,7 +244,7 @@
                     </ol>
                     <section class="import-workbench">
                         <div class="workbench-heading">
-                            <div><p class="eyebrow">FIXED QUIZ BANK</p><h2>识别题库文件</h2></div>
+                            <div><p class="eyebrow">固定题库</p><h2>识别题库文件</h2></div>
                             <span class="step-state">不会直接写入数据库</span>
                         </div>
                         <div class="quiz-scope-grid">
@@ -258,7 +258,7 @@
 
                     <section id="quiz-preview-section" class="quiz-preview-section hidden">
                         <div class="list-heading">
-                            <div><p class="eyebrow">PREVIEW</p><h2>逐题检查</h2></div>
+                            <div><p class="eyebrow">导入前确认</p><h2>逐题检查</h2></div>
                             <div class="preview-actions">
                                 <span id="quiz-preview-count">0 道题</span>
                                 <button id="confirm-quiz-import" class="button primary" type="button" disabled><i data-lucide="badge-check"></i>确认导入</button>
@@ -273,7 +273,7 @@
             <section id="view-members" class="view">
                 <div class="section-heading">
                     <div>
-                        <p class="eyebrow">ACCESS MANAGEMENT</p>
+                        <p class="eyebrow">权限管理</p>
                         <h1>成员与身份</h1>
                         <p>学习者自行注册；系统管理员分配讲师或管理员身份。</p>
                     </div>
@@ -289,7 +289,7 @@
             </section>
 
             <section id="view-demo" class="view">
-                <div class="section-heading"><div><p class="eyebrow">DEMO MODE</p><h1>分析—生成—校验—决策闭环</h1><p>演示模式位于管理界面内，不作为独立企业角色。</p></div></div>
+                <div class="section-heading"><div><p class="eyebrow">演示模式</p><h1>一轮建议如何形成</h1><p>查看从学情证据到最终建议的完整过程。</p></div></div>
                 <div class="flow-strip">
                     <article><i data-lucide="scan-search"></i><strong>学情诊断</strong><span>成员 C</span></article>
                     <i data-lucide="arrow-right"></i>

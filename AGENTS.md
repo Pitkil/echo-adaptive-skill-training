@@ -163,6 +163,7 @@ apps/api/
   Quiz/                     选题、判分和题库导入
   integrations/             检索引擎、SimpleMem、微表征接口
   web/                      学习者与管理端前端
+services/simplemem/         SimpleMem 8020 独立服务、持久化与作用域检索
 scripts/                    环境、测试、迁移和管理员脚本
 tests/unit/                 单模块与业务边界测试
 tests/integration/          API 和服务组合测试
@@ -196,10 +197,12 @@ powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
 
 ```powershell
 Copy-Item .env.example .env
+# 为 SIMPLEMEM_API_KEY 生成并填写至少 32 字节的随机密钥
 docker compose up --build
 ```
 
-Docker 容器通过 `host.docker.internal` 访问宿主机上的三个外部服务。
+Docker 中 ECHO 通过内部容器网络访问 SimpleMem；基础配置不向宿主机发布 `8020`。
+PunditRAG 与真实微表征服务仍通过配置的外部地址接入。
 
 ## 七、编码规范
 
