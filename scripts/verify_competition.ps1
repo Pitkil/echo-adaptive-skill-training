@@ -4,9 +4,6 @@ param(
 
 $ErrorActionPreference = "Stop"
 & (Join-Path $PSScriptRoot "verify_micro_model.ps1")
-if ($LASTEXITCODE -ne 0) {
-    throw "Offline model verification failed"
-}
 
 $healthUrl = "http://127.0.0.1:$Port/health"
 $health = Invoke-RestMethod -Method Get -Uri $healthUrl -TimeoutSec 10

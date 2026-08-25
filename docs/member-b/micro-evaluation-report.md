@@ -3,7 +3,7 @@
 ## 1. 评测信息
 
 - 数据版本：`micro-evaluation-130-v1`
-- 检测器版本：`speechproject-prototype-v1`
+- 检测器版本：`echo-wavlm-prototype-v2`
 - 检测模式：`real-precomputed-embeddings`（真实输出，不是 Mock）
 - 二元观察数：390
 - 脱敏录音案例数：130

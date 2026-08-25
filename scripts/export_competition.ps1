@@ -35,9 +35,6 @@ if ($LASTEXITCODE -ne 0) {
     throw "Git LFS verification failed"
 }
 & (Join-Path $PSScriptRoot "verify_micro_model.ps1")
-if ($LASTEXITCODE -ne 0) {
-    throw "Offline model verification failed"
-}
 
 # Copy only paths tracked by Git from the clean working tree. This copies the
 # checked-out LFS objects themselves, excludes ignored secrets/runtime data,

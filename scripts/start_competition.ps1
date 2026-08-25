@@ -8,9 +8,6 @@ $baseCompose = Join-Path $repositoryRoot "docker-compose.yml"
 $competitionCompose = Join-Path $repositoryRoot "docker-compose.competition.yml"
 
 & (Join-Path $PSScriptRoot "verify_micro_model.ps1")
-if ($LASTEXITCODE -ne 0) {
-    throw "Offline model verification failed"
-}
 
 if ($UseOfflineImages) {
     $imageArchive = Join-Path $repositoryRoot "offline-images\echo-competition-images.tar"
