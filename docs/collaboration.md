@@ -60,7 +60,9 @@ git merge origin/main
 ## 开发环境与命名
 
 - 使用 Python 3.11、3.12 或 3.13，文件统一保存为 UTF-8。
-- 禁止提交密钥、`.env`、数据库、音频、上传文件、模型、缓存和真实个人信息。
+- 禁止提交密钥、`.env`、数据库、音频、上传文件、训练数据、缓存和真实个人信息。只有比赛运行必需、
+  许可和数据授权已确认、版本与 SHA-256 已冻结的推理模型制品可以进入 `models/micro_detector/`，
+  且必须由 Git LFS 管理；生成 embedding、中间 checkpoint、优化器状态和重复权重不得提交。
 - Python 文件、函数和变量使用 `snake_case`。
 - 类使用 `PascalCase`，常量使用 `UPPER_SNAKE_CASE`。
 - 布尔值使用 `is_`、`has_`、`can_` 或 `should_` 开头。

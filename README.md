@@ -201,6 +201,20 @@ docker compose -f docker-compose.yml -f docker-compose.micro-mock.yml --profile 
 该覆盖配置让 ECHO 容器通过 `http://micro-detector:8030` 访问 Mock，并等待其健康检查通过。
 Mock 服务只用于接口联调，不能作为真实诊断，也不能用于检测准确率、Precision、Recall 或 F1 评测。
 
+需要运行真实离线 WavLM 微表征检测时，先拉取 Git LFS 制品并校验：
+
+```powershell
+git lfs install
+git lfs pull
+powershell -ExecutionPolicy Bypass -File scripts\verify_micro_model.ps1
+powershell -ExecutionPolicy Bypass -File scripts\start_competition.ps1
+```
+
+真实服务的 `/health` 必须返回 `mode: real`。提交组委会前，负责人使用
+`scripts/export_competition.ps1` 生成包含实际权重、不包含 `.git` 和密钥的交付文件夹。比赛覆盖配置
+只把 8030 发布到 `127.0.0.1`，单次音频默认限制为 100 MiB；如需调整，可在 `.env` 中设置
+`MICRO_DETECTOR_MAX_AUDIO_BYTES`。启动脚本会在构建前校验 `SIMPLEMEM_API_KEY` 至少为 32 字节。
+
 已有账号可追加 `--promote-existing` 提升为系统管理员。系统管理员登录后在“成员管理”
 中把负责维护内容的账号设为“讲师/导师”。只有讲师/导师和系统管理员能看到“内容导入”，
 只有系统管理员能看到“成员管理”。
