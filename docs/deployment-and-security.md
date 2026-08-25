@@ -1,5 +1,8 @@
 # 部署与安全
 
+完整的从零部署、初始化、健康检查、故障排查、备份恢复和 Smoke Test 步骤见
+[`deployment/runbook.md`](deployment/runbook.md)。本文只保留安全边界和常用启动入口。
+
 ## 启动
 
 ```powershell
@@ -36,7 +39,9 @@ docker compose -f docker-compose.yml -f docker-compose.competition.yml up --buil
 8030 使用 `X-Micro-Service-Key` 请求头调用回调。该值为空时回调入口保持关闭；不得使用普通
 学习者或导师登录令牌代替服务身份。生产部署应通过密钥管理系统注入，不写入 Git。
 
-ECHO API 默认使用 `8000`。基于多路召回与混合向量的可追溯 RAG 检索引擎、SimpleMem、微表征服务分别使用独立地址。
+ECHO 对宿主机默认使用 `8010`；Docker 容器内监听 `8000`。PunditRAG 导入/查询、SimpleMem、
+微表征分别默认使用 `8000`、`8001`、`8020`、`8030`，不要把 ECHO 容器内端口与 PunditRAG
+导入端口混淆。
 SimpleMem 服务位于 `services/simplemem`，默认监听 `8020`，使用独立 SQLite 数据库和
 Docker volume。部署环境应设置非空 `SIMPLEMEM_API_KEY`，ECHO 与 SimpleMem 必须使用相同值。
 未设置密钥时 SimpleMem 默认拒绝启动；基础 Compose 只在容器内部网络公开 `8020`，不发布到
