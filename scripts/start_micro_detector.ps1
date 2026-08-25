@@ -1,24 +1,38 @@
 param(
-    [string]$SpeechProjectRoot = "D:\SpeechProject",
+    [string]$PythonPath = "python",
+    [string]$ModelRoot = "",
     [int]$Port = 8030
 )
 
 $ErrorActionPreference = "Stop"
-$pythonPath = Join-Path $SpeechProjectRoot "venv\Scripts\python.exe"
-$pipelinePath = Join-Path $SpeechProjectRoot "pipeline.py"
-$prototypePath = Join-Path $SpeechProjectRoot "prototypes\behavior_prototypes.pt"
-$servicePath = Join-Path (Split-Path -Parent $PSScriptRoot) "services\micro_detector_real\app.py"
+$repositoryRoot = Split-Path -Parent $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($ModelRoot)) {
+    $ModelRoot = Join-Path $repositoryRoot "models\micro_detector"
+}
 
-foreach ($requiredPath in @($pythonPath, $pipelinePath, $prototypePath, $servicePath)) {
+$requiredPaths = @(
+    (Join-Path $ModelRoot "wavlm-base-plus\config.json"),
+    (Join-Path $ModelRoot "wavlm-base-plus\preprocessor_config.json"),
+    (Join-Path $ModelRoot "wavlm-base-plus\model.safetensors"),
+    (Join-Path $ModelRoot "behavior_prototypes.pt"),
+    (Join-Path $repositoryRoot "services\micro_detector_real\app.py")
+)
+
+foreach ($requiredPath in $requiredPaths) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
         throw "Required micro-detector file not found: $requiredPath"
     }
 }
 
-$env:SPEECH_PROJECT_ROOT = (Resolve-Path -LiteralPath $SpeechProjectRoot).Path
+$env:MICRO_MODEL_ROOT = (Resolve-Path -LiteralPath $ModelRoot).Path
 $env:MICRO_DETECTOR_OFFLINE_MODE = "true"
-& $pythonPath -m uvicorn `
-    --app-dir (Split-Path -Parent $servicePath) `
-    app:app `
-    --host 127.0.0.1 `
-    --port $Port
+Push-Location $repositoryRoot
+try {
+    & $PythonPath -m uvicorn `
+        services.micro_detector_real.app:app `
+        --host 127.0.0.1 `
+        --port $Port
+}
+finally {
+    Pop-Location
+}

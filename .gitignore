@@ -48,6 +48,13 @@ outputs/
 temp/
 tmp/
 
+# The frozen micro-detector inference package is intentionally versioned with
+# Git LFS. Other model and generated-asset paths remain ignored.
+!models/
+models/*
+!models/micro_detector/
+!models/micro_detector/**
+
 # User documents and competition exports
 apps/api/Document/*
 !apps/api/Document/.gitkeep

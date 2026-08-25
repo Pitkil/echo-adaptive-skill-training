@@ -2,7 +2,8 @@
 
 This directory provides the lightweight, contract-compatible mock service for the external
 micro-representation detector. It is intentionally isolated from the ECHO API dependencies and
-does not contain WavLM, FAISS, model weights, indexes, audio, or code copied from SpeechProject.
+does not load the Git LFS inference artifacts. The real offline service lives in the sibling
+`services/micro_detector_real` directory and reads `models/micro_detector`.
 
 Start ECHO and the mock detector:
 
@@ -16,8 +17,8 @@ The mock service is also published at `http://127.0.0.1:8030`. Its `/health` res
 not be treated as a real analysis result. Run `docker compose up --build` without the profile to
 start ECHO alone and exercise the documented external-service degradation path.
 
-The future real detector must keep the same `/v1/detection/jobs` contract, use separate heavy
-dependencies and external model/index volumes, and must never write directly to the ECHO database.
+The real detector keeps the same `/v1/detection/jobs` contract, uses separate heavy dependencies
+and a read-only model volume, and never writes directly to the ECHO database.
 Multipart requests use the `audio` file field. Detector responses and events use `job_id` only for
 the detector-generated identifier; ECHO's internal job identifier is carried separately as the
 request `trace_id` and must not replace the detector identifier in event payloads.

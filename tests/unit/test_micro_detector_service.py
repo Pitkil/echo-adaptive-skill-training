@@ -42,15 +42,37 @@ def _form() -> dict[str, str]:
 
 
 def test_health_identifies_real_detector(tmp_path, monkeypatch) -> None:
-    (tmp_path / "prototypes").mkdir()
-    (tmp_path / "pipeline.py").touch()
-    (tmp_path / "prototypes" / "behavior_prototypes.pt").touch()
-    monkeypatch.setenv("SPEECH_PROJECT_ROOT", str(tmp_path))
+    wavlm_root = tmp_path / "wavlm-base-plus"
+    wavlm_root.mkdir()
+    (wavlm_root / "config.json").write_text("{}", encoding="utf-8")
+    (wavlm_root / "preprocessor_config.json").write_text("{}", encoding="utf-8")
+    with (wavlm_root / "model.safetensors").open("wb") as weight:
+        weight.truncate(300 * 1024 * 1024)
+    (tmp_path / "behavior_prototypes.pt").write_bytes(b"prototype")
+    monkeypatch.setenv("MICRO_MODEL_ROOT", str(tmp_path))
 
     response = TestClient(service.app).get("/health")
 
     assert response.status_code == 200
     assert response.json()["mode"] == "real"
+
+
+def test_health_rejects_lfs_pointer_instead_of_claiming_real_mode(tmp_path, monkeypatch) -> None:
+    wavlm_root = tmp_path / "wavlm-base-plus"
+    wavlm_root.mkdir()
+    (wavlm_root / "config.json").write_text("{}", encoding="utf-8")
+    (wavlm_root / "preprocessor_config.json").write_text("{}", encoding="utf-8")
+    (wavlm_root / "model.safetensors").write_text(
+        "version https://git-lfs.github.com/spec/v1\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "behavior_prototypes.pt").write_bytes(b"prototype")
+    monkeypatch.setenv("MICRO_MODEL_ROOT", str(tmp_path))
+
+    response = TestClient(service.app).get("/health")
+
+    assert response.status_code == 503
+    assert "model.safetensors" in response.json()["detail"]
 
 
 def test_detection_job_preserves_scope_and_returns_events(monkeypatch) -> None:

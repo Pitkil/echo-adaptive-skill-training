@@ -1,15 +1,10 @@
-"""Expose the existing SpeechProject detector through the ECHO v1 HTTP contract.
-
-Run this module with the Python environment from SpeechProject because that
-environment owns the detector's PyTorch, FAISS, and audio dependencies.
-"""
+"""Expose the offline WavLM detector through the ECHO v1 HTTP contract."""
 
 from __future__ import annotations
 
 import json
 import os
 import subprocess
-import sys
 import tempfile
 import threading
 import uuid
@@ -21,8 +16,7 @@ from typing import Annotated, Any, Literal
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-SERVICE_VERSION = "speechproject-prototype-v1"
-DEFAULT_SPEECH_PROJECT_ROOT = Path(r"D:\SpeechProject")
+SERVICE_VERSION = "echo-wavlm-prototype-v2"
 DEFAULT_JOB_STORE = Path(__file__).resolve().parents[2] / "data" / "micro-detector-real" / "jobs.json"
 SEGMENT_DURATION_SECONDS = 30
 LABEL_MAP = {
@@ -125,34 +119,23 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    title="ECHO SpeechProject Micro Detector",
+    title="ECHO Offline WavLM Micro Detector",
     version=SERVICE_VERSION,
     lifespan=lifespan,
 )
 
 
-def _speech_project_root() -> Path:
-    return Path(os.getenv("SPEECH_PROJECT_ROOT", str(DEFAULT_SPEECH_PROJECT_ROOT))).resolve()
-
-
 def _load_detector_dependencies() -> tuple[Any, Any, Any]:
-    root = _speech_project_root()
-    pipeline_path = root / "pipeline.py"
-    if not pipeline_path.is_file():
-        raise RuntimeError(f"SpeechProject pipeline not found: {pipeline_path}")
     if os.getenv("MICRO_DETECTOR_OFFLINE_MODE", "true").casefold() == "true":
-        # Competition demos must not depend on a live model-hub request. The
-        # model is provisioned once, then Transformers reads its local cache.
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
         os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-    root_text = str(root)
-    if root_text not in sys.path:
-        sys.path.insert(0, root_text)
-    from detection_utils import merge_events
-    from pipeline import _run_detection
-    from step3 import extract_embeddings_batch
+    from services.micro_detector_real.detector import (
+        extract_embeddings_batch,
+        merge_events,
+        run_detection,
+    )
 
-    return extract_embeddings_batch, _run_detection, merge_events
+    return extract_embeddings_batch, run_detection, merge_events
 
 
 def _segment_audio(input_path: Path, output_dir: Path) -> list[tuple[Path, int]]:
@@ -232,17 +215,10 @@ def _run_time_aligned_pipeline(input_path: Path) -> list[dict[str, Any]]:
             embedding_dir,
             batch_size=4,
         )
-        final: dict[str, Any] | None = None
-        for progress in run_detection(embedding_dir, 0.51, input_path):
-            if progress.get("stage") == "error":
-                raise RuntimeError(str(progress.get("msg") or "detector pipeline failed"))
-            if progress.get("stage") == "done":
-                final = progress
-        if final is None:
-            raise RuntimeError("detector pipeline returned no final result")
+        raw_results = run_detection(embedding_dir, 0.51, input_path)
         offsets = {segment.name: offset for segment, offset in segments}
         return _restore_original_timeline(
-            final.get("results") or [],
+            raw_results,
             offsets,
             merge_events,
             input_path.name,
@@ -316,10 +292,15 @@ def _detect(job_id: str, audio_path: Path) -> None:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    pipeline = _speech_project_root() / "pipeline.py"
-    prototype = _speech_project_root() / "prototypes" / "behavior_prototypes.pt"
-    if not pipeline.is_file() or not prototype.is_file():
-        raise HTTPException(status_code=503, detail="SpeechProject detector assets unavailable")
+    from services.micro_detector_real.detector import missing_artifacts
+
+    missing = missing_artifacts()
+    if missing:
+        names = ", ".join(path.name for path in missing)
+        raise HTTPException(
+            status_code=503,
+            detail=f"offline detector artifacts unavailable: {names}",
+        )
     return {"status": "ok", "mode": "real", "detector_version": SERVICE_VERSION}
 
 
