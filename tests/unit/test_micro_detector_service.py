@@ -213,6 +213,33 @@ def test_detection_job_rejects_missing_consent() -> None:
     assert response.status_code == 422
 
 
+def test_detection_job_rejects_oversized_audio_and_removes_temporary_file(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("MICRO_DETECTOR_MAX_AUDIO_BYTES", "16")
+    monkeypatch.setattr(service.tempfile, "gettempdir", lambda: str(tmp_path))
+
+    response = TestClient(service.app).post(
+        "/v1/detection/jobs",
+        data=_form(),
+        files={"audio": ("answer.wav", _wav_bytes(), "audio/wav")},
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "audio file is too large"
+    upload_root = tmp_path / "echo-micro-detector"
+    assert list(upload_root.iterdir()) == []
+
+
+@pytest.mark.parametrize("configured_value", ["0", "-1", "invalid"])
+def test_invalid_audio_size_limit_fails_closed(monkeypatch, configured_value) -> None:
+    monkeypatch.setenv("MICRO_DETECTOR_MAX_AUDIO_BYTES", configured_value)
+
+    with pytest.raises(RuntimeError, match="must be a positive integer"):
+        service._max_audio_bytes()
+
+
 def test_segment_events_are_restored_to_original_recording_timeline() -> None:
     raw_results = [
         {

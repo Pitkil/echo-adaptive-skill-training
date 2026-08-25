@@ -16,8 +16,9 @@ services:
       MICRO_MODEL_ROOT: /models
       MICRO_DETECTOR_OFFLINE_MODE: "true"
       MICRO_DETECTOR_JOB_STORE: /data/jobs.json
+      MICRO_DETECTOR_MAX_AUDIO_BYTES: ${MICRO_DETECTOR_MAX_AUDIO_BYTES:-104857600}
     ports:
-      - "${MICRO_DETECTOR_PORT:-8030}:8030"
+      - "127.0.0.1:${MICRO_DETECTOR_PORT:-8030}:8030"
     volumes:
       - ./models/micro_detector:/models:ro
       - micro-detector-data:/data

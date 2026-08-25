@@ -28,12 +28,16 @@ docker compose -f docker-compose.yml -f docker-compose.micro-mock.yml --profile 
 git lfs install
 git lfs pull
 powershell -ExecutionPolicy Bypass -File scripts\verify_micro_model.ps1
-docker compose -f docker-compose.yml -f docker-compose.competition.yml up --build
+powershell -ExecutionPolicy Bypass -File scripts\start_competition.ps1
 ```
 
 `models/micro_detector/` 只保存 WavLM 推理权重、三类行为原型、许可说明和校验清单。FAISS 索引在运行时
 根据三个原型向量内存构建，不提交持久化索引。训练音频、生成 embedding、缓存和个人数据不得进入 Git。
 组委会交付由 `scripts/export_competition.ps1` 从冻结提交生成，脚本会将 Git LFS 指针替换为已校验的真实权重。
+比赛覆盖配置仅将检测服务发布到宿主机 `127.0.0.1:8030`，不允许局域网直接访问无鉴权接口；
+上传音频按流式读取并默认限制为 100 MiB，超限文件立即删除。可通过
+`MICRO_DETECTOR_MAX_AUDIO_BYTES` 调整上限。`scripts/start_competition.ps1` 会在模型校验和镜像构建前
+确认 `SIMPLEMEM_API_KEY` 已设置且至少包含 32 个 UTF-8 字节。
 
 需要启用检测服务事件回调时，在 ECHO 与 8030 服务中配置相同的 `MICRO_CALLBACK_SECRET`，
 8030 使用 `X-Micro-Service-Key` 请求头调用回调。该值为空时回调入口保持关闭；不得使用普通
