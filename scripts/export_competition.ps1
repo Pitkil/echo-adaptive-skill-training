@@ -76,11 +76,17 @@ if ($IncludeDockerImages) {
     }
     $imageDirectory = Join-Path $resolvedOutput "offline-images"
     New-Item -ItemType Directory -Path $imageDirectory | Out-Null
-    docker save --output (Join-Path $imageDirectory "echo-competition-images.tar") `
+    $imageArchive = Join-Path $imageDirectory "echo-competition-images.tar"
+    docker save --output $imageArchive `
         echo-api:competition echo-micro-detector-real:competition
     if ($LASTEXITCODE -ne 0) {
         throw "Docker image export failed"
     }
+    $imageArchiveHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $imageArchive).Hash.ToLowerInvariant()
+    Set-Content -LiteralPath (Join-Path $imageDirectory "SHA256SUMS.txt") `
+        -Value "$imageArchiveHash  echo-competition-images.tar" -Encoding ascii
+    Add-Content -LiteralPath (Join-Path $resolvedOutput "DELIVERY-MANIFEST.txt") `
+        -Value "docker_images_sha256=$imageArchiveHash" -Encoding utf8
 }
 
 Write-Host "Competition delivery exported to $resolvedOutput"

@@ -14,6 +14,19 @@ if ($UseOfflineImages) {
     if (-not (Test-Path -LiteralPath $imageArchive -PathType Leaf)) {
         throw "Offline image archive not found: $imageArchive"
     }
+    $checksumManifest = Join-Path $repositoryRoot "offline-images\SHA256SUMS.txt"
+    if (-not (Test-Path -LiteralPath $checksumManifest -PathType Leaf)) {
+        throw "Offline image checksum manifest not found: $checksumManifest"
+    }
+    $checksumLine = (Get-Content -LiteralPath $checksumManifest | Select-Object -First 1)
+    if ($checksumLine -notmatch '^([0-9a-fA-F]{64})\s{2}echo-competition-images\.tar$') {
+        throw "Invalid offline image checksum manifest: $checksumManifest"
+    }
+    $expectedHash = $Matches[1].ToLowerInvariant()
+    $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $imageArchive).Hash.ToLowerInvariant()
+    if ($actualHash -ne $expectedHash) {
+        throw "Offline image archive checksum mismatch: $imageArchive"
+    }
     docker load --input $imageArchive
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to load offline Docker images"

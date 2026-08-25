@@ -9,7 +9,7 @@
 - 服务模式：`real`，不是 Mock
 - 模型：冻结的 `microsoft/wavlm-base-plus` 离线权重，由 `models/micro_detector/SHA256SUMS.txt` 校验
 - Docker 镜像：`echo-micro-detector-real:competition`
-- 镜像 ID：`sha256:7cf3d36b0aaa50956205b6c5c7fe24d57918fa4efea8acdb1ce3d3c27bb005e3`
+- 离线镜像归档：`offline-images/echo-competition-images.tar`，由同目录 `SHA256SUMS.txt` 校验
 - 原型阈值：0.51
 - ECHO 接口：`POST /v1/micro/mentor-batches`、任务查询和批次汇总查询
 - 数据环境：隔离的临时 SQLite 数据库
