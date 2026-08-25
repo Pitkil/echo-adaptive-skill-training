@@ -25,6 +25,11 @@ $status = git -C $repositoryRoot status --porcelain
 if ($LASTEXITCODE -ne 0 -or $status) {
     throw "Export requires a clean Git worktree"
 }
+$headCommit = git -C $repositoryRoot rev-parse HEAD
+$requestedCommit = git -C $repositoryRoot rev-parse $Ref
+if ($LASTEXITCODE -ne 0 -or $headCommit -ne $requestedCommit) {
+    throw "Export ref must match the currently checked out clean worktree"
+}
 git -C $repositoryRoot lfs fsck
 if ($LASTEXITCODE -ne 0) {
     throw "Git LFS verification failed"
@@ -34,29 +39,31 @@ if ($LASTEXITCODE -ne 0) {
     throw "Offline model verification failed"
 }
 
-$archivePath = Join-Path $resolvedOutputParent "$outputLeaf-source.zip"
-if (Test-Path -LiteralPath $archivePath) {
-    throw "Temporary archive already exists: $archivePath"
+# Copy only paths tracked by Git from the clean working tree. This copies the
+# checked-out LFS objects themselves, excludes ignored secrets/runtime data,
+# and avoids `git archive` emitting pointer blobs or stalling in LFS filters.
+New-Item -ItemType Directory -Path $resolvedOutput | Out-Null
+$trackedPaths = git -C $repositoryRoot ls-files
+if ($LASTEXITCODE -ne 0 -or -not $trackedPaths) {
+    throw "Failed to enumerate tracked delivery files"
 }
-git -C $repositoryRoot archive --format=zip --output=$archivePath $Ref
-if ($LASTEXITCODE -ne 0) {
-    throw "Failed to export Git source archive"
+foreach ($relativePath in $trackedPaths) {
+    $sourcePath = Join-Path $repositoryRoot $relativePath
+    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+        throw "Tracked delivery file is missing from the working tree: $relativePath"
+    }
+    $destinationPath = Join-Path $resolvedOutput $relativePath
+    $destinationParent = Split-Path -Parent $destinationPath
+    New-Item -ItemType Directory -Force -Path $destinationParent | Out-Null
+    Copy-Item -LiteralPath $sourcePath -Destination $destinationPath
 }
-Expand-Archive -LiteralPath $archivePath -DestinationPath $resolvedOutput
-Remove-Item -LiteralPath $archivePath
+& (Join-Path $resolvedOutput "scripts\verify_micro_model.ps1") `
+    -ModelRoot (Join-Path $resolvedOutput "models\micro_detector")
 
-# Git archives contain LFS pointer blobs. Overwrite only the frozen model tree
-# with verified working-tree artifacts so the submission is actually offline.
-$exportedModels = Join-Path $resolvedOutput "models\micro_detector"
-New-Item -ItemType Directory -Force -Path $exportedModels | Out-Null
-Copy-Item -Path (Join-Path $repositoryRoot "models\micro_detector\*") `
-    -Destination $exportedModels -Recurse -Force
-
-$commit = git -C $repositoryRoot rev-parse $Ref
 $manifest = @(
     "ECHO competition delivery",
     "source_ref=$Ref",
-    "source_commit=$commit",
+    "source_commit=$headCommit",
     "exported_at=$([DateTimeOffset]::Now.ToString('o'))",
     "model_manifest=models/micro_detector/SHA256SUMS.txt"
 )
