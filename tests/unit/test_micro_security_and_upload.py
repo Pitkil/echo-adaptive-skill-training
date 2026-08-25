@@ -15,6 +15,7 @@ from app import (
     get_mentor_batch,
     get_micro_job,
     ingest_micro_events,
+    list_micro_learners,
     queue_awaiting_micro_job_retry,
     require_micro_callback_identity,
     require_micro_job_access,
@@ -136,6 +137,47 @@ def test_mentor_can_only_read_a_job_they_created() -> None:
             make_user(10, UserRole.MENTOR.value),
         )
     assert exc_info.value.status_code == 404
+
+
+def test_mentor_speaker_binding_lists_only_active_organization_learners() -> None:
+    db, organization, learner, other_learner, _, _, _ = make_database_context()
+    mentor = User(
+        organization_id=organization.id,
+        username="mentor-selector",
+        hashed_password="unused",
+        role=UserRole.MENTOR.value,
+    )
+    inactive = User(
+        organization_id=organization.id,
+        username="inactive-learner",
+        hashed_password="unused",
+        role=UserRole.LEARNER.value,
+        status="inactive",
+    )
+    other_organization = Organization(code="OTHER", name="Other Organization")
+    db.add_all([mentor, inactive, other_organization])
+    db.flush()
+    external_learner = User(
+        organization_id=other_organization.id,
+        username="external-learner",
+        hashed_password="unused",
+        role=UserRole.LEARNER.value,
+    )
+    db.add(external_learner)
+    db.commit()
+
+    rows = list_micro_learners(db=db, user=mentor)
+
+    assert [row.id for row in rows] == [learner.id, other_learner.id]
+
+
+def test_learner_cannot_list_speaker_binding_options() -> None:
+    db, _, learner, _, _, _, _ = make_database_context()
+
+    with pytest.raises(HTTPException) as exc_info:
+        list_micro_learners(db=db, user=learner)
+
+    assert exc_info.value.status_code == 403
 
 
 def test_callback_requires_independent_service_identity(monkeypatch: pytest.MonkeyPatch) -> None:

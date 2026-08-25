@@ -41,15 +41,27 @@ def _form() -> dict[str, str]:
     }
 
 
-def test_health_identifies_real_detector(tmp_path, monkeypatch) -> None:
+def _create_fake_model_root(tmp_path, *, lfs_pointer: bool = False) -> None:
     wavlm_root = tmp_path / "wavlm-base-plus"
     wavlm_root.mkdir()
     (wavlm_root / "config.json").write_text("{}", encoding="utf-8")
     (wavlm_root / "preprocessor_config.json").write_text("{}", encoding="utf-8")
-    with (wavlm_root / "model.safetensors").open("wb") as weight:
-        weight.truncate(300 * 1024 * 1024)
+    weight_path = wavlm_root / "model.safetensors"
+    if lfs_pointer:
+        weight_path.write_text(
+            "version https://git-lfs.github.com/spec/v1\n",
+            encoding="utf-8",
+        )
+    else:
+        with weight_path.open("wb") as weight:
+            weight.truncate(300 * 1024 * 1024)
     (tmp_path / "behavior_prototypes.pt").write_bytes(b"prototype")
+
+
+def test_health_identifies_real_detector(tmp_path, monkeypatch) -> None:
+    _create_fake_model_root(tmp_path)
     monkeypatch.setenv("MICRO_MODEL_ROOT", str(tmp_path))
+    monkeypatch.setattr(service.shutil, "which", lambda executable: f"/tools/{executable}")
 
     response = TestClient(service.app).get("/health")
 
@@ -58,21 +70,25 @@ def test_health_identifies_real_detector(tmp_path, monkeypatch) -> None:
 
 
 def test_health_rejects_lfs_pointer_instead_of_claiming_real_mode(tmp_path, monkeypatch) -> None:
-    wavlm_root = tmp_path / "wavlm-base-plus"
-    wavlm_root.mkdir()
-    (wavlm_root / "config.json").write_text("{}", encoding="utf-8")
-    (wavlm_root / "preprocessor_config.json").write_text("{}", encoding="utf-8")
-    (wavlm_root / "model.safetensors").write_text(
-        "version https://git-lfs.github.com/spec/v1\n",
-        encoding="utf-8",
-    )
-    (tmp_path / "behavior_prototypes.pt").write_bytes(b"prototype")
+    _create_fake_model_root(tmp_path, lfs_pointer=True)
     monkeypatch.setenv("MICRO_MODEL_ROOT", str(tmp_path))
+    monkeypatch.setattr(service.shutil, "which", lambda executable: f"/tools/{executable}")
 
     response = TestClient(service.app).get("/health")
 
     assert response.status_code == 503
     assert "model.safetensors" in response.json()["detail"]
+
+
+def test_health_rejects_missing_ffmpeg(tmp_path, monkeypatch) -> None:
+    _create_fake_model_root(tmp_path)
+    monkeypatch.setenv("MICRO_MODEL_ROOT", str(tmp_path))
+    monkeypatch.setattr(service.shutil, "which", lambda _: None)
+
+    response = TestClient(service.app).get("/health")
+
+    assert response.status_code == 503
+    assert "ffmpeg" in response.json()["detail"]
 
 
 def test_detection_job_preserves_scope_and_returns_events(monkeypatch) -> None:
@@ -120,6 +136,68 @@ def test_detection_job_preserves_scope_and_returns_events(monkeypatch) -> None:
     persisted = service._job_store_path().read_text(encoding="utf-8")
     assert "trace-1" in persisted
     assert "answer.wav" not in persisted
+
+
+def test_non_wav_job_records_converted_duration_and_clamps_events(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    audio_path = tmp_path / "answer.webm"
+    audio_path.write_bytes(b"not-retained")
+    stored = service.StoredJob(
+        result=service.DetectionJob(job_id="speech-webm", status="queued"),
+        scope={
+            "organization_id": 1,
+            "learner_id": 2,
+            "session_id": 3,
+            "module_id": 4,
+            "knowledge_point_id": 5,
+            "source_type": "learner_voice",
+            "speaker_mapping_confirmed": True,
+        },
+    )
+    with service._jobs_lock:
+        service._jobs[stored.result.job_id] = stored
+    monkeypatch.setattr(
+        service,
+        "_run_time_aligned_pipeline",
+        lambda _: (
+            [
+                {
+                    "label": "犹豫",
+                    "start": 1.0,
+                    "end": 2.0,
+                    "score": 0.8,
+                }
+            ],
+            1250,
+        ),
+    )
+
+    service._detect(stored.result.job_id, audio_path)
+
+    completed = service._jobs[stored.result.job_id]
+    assert completed.result.status == "completed"
+    assert completed.result.audio_duration_ms == 1250
+    assert completed.events[0].end_ms == 1250
+    assert not audio_path.exists()
+
+
+def test_detection_cleanup_runs_when_processing_persistence_fails(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    audio_path = tmp_path / "answer.wav"
+    audio_path.write_bytes(_wav_bytes())
+
+    def fail_update(*_args, **_kwargs) -> None:
+        raise OSError("store unavailable")
+
+    monkeypatch.setattr(service, "_update_job", fail_update)
+
+    service._detect("missing-job", audio_path)
+
+    assert not audio_path.exists()
 
 
 def test_detection_job_rejects_missing_consent() -> None:

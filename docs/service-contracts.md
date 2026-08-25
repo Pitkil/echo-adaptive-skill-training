@@ -187,6 +187,7 @@ ECHO 分别保存检测状态与事件同步状态。创建检测任务直接返
 ECHO 主系统对外入口：
 
 - `POST /v1/micro/detection-jobs`：学习者单轮音频
+- `GET /v1/micro/learners`：讲师或系统管理员读取同组织有效学习者的最小绑定选项（仅 `id`、`username`）
 - `POST /v1/micro/mentor-batches`：讲师批量录音
 - `GET /v1/micro/mentor-batches/{batch_id}`：批量任务和课次汇总
 - `GET /v1/micro/detection-jobs/{job_id}`：任务状态
@@ -200,6 +201,8 @@ ECHO 主系统对外入口：
 信号总数、犹豫与思考停顿的总时长、待确认数量，并按录音时间中点比较前后半段信号数量。
 单轮音频入口只接受当前学习者自己的 `learner_voice`；讲师录音统一使用批量入口。
 讲师录音的 `learner_id` 与 `speaker_mapping_confirmed` 必须同时存在或同时为空，不一致时拒绝请求。
+前端确认说话人后必须从 `GET /v1/micro/learners` 返回的同组织有效学习者中明确选择一人；
+未确认时清空 `learner_id`，录音只进入课次统计。
 
 事件类型固定为犹豫、猜测、思考停顿、不确定、自我修正和其他。事件包含模块、知识点、
 来源、开始和结束时间、可信程度、短转写、证据地址和说话人确认状态。

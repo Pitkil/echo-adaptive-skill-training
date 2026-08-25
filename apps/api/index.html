@@ -178,6 +178,12 @@
                         <p>未确认说话人时仅进入课次统计，不进入个人画像。</p>
                         <label class="consent"><input id="mentor-consent" type="checkbox">已确认录音采集与分析授权</label>
                         <label class="consent"><input id="speaker-confirmed" type="checkbox">说话人与学习者绑定已人工确认</label>
+                        <label>绑定学习者
+                            <select id="mentor-learner-select" disabled aria-describedby="mentor-learner-help">
+                                <option value="">请先确认说话人</option>
+                            </select>
+                        </label>
+                        <p id="mentor-learner-help">勾选人工确认后必须选择学习者；未确认的录音只参与课次统计。</p>
                         <input id="mentor-audio-files" type="file" accept="audio/*" multiple>
                         <button id="upload-mentor-audio" class="button primary"><i data-lucide="folder-up"></i>批量提交</button>
                         <div id="mentor-job-status" class="job-status">尚未提交批量任务。</div>

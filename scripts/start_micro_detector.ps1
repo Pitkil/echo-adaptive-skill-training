@@ -23,6 +23,9 @@ foreach ($requiredPath in $requiredPaths) {
         throw "Required micro-detector file not found: $requiredPath"
     }
 }
+if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+    throw "Required micro-detector executable not found: ffmpeg"
+}
 
 $env:MICRO_MODEL_ROOT = (Resolve-Path -LiteralPath $ModelRoot).Path
 $env:MICRO_DETECTOR_OFFLINE_MODE = "true"
