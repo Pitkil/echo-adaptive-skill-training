@@ -131,19 +131,19 @@
                             <video id="course-video-player" controls preload="metadata" poster="/web/assets/images/auth-library.jpg"></video>
                             <div id="video-empty-state" class="video-empty-state">
                                 <i data-lucide="play-square"></i>
-                                <strong>从本机选择课程视频</strong>
-                                <p>文件只在当前浏览器播放，不会上传到服务器。</p>
+                                <strong>选择下方课程视频</strong>
+                                <p>讲师上传的视频会保存在服务器，并记录你的观看进度。</p>
                             </div>
                         </div>
                         <div class="video-source-actions">
-                            <label class="button primary" for="course-video-file"><i data-lucide="file-video"></i><span>选择课程视频</span><input id="course-video-file" class="visually-hidden" type="file" accept="video/mp4,video/webm,video/ogg,video/quicktime"></label>
                             <a class="button secondary" href="https://learn.microsoft.com/semantic-kernel/overview/" target="_blank" rel="noopener noreferrer"><i data-lucide="external-link"></i>查看官方课程资料</a>
                         </div>
-                        <p class="video-source-note">正式部署时由讲师配置课程视频；当前入口便于本地演示真实播放、暂停和学习节点流程。</p>
+                        <div id="course-video-list" class="video-list"></div>
+                        <p class="video-source-note">讲师上传的课程视频保存在服务器；系统会记住你上次的观看位置。</p>
                     </section>
 
                     <aside class="video-companion-panel">
-                        <div class="video-companion-intro"><i data-lucide="headphones"></i><div><h2>ECHO 伴学</h2><p>播放进度只保存在当前设备，用于下次继续观看。</p></div></div>
+                        <div class="video-companion-intro"><i data-lucide="headphones"></i><div><h2>ECHO 伴学</h2><p>播放进度会保存到服务器，下次继续观看。</p></div></div>
                         <label>本节对应知识点<select id="video-knowledge-point"><option value="">读取知识点中</option></select></label>
                         <div class="video-privacy-note"><i data-lucide="mic-off"></i><div><strong>麦克风保持关闭</strong><span>播放、暂停和拖动进度都不会触发录音。</span></div></div>
                         <section id="video-checkpoint" class="video-checkpoint hidden" aria-live="polite">
@@ -306,6 +306,7 @@
                 <div class="segmented import-tabs" role="tablist" aria-label="内容导入类型">
                     <button class="active" type="button" data-import-tab="materials"><i data-lucide="database"></i>课程材料</button>
                     <button type="button" data-import-tab="quizzes"><i data-lucide="list-checks"></i>固定题库</button>
+                    <button type="button" data-import-tab="videos"><i data-lucide="clapperboard"></i>课程视频</button>
                 </div>
 
                 <div id="import-materials" class="import-pane active">
@@ -371,6 +372,36 @@
                         <div class="validation-note"><i data-lucide="shield-check"></i><span>题目、答案、评分方法、资料名称、官方链接和出处章节均完整时才允许导入。</span></div>
                         <div id="quiz-preview-list" class="quiz-preview-list"></div>
                     </section>
+                </div>
+
+                <div id="import-videos" class="import-pane">
+                    <div class="import-summary">
+                        <div><span>进入位置</span><strong>服务端视频库</strong></div>
+                        <div><span>主要用途</span><strong>课程伴学与断点续看</strong></div>
+                        <div><span>支持格式</span><strong>MP4 / MOV / WebM / M4V</strong></div>
+                    </div>
+                    <section class="import-workbench">
+                        <div class="workbench-heading">
+                            <div><p class="eyebrow">课程视频</p><h2>批量上传视频</h2></div>
+                            <span class="step-state">保存到服务器并登记</span>
+                        </div>
+                        <div class="quiz-scope-grid">
+                            <label>学习模块<select id="video-module-select"></select></label>
+                            <label>知识点（可选）<select id="video-knowledge-point-select"><option value="">不指定</option></select></label>
+                            <label class="file-field">视频文件（可多选）<input id="video-files" type="file" accept="video/*" multiple></label>
+                            <button id="upload-videos" class="button primary" type="button"><i data-lucide="clapperboard"></i>批量上传</button>
+                        </div>
+                        <div id="video-upload-status" class="job-status">等待选择视频文件。</div>
+                    </section>
+                    <div class="list-heading"><h2>已上传视频</h2><span>当前所选模块</span></div>
+                    <div id="admin-video-list" class="record-list wide"></div>
+                    <div class="list-heading"><h2>口述题检查点</h2><span id="admin-checkpoint-video-label">未选择视频</span></div>
+                    <div class="checkpoint-toolbar">
+                        <button id="generate-checkpoints" class="button primary" type="button" disabled><i data-lucide="sparkles"></i>生成口述题</button>
+                        <button id="freeze-checkpoints" class="button secondary" type="button" disabled><i data-lucide="lock-keyhole"></i>冻结全部草稿</button>
+                    </div>
+                    <div id="admin-checkpoint-status" class="job-status">选择视频后可生成口述题。</div>
+                    <div id="admin-checkpoint-list" class="checkpoint-list"></div>
                 </div>
             </section>
 

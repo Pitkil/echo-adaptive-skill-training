@@ -81,8 +81,8 @@ def test_course_center_exposes_one_real_course_and_honest_samples() -> None:
 
 def test_video_learning_never_starts_microphone_implicitly() -> None:
     assert 'id="course-video-player"' in INDEX
-    assert 'id="course-video-file"' in INDEX
-    assert "文件只在当前浏览器播放，不会上传到服务器" in INDEX
+    assert 'id="course-video-list"' in INDEX
+    assert "讲师上传的视频会保存在服务器，并记录你的观看进度" in INDEX
     assert "视频播放本身不会开启麦克风" in INDEX
     assert 'id="video-start-evidence"' in INDEX
     assert 'id="video-knowledge-point"' in INDEX
