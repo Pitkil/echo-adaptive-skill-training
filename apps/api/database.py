@@ -45,6 +45,7 @@ class EvidenceStatus(StrEnum):
 class TurnStatus(StrEnum):
     PLANNED = "planned"
     COMPLETED = "completed"
+    COMPLETED_WITH_DEGRADATION = "completed_degraded"
     FAILED = "failed"
 
 

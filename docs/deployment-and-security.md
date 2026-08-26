@@ -50,9 +50,11 @@ Docker volume。部署环境应设置非空 `SIMPLEMEM_API_KEY`，ECHO 与 Simpl
 docker compose -f docker-compose.yml -f docker-compose.simplemem-dev.yml up --build
 ```
 
-该覆盖配置只把 `8020` 绑定到 `127.0.0.1`，并为 ECHO 与 SimpleMem 配置相同的固定开发服务密钥，
-不得用于共享或生产环境。直接无鉴权启动仍需显式设置 `SIMPLEMEM_ALLOW_INSECURE_DEV=true`，且服务
-会拒绝任何非回环 `SIMPLEMEM_HOST`。
+该覆盖配置把 `8020` 绑定到宿主机 `127.0.0.1`，将 ECHO 的访问地址固定为容器网络中的
+`http://simplemem:8020`，并为 ECHO 与 SimpleMem 配置相同的固定开发服务密钥。
+`http://host.docker.internal:8020` 仅用于容器访问另行启动在宿主机上的服务；地址可解析不等于
+服务已运行。开发覆盖不得用于共享或生产环境。直接无鉴权启动仍需显式设置
+`SIMPLEMEM_ALLOW_INSECURE_DEV=true`，且服务会拒绝任何非回环 `SIMPLEMEM_HOST`。
 完整服务不可用时保留事实记录并返回降级原因，不伪造成功状态。
 
 ## 权限

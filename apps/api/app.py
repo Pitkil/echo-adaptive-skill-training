@@ -49,6 +49,7 @@ from database import (
     Organization,
     Quiz,
     SessionLocal,
+    StudentQuestionHistory,
     TrainingModule,
     TrainingProgram,
     TurnExecution,
@@ -82,6 +83,7 @@ from integrations.contracts import (
 from integrations.contracts import (
     MicroRepresentationEvent as MicroEventContract,
 )
+from integrations.health import collect_dependency_health
 from integrations.http_client import (
     IntegrationContractError,
     IntegrationTransientError,
@@ -102,6 +104,11 @@ from MIRT.mirt_daily_stats import build_daily_series
 from passlib.context import CryptContext
 from pydantic import BaseModel, Field
 from Quiz.AdaptiveEngine import AdaptiveEngine
+from Quiz.assessment_flow import (
+    AssessmentFlowService,
+    AssessmentProgress,
+    AssessmentProgressResponse,
+)
 from Quiz.grading import grade_quiz_answer
 from Quiz.import_from_document import (
     SUPPORTED_IMPORT_EXTENSIONS,
@@ -114,6 +121,7 @@ from resource_generation import (
     build_personalization_plan,
 )
 from sqlalchemy import and_, or_
+from sqlalchemy import text as sql_text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -244,6 +252,23 @@ class QuizSubmit(BaseModel):
     attempt_id: str = Field(default_factory=lambda: uuid4().hex, max_length=64)
     session_id: int | None = None
     stage: str | None = None
+
+
+class DependencyHealthResponse(BaseModel):
+    status: Literal["ok", "unavailable", "not_configured"]
+    detail: str | None = None
+    service: str | None = None
+    version: str | None = None
+    mode: str | None = None
+
+
+class SystemHealthResponse(BaseModel):
+    status: Literal["ok", "degraded"]
+    service: str
+    version: str
+    rag_provider: str
+    unavailable_count: int
+    dependencies: dict[str, DependencyHealthResponse]
 
 
 class ResourceRequest(BaseModel):
@@ -605,14 +630,22 @@ def root():
     return FileResponse(API_DIR / "index.html")
 
 
-@app.get("/health")
-@app.get("/api/health")
-def health():
+@app.get("/health", response_model=SystemHealthResponse)
+@app.get("/api/health", response_model=SystemHealthResponse)
+def health(db: Session = Depends(get_db)):
+    db.execute(sql_text("SELECT 1"))
+    dependencies = collect_dependency_health()
+    dependencies["database"] = {"status": "ok", "service": "business-database"}
+    unavailable_count = sum(
+        item["status"] != "ok" for item in dependencies.values()
+    )
     return {
-        "status": "ok",
+        "status": "degraded" if unavailable_count else "ok",
         "service": "echo-competition",
         "version": Config.app.APP_VERSION,
         "rag_provider": "punditrag",
+        "unavailable_count": unavailable_count,
+        "dependencies": dependencies,
     }
 
 
@@ -1289,7 +1322,9 @@ def extract_answer(text: str) -> str:
 
 def requested_quiz_purpose(text: str) -> Literal[
     "pretest", "posttest", "stage_test", "practice"
-]:
+] | None:
+    """Return an explicitly requested purpose; generic requests follow server progress."""
+
     normalized = TurnOrchestrator.normalize(text)
     if "前测" in normalized:
         return "pretest"
@@ -1297,7 +1332,25 @@ def requested_quiz_purpose(text: str) -> Literal[
         return "posttest"
     if "练习" in normalized:
         return "practice"
-    return "stage_test"
+    if "阶段" in normalized:
+        return "stage_test"
+    return None
+
+
+def recommended_quiz_purpose(progress: AssessmentProgress) -> Literal[
+    "pretest", "posttest", "stage_test", "practice"
+] | None:
+    """Map the server-owned next action to the only assessment purpose to issue."""
+
+    if progress.next_action in {"start_pretest", "continue_pretest"}:
+        return "pretest"
+    if progress.next_action in {"start_stage_test", "continue_stage_test"}:
+        return "stage_test"
+    if progress.next_action in {"start_posttest", "continue_posttest"}:
+        return "posttest"
+    if progress.next_action == "practice":
+        return "practice"
+    return None
 
 
 def public_quiz_payload(quiz: Quiz) -> dict[str, Any]:
@@ -1346,13 +1399,37 @@ def execute_turn(
         session.context_version += 1
         content = f"已切换到“{target.name}”，新的 ECHO 学习循环从唤起阶段开始。"
     elif action is PrimaryAction.GENERATE_QUIZ:
-        purpose = requested_quiz_purpose(request.user_input)
-        quiz = AdaptiveEngine(db).get_adaptive_question(
-            user.id,
-            session.module_id,
-            purpose=purpose,
+        assessment_flow = AssessmentFlowService(
+            db,
+            user_id=user.id,
+            module_id=session.module_id,
         )
-        if quiz is None:
+        assessment_progress = assessment_flow.progress(
+            active_quiz_id=session.active_quiz_id,
+        )
+        purpose = requested_quiz_purpose(request.user_input)
+        purpose = purpose or recommended_quiz_purpose(assessment_progress)
+        if purpose is None:
+            is_allowed = False
+            content = assessment_progress.description
+        else:
+            is_allowed, blocked_message = assessment_flow.can_request(
+                purpose,
+                active_quiz_id=session.active_quiz_id,
+            )
+            if not is_allowed:
+                content = blocked_message
+            else:
+                quiz = AdaptiveEngine(db).get_adaptive_question(
+                    user.id,
+                    session.module_id,
+                    purpose=purpose,
+                )
+                if quiz is not None:
+                    session.active_quiz_id = quiz.id
+                    payload["quiz"] = public_quiz_payload(quiz)
+                    content = quiz.content
+        if purpose is not None and is_allowed and "quiz" not in payload:
             purpose_label = {
                 "pretest": "前测",
                 "posttest": "后测",
@@ -1360,10 +1437,6 @@ def execute_turn(
                 "practice": "练习",
             }[purpose]
             content = f"当前模块还没有可用的{purpose_label}题目，请先导入对应用途的固定题库。"
-        else:
-            session.active_quiz_id = quiz.id
-            payload["quiz"] = public_quiz_payload(quiz)
-            content = quiz.content
     elif action is PrimaryAction.GRADE_ANSWER:
         quiz = db.query(Quiz).filter_by(id=session.active_quiz_id).first()
         if quiz is None:
@@ -1419,9 +1492,15 @@ def execute_turn(
         payload["echo_transition"] = transition
         payload["evidence"] = evidence
     elif action is PrimaryAction.GENERAL_RESPONSE:
-        content = "收到。当前学习状态保持不变，可以继续提问或请求阶段测验。"
+        content = "收到。当前学习状态保持不变，可以继续提问，系统会在合适阶段安排测验。"
     else:
         content = "本轮没有执行学习动作，请提供具体问题、测验请求或模块切换目标。"
+
+    payload["assessment_progress"] = AssessmentFlowService(
+        db,
+        user_id=user.id,
+        module_id=session.module_id,
+    ).progress(active_quiz_id=session.active_quiz_id).public_payload()
 
     db.add(
         Message(
@@ -1469,7 +1548,11 @@ def execute_turn(
             evidence_refs=[ref for ref in evidence_refs if ref],
         )
     )
-    execution.status = TurnStatus.COMPLETED.value
+    execution.status = (
+        TurnStatus.COMPLETED_WITH_DEGRADATION.value
+        if degradation
+        else TurnStatus.COMPLETED.value
+    )
     execution.result = result
     execution.finished_at = datetime.now()
     db.commit()
@@ -1511,7 +1594,10 @@ def chat(
         .filter_by(session_id=session.id, request_id=request.request_id)
         .first()
     )
-    if existing and existing.status == TurnStatus.COMPLETED.value:
+    if existing and existing.status in {
+        TurnStatus.COMPLETED.value,
+        TurnStatus.COMPLETED_WITH_DEGRADATION.value,
+    }:
         return StreamingResponse(stream_result(existing.result), media_type="application/x-ndjson")
 
     context = TurnContext(
@@ -1555,6 +1641,34 @@ def chat(
     return StreamingResponse(stream_result(result), media_type="application/x-ndjson")
 
 
+@app.get(
+    "/v1/modules/{module_id}/assessment-progress",
+    response_model=AssessmentProgressResponse,
+)
+def assessment_progress(
+    module_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """Return the server-owned next assessment action for this learner and module."""
+
+    accessible_module(db, user, module_id)
+    latest_session = (
+        db.query(ChatSession)
+        .filter_by(user_id=user.id, module_id=module_id)
+        .order_by(ChatSession.updated_at.desc(), ChatSession.id.desc())
+        .first()
+    )
+    progress = AssessmentFlowService(
+        db,
+        user_id=user.id,
+        module_id=module_id,
+    ).progress(
+        active_quiz_id=latest_session.active_quiz_id if latest_session else None,
+    )
+    return AssessmentProgressResponse.model_validate(progress.public_payload())
+
+
 @app.get("/v1/quizzes/next")
 def next_fixed_quiz(
     module_id: int,
@@ -1564,6 +1678,13 @@ def next_fixed_quiz(
     user: User = Depends(current_user),
 ):
     accessible_module(db, user, module_id)
+    is_allowed, blocked_message = AssessmentFlowService(
+        db,
+        user_id=user.id,
+        module_id=module_id,
+    ).can_request(purpose)
+    if not is_allowed:
+        raise HTTPException(status_code=409, detail=blocked_message)
     if knowledge_point_id is not None:
         point = (
             db.query(KnowledgePoint)
@@ -1600,6 +1721,20 @@ def submit_quiz(
         session = get_owned_session(db, payload.session_id, user.id)
         if session.active_quiz_id not in {None, quiz.id}:
             raise HTTPException(status_code=409, detail="提交题目与当前待答题目不一致")
+    existing_attempt = (
+        db.query(StudentQuestionHistory)
+        .filter_by(attempt_id=payload.attempt_id)
+        .first()
+    )
+    is_active_question = session is not None and session.active_quiz_id == quiz.id
+    if existing_attempt is None and not is_active_question:
+        is_allowed, blocked_message = AssessmentFlowService(
+            db,
+            user_id=user.id,
+            module_id=quiz.module_id,
+        ).can_request(quiz.purpose)
+        if not is_allowed:
+            raise HTTPException(status_code=409, detail=blocked_message)
     try:
         grade = grade_quiz_answer(quiz, payload.answer)
         ability, updated = AdaptiveEngine(db).update_student_state(

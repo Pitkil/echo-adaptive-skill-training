@@ -28,6 +28,7 @@ def test_development_override_is_authenticated_and_loopback_only() -> None:
     ).read_text(encoding="utf-8")
 
     assert override.count("SIMPLEMEM_API_KEY: simplemem-loopback-development-key") == 2
+    assert "SIMPLEMEM_BASE_URL: http://simplemem:8020" in override
     assert 'SIMPLEMEM_ALLOW_INSECURE_DEV: "false"' in override
     assert '"127.0.0.1:${SIMPLEMEM_PORT:-8020}:8020"' in override
 
