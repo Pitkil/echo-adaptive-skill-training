@@ -91,6 +91,18 @@ class AIConfig:
 class UploadConfig:
     UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./uploads")
     MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", str(100 * 1024 * 1024)))
+    VIDEO_MAX_FILE_SIZE = int(os.getenv("VIDEO_MAX_FILE_SIZE", str(500 * 1024 * 1024)))
+    VIDEO_ALLOWED_EXTENSIONS = {
+        ".mp4",
+        ".m4v",
+        ".mov",
+        ".webm",
+        ".ogv",
+        ".ogg",
+    }
+    VIDEO_FRAME_INTERVAL_SECONDS = int(os.getenv("VIDEO_FRAME_INTERVAL_SECONDS", "30"))
+    VIDEO_FRAME_MAX_COUNT = int(os.getenv("VIDEO_FRAME_MAX_COUNT", "24"))
+    VIDEO_OCR_BACKEND = os.getenv("VIDEO_OCR_BACKEND", "auto")
     ALLOWED_EXTENSIONS = {
         ".txt",
         ".md",

@@ -35,6 +35,7 @@ from catalog import (
 from config import Config
 from database import (
     ChatSession,
+    CourseVideo,
     EvidenceStatus,
     GeneratedResource,
     KnowledgeBase,
@@ -58,6 +59,9 @@ from database import (
     User,
     UserRole,
     VerificationResult,
+    VideoAnalysisJob,
+    VideoCheckpoint,
+    VideoProgress,
     init_db,
 )
 from fastapi import (
@@ -124,6 +128,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy import text as sql_text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
+from video_analysis import run_video_analysis
 
 API_DIR = Path(__file__).resolve().parent
 WEB_DIR = API_DIR / "web"
@@ -2765,6 +2770,499 @@ def list_knowledge_documents(
             for row in rows
         ]
     }
+
+
+class VideoProgressRequest(BaseModel):
+    current_time: float = Field(ge=0)
+    duration: float = Field(ge=0)
+    completed: bool = False
+
+
+class VideoProgressResponse(BaseModel):
+    current_time: float
+    duration: float
+    completed: bool
+
+
+class CourseVideoResponse(BaseModel):
+    id: int
+    module_id: int
+    knowledge_point_id: int | None
+    title: str
+    filename: str
+    file_size: int
+    content_type: str
+    duration_seconds: float | None
+    uploaded_at: datetime
+    stream_url: str | None = None
+    progress: VideoProgressResponse | None = None
+
+
+class CourseVideoListResponse(BaseModel):
+    items: list[CourseVideoResponse]
+
+
+class CourseVideoUploadResponse(BaseModel):
+    items: list[CourseVideoResponse]
+    total_size: int
+
+
+def create_media_token(user_id: int, video_id: int) -> str:
+    """Mint a short-lived token so the HTML video element can stream a protected file."""
+
+    return jwt.encode(
+        {
+            "sub": str(user_id),
+            "vid": video_id,
+            "exp": datetime.now(UTC) + timedelta(hours=2),
+        },
+        Config.security.SECRET_KEY,
+        algorithm=Config.security.ALGORITHM,
+    )
+
+
+def _course_video_payload(
+    video: CourseVideo,
+    progress: VideoProgress | None,
+    *,
+    user_id: int,
+) -> dict:
+    return {
+        "id": video.id,
+        "module_id": video.module_id,
+        "knowledge_point_id": video.knowledge_point_id,
+        "title": video.title,
+        "filename": video.filename,
+        "file_size": video.file_size,
+        "content_type": video.content_type,
+        "duration_seconds": video.duration_seconds,
+        "uploaded_at": video.uploaded_at.isoformat(),
+        "stream_url": f"/v1/videos/{video.id}/stream?token={create_media_token(user_id, video.id)}",
+        "progress": (
+            {
+                "current_time": progress.current_time,
+                "duration": progress.duration,
+                "completed": progress.completed,
+            }
+            if progress
+            else None
+        ),
+    }
+
+
+def _range_video_response(path: Path, media_type: str, request: Request):
+    file_size = path.stat().st_size
+    range_header = (request.headers.get("range") or "").strip()
+    match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header)
+    if not match:
+        return FileResponse(path, media_type=media_type)
+
+    start_raw, end_raw = match.groups()
+    if not start_raw and end_raw:
+        start = max(0, file_size - int(end_raw))
+        end = file_size - 1
+    else:
+        start = int(start_raw or 0)
+        end = int(end_raw) if end_raw else file_size - 1
+    end = min(end, file_size - 1)
+    if start >= file_size or start > end:
+        raise HTTPException(status_code=416, detail="请求范围无效")
+
+    def iter_file():
+        remaining = end - start + 1
+        with path.open("rb") as stream:
+            stream.seek(start)
+            while remaining > 0:
+                chunk = stream.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    return StreamingResponse(
+        iter_file(),
+        status_code=206,
+        media_type=media_type,
+        headers={
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(end - start + 1),
+        },
+    )
+
+
+def _stream_identity(
+    db: Session,
+    video_id: int,
+    authorization: str | None,
+    token: str | None,
+) -> User:
+    candidates: list[str] = []
+    if authorization and authorization.lower().startswith("bearer "):
+        candidates.append(authorization.split(" ", 1)[1])
+    if token:
+        candidates.append(token)
+    for raw in candidates:
+        try:
+            payload = jwt.decode(
+                raw,
+                Config.security.SECRET_KEY,
+                algorithms=[Config.security.ALGORITHM],
+            )
+            if "vid" in payload and int(payload["vid"]) != video_id:
+                continue
+            user_id = int(payload["sub"])
+        except (jwt.PyJWTError, KeyError, ValueError):
+            continue
+        user = db.query(User).filter(User.id == user_id, User.status == "active").first()
+        if user is not None:
+            return user
+    raise HTTPException(status_code=401, detail="缺少登录令牌")
+
+
+@app.post("/v1/modules/{module_id}/videos", response_model=CourseVideoUploadResponse)
+def upload_course_videos(
+    module_id: int,
+    files: Annotated[list[UploadFile], File()],
+    knowledge_point_id: Annotated[int | None, Form()] = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    if user.role not in {UserRole.MENTOR.value, UserRole.SYSTEM_ADMIN.value}:
+        raise HTTPException(status_code=403, detail="仅讲师、导师或系统管理员可上传课程视频")
+    module = accessible_module(db, user, module_id)
+    if knowledge_point_id is not None:
+        point = (
+            db.query(KnowledgePoint)
+            .filter_by(id=knowledge_point_id, module_id=module_id)
+            .first()
+        )
+        if point is None:
+            raise HTTPException(status_code=404, detail="知识点不存在")
+
+    destination_dir = UPLOAD_DIR / "videos"
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    created: list[dict] = []
+    total_size = 0
+    max_mb = Config.upload.VIDEO_MAX_FILE_SIZE // (1024 * 1024)
+    for upload in files:
+        original = (upload.filename or "video").strip() or "video"
+        extension = Path(original).suffix.lower()
+        if extension not in Config.upload.VIDEO_ALLOWED_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"不支持的视频格式：{extension or original}")
+        safe_stem = re.sub(r"[^A-Za-z0-9._-]", "_", Path(original).stem) or "video"
+        trace_id = uuid4().hex
+        destination = destination_dir / f"{trace_id}_{safe_stem}{extension}"
+        size = 0
+        exceeded = False
+        with destination.open("wb") as output:
+            while True:
+                chunk = upload.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > Config.upload.VIDEO_MAX_FILE_SIZE:
+                    exceeded = True
+                    break
+                output.write(chunk)
+        if exceeded:
+            destination.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail=f"视频文件超过 {max_mb} MB 上限")
+        if size == 0:
+            destination.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail="不能上传空视频文件")
+        video = CourseVideo(
+            module_id=module.id,
+            knowledge_point_id=knowledge_point_id,
+            title=Path(original).stem,
+            filename=original,
+            filepath=str(destination),
+            content_type=upload.content_type or f"video/{extension.lstrip('.')}",
+            file_size=size,
+            sort_order=0,
+            uploaded_by_user_id=user.id,
+        )
+        db.add(video)
+        db.flush()
+        created.append(_course_video_payload(video, None, user_id=user.id))
+        total_size += size
+    db.commit()
+    return {"items": created, "total_size": total_size}
+
+
+@app.get("/v1/modules/{module_id}/videos", response_model=CourseVideoListResponse)
+def list_course_videos(
+    module_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    accessible_module(db, user, module_id)
+    videos = (
+        db.query(CourseVideo)
+        .filter_by(module_id=module_id)
+        .order_by(CourseVideo.sort_order, CourseVideo.id)
+        .all()
+    )
+    video_ids = [video.id for video in videos]
+    progress_map = {
+        row.video_id: row
+        for row in (
+            db.query(VideoProgress)
+            .filter(VideoProgress.user_id == user.id)
+            .filter(VideoProgress.video_id.in_(video_ids))
+            .all()
+        )
+    } if video_ids else {}
+    return {
+        "items": [
+            _course_video_payload(video, progress_map.get(video.id), user_id=user.id)
+            for video in videos
+        ]
+    }
+
+
+@app.get("/v1/videos/{video_id}/stream")
+def stream_course_video(
+    video_id: int,
+    request: Request,
+    token: str | None = None,
+    db: Session = Depends(get_db),
+):
+    user = _stream_identity(
+        db,
+        video_id,
+        request.headers.get("authorization"),
+        token,
+    )
+    video = db.query(CourseVideo).filter_by(id=video_id).first()
+    if video is None:
+        raise HTTPException(status_code=404, detail="视频不存在")
+    accessible_module(db, user, video.module_id)
+    path = Path(video.filepath)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="视频文件缺失")
+    return _range_video_response(path, video.content_type, request)
+
+
+@app.put("/v1/videos/{video_id}/progress", response_model=VideoProgressResponse)
+def save_course_video_progress(
+    video_id: int,
+    payload: VideoProgressRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    video = db.query(CourseVideo).filter_by(id=video_id).first()
+    if video is None:
+        raise HTTPException(status_code=404, detail="视频不存在")
+    accessible_module(db, user, video.module_id)
+    progress = (
+        db.query(VideoProgress)
+        .filter_by(user_id=user.id, video_id=video_id)
+        .first()
+    )
+    if progress is None:
+        progress = VideoProgress(
+            user_id=user.id,
+            video_id=video_id,
+            module_id=video.module_id,
+        )
+        db.add(progress)
+    progress.current_time = payload.current_time
+    progress.duration = payload.duration
+    progress.completed = payload.completed
+    progress.updated_at = datetime.now()
+    db.commit()
+    return {
+        "current_time": progress.current_time,
+        "duration": progress.duration,
+        "completed": progress.completed,
+    }
+
+
+class VideoCheckpointResponse(BaseModel):
+    id: int
+    video_id: int
+    time_offset_seconds: float
+    question: str
+    expected_points: list[str]
+    official_sources: list[str]
+    status: str
+
+
+class VideoCheckpointListResponse(BaseModel):
+    items: list[VideoCheckpointResponse]
+
+
+class VideoCheckpointEditRequest(BaseModel):
+    time_offset_seconds: float | None = None
+    question: str | None = Field(default=None, min_length=1)
+    expected_points: list[str] | None = None
+    official_sources: list[str] | None = None
+
+
+class VideoAnalysisJobResponse(BaseModel):
+    job_id: str
+    status: str
+    frames_count: int
+    error: str | None
+
+
+def _video_checkpoint_payload(checkpoint: VideoCheckpoint) -> dict:
+    return {
+        "id": checkpoint.id,
+        "video_id": checkpoint.video_id,
+        "time_offset_seconds": checkpoint.time_offset_seconds,
+        "question": checkpoint.question,
+        "expected_points": checkpoint.expected_points,
+        "official_sources": checkpoint.official_sources,
+        "status": checkpoint.status,
+    }
+
+
+def run_video_analysis_task(job_id: str) -> None:
+    db = SessionLocal()
+    try:
+        run_video_analysis(db, job_id)
+    finally:
+        db.close()
+
+
+@app.post(
+    "/v1/videos/{video_id}/generate-checkpoints",
+    response_model=VideoAnalysisJobResponse,
+)
+def generate_video_checkpoints(
+    video_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    if user.role not in {UserRole.MENTOR.value, UserRole.SYSTEM_ADMIN.value}:
+        raise HTTPException(status_code=403, detail="仅讲师、导师或系统管理员可生成视频口述题")
+    video = db.query(CourseVideo).filter_by(id=video_id).first()
+    if video is None:
+        raise HTTPException(status_code=404, detail="视频不存在")
+    accessible_module(db, user, video.module_id)
+    job = VideoAnalysisJob(id=uuid4().hex, video_id=video_id, status="queued")
+    db.add(job)
+    db.commit()
+    background_tasks.add_task(run_video_analysis_task, job.id)
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "frames_count": 0,
+        "error": None,
+    }
+
+
+@app.get("/v1/video-analysis/{job_id}", response_model=VideoAnalysisJobResponse)
+def get_video_analysis_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    job = db.query(VideoAnalysisJob).filter_by(id=job_id).first()
+    if job is None:
+        raise HTTPException(status_code=404, detail="分析任务不存在")
+    video = db.get(CourseVideo, job.video_id)
+    if video is not None:
+        accessible_module(db, user, video.module_id)
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "frames_count": job.frames_count,
+        "error": job.error,
+    }
+
+
+@app.get("/v1/videos/{video_id}/checkpoints", response_model=VideoCheckpointListResponse)
+def list_video_checkpoints(
+    video_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    video = db.get(CourseVideo, video_id)
+    if video is None:
+        raise HTTPException(status_code=404, detail="视频不存在")
+    accessible_module(db, user, video.module_id)
+    query = (
+        db.query(VideoCheckpoint)
+        .filter_by(video_id=video_id)
+        .order_by(VideoCheckpoint.time_offset_seconds, VideoCheckpoint.id)
+    )
+    if user.role not in {UserRole.MENTOR.value, UserRole.SYSTEM_ADMIN.value}:
+        query = query.filter(VideoCheckpoint.status == "frozen")
+    return {"items": [_video_checkpoint_payload(item) for item in query.all()]}
+
+
+@app.put(
+    "/v1/videos/{video_id}/checkpoints/{checkpoint_id}",
+    response_model=VideoCheckpointResponse,
+)
+def edit_video_checkpoint(
+    video_id: int,
+    checkpoint_id: int,
+    payload: VideoCheckpointEditRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    if user.role not in {UserRole.MENTOR.value, UserRole.SYSTEM_ADMIN.value}:
+        raise HTTPException(status_code=403, detail="仅讲师、导师或系统管理员可编辑口述题")
+    video = db.get(CourseVideo, video_id)
+    if video is None:
+        raise HTTPException(status_code=404, detail="视频不存在")
+    accessible_module(db, user, video.module_id)
+    checkpoint = (
+        db.query(VideoCheckpoint)
+        .filter_by(id=checkpoint_id, video_id=video_id)
+        .first()
+    )
+    if checkpoint is None:
+        raise HTTPException(status_code=404, detail="口述题不存在")
+    if payload.time_offset_seconds is not None:
+        checkpoint.time_offset_seconds = payload.time_offset_seconds
+    if payload.question is not None:
+        checkpoint.question = payload.question
+    if payload.expected_points is not None:
+        checkpoint.expected_points = payload.expected_points
+    if payload.official_sources is not None:
+        checkpoint.official_sources = payload.official_sources
+    checkpoint.updated_at = datetime.now()
+    db.commit()
+    return _video_checkpoint_payload(checkpoint)
+
+
+@app.post(
+    "/v1/videos/{video_id}/checkpoints/freeze",
+    response_model=VideoCheckpointListResponse,
+)
+def freeze_video_checkpoints(
+    video_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    if user.role not in {UserRole.MENTOR.value, UserRole.SYSTEM_ADMIN.value}:
+        raise HTTPException(status_code=403, detail="仅讲师、导师或系统管理员可冻结口述题")
+    video = db.get(CourseVideo, video_id)
+    if video is None:
+        raise HTTPException(status_code=404, detail="视频不存在")
+    accessible_module(db, user, video.module_id)
+    checkpoints = (
+        db.query(VideoCheckpoint)
+        .filter_by(video_id=video_id, status="draft")
+        .all()
+    )
+    for item in checkpoints:
+        item.status = "frozen"
+        item.updated_at = datetime.now()
+    db.commit()
+    frozen = (
+        db.query(VideoCheckpoint)
+        .filter_by(video_id=video_id)
+        .order_by(VideoCheckpoint.time_offset_seconds, VideoCheckpoint.id)
+        .all()
+    )
+    return {"items": [_video_checkpoint_payload(item) for item in frozen]}
 
 
 @app.get("/v1/resources")

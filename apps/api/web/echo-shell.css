@@ -373,6 +373,24 @@ label { display: grid; gap: 7px; color: var(--ink-soft); font-size: 13px; font-w
 .video-source-actions label { display: inline-flex; color: white; }
 .video-source-actions a { text-decoration: none; }
 .video-source-note { max-width: 74ch; margin: 13px 0 0; color: var(--muted); font-size: 10px; line-height: 1.65; }
+.video-list { display: grid; gap: 8px; margin-top: 16px; }
+.video-list-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.72); color: inherit; text-align: left; cursor: pointer; }
+.video-list-item:hover, .video-list-item.active { border-color: var(--blue); background: var(--blue-soft); }
+.video-list-item > svg { width: 22px; height: 22px; flex: 0 0 22px; color: var(--blue); stroke-width: 1.55; }
+.video-list-item span { display: grid; gap: 3px; min-width: 0; }
+.video-list-item strong { font-size: 13px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.video-list-item small { color: var(--muted); font-size: 10px; }
+.admin-video-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.72); }
+.admin-video-item > div { display: grid; gap: 3px; min-width: 0; }
+.admin-video-item strong { font-size: 13px; font-weight: 550; }
+.admin-video-item small { color: var(--muted); font-size: 10px; }
+.admin-video-item .row-actions { display: flex; flex-wrap: wrap; gap: 7px; flex: 0 0 auto; }
+.checkpoint-toolbar { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 14px; }
+.checkpoint-list { display: grid; gap: 12px; margin-top: 14px; }
+.checkpoint-item { display: grid; gap: 9px; padding: 14px; border: 1px solid var(--line); border-radius: 15px; background: rgba(255,255,255,.72); }
+.checkpoint-item .checkpoint-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.checkpoint-item .checkpoint-head strong { font-size: 12px; font-weight: 600; color: var(--blue); }
+.checkpoint-item textarea { width: 100%; min-height: 64px; resize: vertical; font: inherit; font-size: 12px; }
 .video-companion-panel { align-self: start; display: grid; gap: 18px; padding: 24px; }
 .video-companion-intro { display: flex; align-items: flex-start; gap: 12px; }
 .video-companion-intro > svg { width: 37px; height: 37px; flex: 0 0 37px; padding: 8px; border-radius: 11px; background: var(--surface-low); color: var(--primary); stroke-width: 1.55; }
