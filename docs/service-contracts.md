@@ -62,6 +62,21 @@ PunditRAG 接受上传只表示异步任务已排队，不能立即标记为 `in
 `completed` 可显示为已索引。外部服务不可用时保留本地文件和明确降级原因，但不得伪造
 外部文档编号、任务编号或成功状态。
 
+## 固定测评编排
+
+`GET /v1/modules/{module_id}/assessment-progress` 是学习者端测评入口的唯一状态来源。
+服务端按前测、知识点练习覆盖、阶段测验、巩固重测和后测的顺序返回：
+
+- `state`、`title`、`description`：当前阶段及可直接展示的说明；
+- `next_action`：唯一下一步动作；
+- `button_label`、`command_text`、`button_enabled`：前端唯一操作按钮；
+- `phases`：各用途的题量、已答数量、正确率和最近作答时间。
+
+学习者前端不得自行解锁或选择用途。`GET /v1/quizzes/next` 和 `POST /quiz/submit`
+必须再次执行相同的服务端阶段校验，不能相信客户端传入的 `purpose`。阶段测验完成率达到
+100% 且正确率不低于 70% 才可解锁后测；未达标时必须先产生一条更新的练习作答记录，
+再允许阶段重测。题库缺失时返回明确的内容待配置状态，不得用动态生成题冒充正式固定题。
+
 ## SimpleMem
 
 本仓库的可部署实现位于 `services/simplemem`，默认监听 `8020`。服务使用 SQLite 持久化记忆、
