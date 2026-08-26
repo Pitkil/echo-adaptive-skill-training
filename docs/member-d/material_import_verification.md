@@ -52,7 +52,7 @@
 ## 3. 导入状态汇总
 
 2026-08-26 已使用 `scripts/build_official_kb_slice.py` 完成受控构建：15 份来源均成功获取，生成
-299 个切片，重复来源/重复内容为 0，manifest、材料、chunk 与 SHA-256 校验通过。生成物位于
+291 个切片，重复来源/重复内容为 0，manifest、材料、chunk 与 SHA-256 校验通过。生成物位于
 Git 忽略的 `data/official-kb-slice/`；此状态为 `prepared`，不等于已入 PunditRAG。
 
 同日真实服务探测结果：PunditRAG 导入 `127.0.0.1:8000`、查询 `127.0.0.1:8001` 均为
@@ -87,7 +87,7 @@ connection refused。因此以下“已导入、可检索、可引用”仍保�
 | M1-KP1 Kernel 创建与模型服务接入 | "Kernel 作用" | MS-SK-CONCEPTS-KERNEL | — | 待验证 |
 | M1-KP2 提示词与聊天完成 | "提示词模板" | MS-SK-CONCEPTS-COMPONENTS | — | 待验证 |
 | M1-KP3 插件定义与函数调用 | "插件函数调用" | MS-SK-CONCEPTS-PLUGINS | — | 待验证 |
-| M1-KP4 多轮对话与执行设置 | "多轮对话" | MS-SK-CONCEPTS-COMPONENTS | — | 待验证 |
+| M1-KP4 多轮对话与执行设置 | "多轮对话" | MS-SK-TRAINING-BUILD-KERNEL | — | 待验证 |
 | M2-KP1 Agent 创建与指令设计 | "ChatCompletionAgent" | MS-SK-AGENT-ARCHITECTURE | — | 待验证 |
 | M2-KP2 对话线程与状态管理 | "AgentThread" | MS-SK-AGENT-ARCHITECTURE | — | 待验证 |
 | M2-KP3 记忆与相关内容检索 | "向量存储" | MS-SK-VECTOR-STORE | — | 待验证 |

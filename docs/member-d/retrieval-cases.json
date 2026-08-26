@@ -1,5 +1,5 @@
 {
-  "version":"1.0","status":"pending_real_punditrag_run",
+  "version":"1.1","status":"pending_real_punditrag_run","handoff_document":"docs/member-b-punditrag-handoff.md",
   "rules":{"enable_web_search":false,"allowed_hosts":["learn.microsoft.com","github.com"],"required_metadata":["source_title","source_url","source_section","version","chunk_id"]},
   "cases":[
     {"case_id":"R01","module_id":"M1","knowledge_point_id":"M1-KP1","query":"Kernel 的职责以及如何接入聊天完成服务？","expected_material_ids":["MS-SK-CONCEPTS-KERNEL","MS-SK-TRAINING-BUILD-KERNEL"]},
@@ -15,7 +15,7 @@
     {"case_id":"R11","module_id":"M3","knowledge_point_id":"M3-KP1","query":"如何创建第一个 Semantic Kernel Process？","expected_material_ids":["MS-SK-PROCESS-FIRST"]},
     {"case_id":"R12","module_id":"M3","knowledge_point_id":"M3-KP2","query":"如何接入 OpenTelemetry traces metrics logs？","expected_material_ids":["MS-SK-OBSERVABILITY"]},
     {"case_id":"R13","module_id":"M3","knowledge_point_id":"M3-KP3","query":"filters 如何处理函数调用安全和异常？","expected_material_ids":["MS-SK-FILTERS"]},
-    {"case_id":"R14","module_id":"M3","knowledge_point_id":"M3-KP4","query":"如何通过可观测性评估应用质量？","expected_material_ids":["MS-SK-OBSERVABILITY","MS-SK-PROCESS-OVERVIEW"]},
+    {"case_id":"R14","module_id":"M3","knowledge_point_id":"M3-KP4","query":"如何利用流程审计、日志、指标和跟踪评估 Semantic Kernel 应用质量？","expected_material_ids":["MS-SK-OBSERVABILITY","MS-SK-PROCESS-OVERVIEW"],"manual_review_required":true,"gap_policy":"证据不能同时支持部署与质量评测时记录覆盖缺口并补充官方来源，不强行判定通过"},
     {"case_id":"R15","module_id":"M3","knowledge_point_id":"M3-KP3","query":"未登记网页结果能否作为正式引用？","expected_behavior":"reject_unregistered_or_untraceable_sources"}
   ]
 }
