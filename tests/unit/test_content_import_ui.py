@@ -47,14 +47,30 @@ def test_frontend_uses_profile_driven_resources_and_admin_navigation() -> None:
     assert 'showView("workspace");' in script
 
 
+def test_frontend_uses_one_server_owned_assessment_action() -> None:
+    html = (REPOSITORY_ROOT / "apps" / "api" / "index.html").read_text(encoding="utf-8")
+    script = (
+        REPOSITORY_ROOT / "apps" / "api" / "web" / "echo-app.js"
+    ).read_text(encoding="utf-8")
+
+    assert 'id="assessment-next"' in html
+    assert 'id="assessment-action"' in html
+    assert 'id="quiz-purpose-select"' not in html
+    assert 'id="quick-quiz"' not in html
+    assert "/assessment-progress" in script
+    assert 'Trace：${meta.trace_id' not in script
+    assert "部分辅助能力暂不可用，本轮学习记录已保留" in script
+    assert "completed_degraded" not in script
+
+
 def test_frontend_responses_disable_stale_browser_cache() -> None:
     with TestClient(app) as client:
         page = client.get("/")
-        script = client.get("/web/echo-app.js?v=0.3.0")
-        stylesheet = client.get("/web/echo-shell.css?v=0.3.0")
+        script = client.get("/web/echo-app.js?v=0.5.0")
+        stylesheet = client.get("/web/echo-shell.css?v=0.5.0")
 
     assert page.headers["cache-control"] == "no-store, max-age=0"
     assert script.headers["cache-control"] == "no-store, max-age=0"
     assert stylesheet.headers["cache-control"] == "no-store, max-age=0"
-    assert 'echo-app.js?v=0.3.0' in page.text
-    assert 'echo-shell.css?v=0.3.0' in page.text
+    assert 'echo-app.js?v=0.5.0' in page.text
+    assert 'echo-shell.css?v=0.5.0' in page.text

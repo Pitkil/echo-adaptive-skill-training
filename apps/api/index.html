@@ -3,15 +3,17 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="ECHO 以对话为入口，根据真实作答与学习进度安排 Semantic Kernel 技能训练。">
     <title>ECHO 企业技能训练系统</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/web/echo-shell.css?v=0.3.0">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@500;600&family=Source+Serif+4:ital,wght@0,500;0,600;1,500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/web/echo-shell.css?v=0.5.0">
     <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 </head>
 <body>
+    <a class="skip-link" href="#main-content">跳到主要内容</a>
     <div id="auth-screen" class="auth-screen">
         <section class="auth-visual" aria-label="ECHO 产品介绍">
             <img src="/web/assets/images/auth-library.jpg" alt="企业知识库与学习工作场景">
@@ -44,7 +46,8 @@
                 <div><strong>ECHO</strong><span>自适应技能训练</span></div>
             </div>
             <nav class="nav-list" aria-label="主导航">
-                <button class="nav-item active" data-view="workspace"><i data-lucide="messages-square"></i><span>导学工作台</span></button>
+                <button class="nav-item active" data-view="courses"><i data-lucide="layout-grid"></i><span>课程中心</span></button>
+                <button class="nav-item" data-view="workspace"><i data-lucide="messages-square"></i><span>导学工作台</span></button>
                 <button class="nav-item" data-view="insight"><i data-lucide="chart-no-axes-combined"></i><span>学习画像与洞察</span></button>
                 <button class="nav-item" data-view="resources"><i data-lucide="library-big"></i><span>个性化资源</span></button>
                 <button class="nav-item" data-view="evidence"><i data-lucide="audio-lines"></i><span>语音证据</span></button>
@@ -61,7 +64,7 @@
             </div>
         </aside>
 
-        <main class="main">
+        <main id="main-content" class="main">
             <header class="topbar">
                 <div>
                     <p class="eyebrow">培训计划</p>
@@ -73,7 +76,91 @@
                 </div>
             </header>
 
-            <section id="view-workspace" class="view active">
+            <section id="view-courses" class="view active">
+                <div class="course-hero">
+                    <div class="course-hero-copy">
+                        <p class="eyebrow">当前开放课程</p>
+                        <h1 id="course-center-title">正在读取课程</h1>
+                        <p id="course-center-description">课程内容正在加载，请稍候。</p>
+                        <div class="course-hero-actions">
+                            <button id="course-continue" class="button primary" type="button" disabled><i data-lucide="message-square-more"></i><span>进入 ECHO 学习</span></button>
+                            <button id="course-video" class="button secondary" type="button" disabled><i data-lucide="circle-play"></i><span>视频伴学</span></button>
+                        </div>
+                    </div>
+                    <aside class="course-facts" aria-label="课程概览">
+                        <div><span>开放课程</span><strong id="available-course-count">1 门</strong></div>
+                        <div><span>课程结构</span><strong id="course-module-count">3 个模块</strong></div>
+                        <div><span>学习方式</span><strong>ECHO 对话与视频伴学</strong></div>
+                    </aside>
+                </div>
+
+                <section class="course-outline" aria-labelledby="course-outline-title">
+                    <div class="course-section-heading">
+                        <div><h2 id="course-outline-title">课程内容</h2><p>选择模块后进入同一条对话学习路径，测验时机由系统根据进度安排。</p></div>
+                        <span id="course-current-module">等待课程目录</span>
+                    </div>
+                    <div id="course-module-list" class="course-module-list" aria-live="polite">
+                        <div class="course-loading" aria-label="课程目录加载中"><i></i><i></i><i></i></div>
+                    </div>
+                </section>
+
+                <section class="sample-courses" aria-labelledby="sample-course-title">
+                    <div class="course-section-heading">
+                        <div><h2 id="sample-course-title">更多课程方向</h2><p>以下仅用于展示平台可扩展的课程形态，尚未开放学习，也不会产生虚假进度。</p></div>
+                    </div>
+                    <div class="sample-course-list">
+                        <article><div><i data-lucide="database-zap"></i><span>课程样例</span></div><h3>企业知识库与 RAG</h3><p>从资料治理、混合检索到可追溯回答。</p><button type="button" disabled>即将开放</button></article>
+                        <article><div><i data-lucide="network"></i><span>课程样例</span></div><h3>多智能体业务协作</h3><p>围绕职责拆分、状态传递和协作决策展开训练。</p><button type="button" disabled>即将开放</button></article>
+                        <article><div><i data-lucide="shield-check"></i><span>课程样例</span></div><h3>AI 应用安全与评测</h3><p>覆盖权限、审计、失败降级和质量评测。</p><button type="button" disabled>即将开放</button></article>
+                    </div>
+                </section>
+            </section>
+
+            <section id="view-video" class="view">
+                <div class="section-heading video-page-heading">
+                    <div><p class="eyebrow">视频伴学</p><h1>边看课程，边向 ECHO 讲清楚</h1><p>视频播放本身不会开启麦克风。只有你进入口述练习并明确授权后，系统才会处理录音。</p></div>
+                    <button id="video-back-to-course" class="button secondary" type="button"><i data-lucide="arrow-left"></i>返回课程中心</button>
+                </div>
+                <div class="video-learning-grid">
+                    <section class="video-player-panel">
+                        <div class="video-lesson-heading">
+                            <div><span id="video-module-label">当前模块</span><h2 id="video-lesson-title">选择一段课程视频</h2></div>
+                            <span id="video-progress-label">尚未开始</span>
+                        </div>
+                        <div class="video-frame">
+                            <video id="course-video-player" controls preload="metadata" poster="/web/assets/images/auth-library.jpg"></video>
+                            <div id="video-empty-state" class="video-empty-state">
+                                <i data-lucide="play-square"></i>
+                                <strong>从本机选择课程视频</strong>
+                                <p>文件只在当前浏览器播放，不会上传到服务器。</p>
+                            </div>
+                        </div>
+                        <div class="video-source-actions">
+                            <label class="button primary" for="course-video-file"><i data-lucide="file-video"></i><span>选择课程视频</span><input id="course-video-file" class="visually-hidden" type="file" accept="video/mp4,video/webm,video/ogg,video/quicktime"></label>
+                            <a class="button secondary" href="https://learn.microsoft.com/semantic-kernel/overview/" target="_blank" rel="noopener noreferrer"><i data-lucide="external-link"></i>查看官方课程资料</a>
+                        </div>
+                        <p class="video-source-note">正式部署时由讲师配置课程视频；当前入口便于本地演示真实播放、暂停和学习节点流程。</p>
+                    </section>
+
+                    <aside class="video-companion-panel">
+                        <div class="video-companion-intro"><i data-lucide="headphones"></i><div><h2>ECHO 伴学</h2><p>播放进度只保存在当前设备，用于下次继续观看。</p></div></div>
+                        <label>本节对应知识点<select id="video-knowledge-point"><option value="">读取知识点中</option></select></label>
+                        <div class="video-privacy-note"><i data-lucide="mic-off"></i><div><strong>麦克风保持关闭</strong><span>播放、暂停和拖动进度都不会触发录音。</span></div></div>
+                        <section id="video-checkpoint" class="video-checkpoint hidden" aria-live="polite">
+                            <span>学习节点</span>
+                            <h3 id="video-checkpoint-title">用自己的话讲清本节内容</h3>
+                            <p id="video-checkpoint-prompt">请用 30-90 秒说明你刚刚理解的关键概念，并举一个应用例子。</p>
+                            <div>
+                                <button id="video-start-evidence" class="button primary" type="button"><i data-lucide="mic"></i>进入口述练习</button>
+                                <button id="video-skip-checkpoint" class="text-button" type="button">暂时跳过</button>
+                            </div>
+                        </section>
+                        <button id="video-manual-evidence" class="video-evidence-action" type="button"><i data-lucide="audio-lines"></i><span><strong>随时发起口述练习</strong><small>先暂停视频，再由你主动授权录音</small></span><i data-lucide="arrow-up-right"></i></button>
+                    </aside>
+                </div>
+            </section>
+
+            <section id="view-workspace" class="view">
                 <div class="workspace-grid">
                     <section class="chat-area">
                         <div class="section-heading">
@@ -85,34 +172,31 @@
                                 <i data-lucide="message-circle-question"></i>
                                 <strong>说说你正在解决的问题</strong>
                                 <p>我会先确认目标，再根据你的进度给出一个清晰的下一步。</p>
+                                <div class="prompt-starters" aria-label="可以这样开始">
+                                    <button type="button" data-chat-prompt="解释 Kernel 与插件之间的关系">理解 Kernel 与插件</button>
+                                    <button type="button" data-chat-prompt="给我一个函数调用的实操思路">练习函数调用</button>
+                                    <button type="button" data-chat-prompt="继续我当前最需要的下一步">继续学习路径</button>
+                                </div>
                             </div>
                         </div>
                         <form id="chat-form" class="composer">
+                            <section id="assessment-next" class="assessment-next" aria-live="polite">
+                                <div class="assessment-next-copy">
+                                    <span>系统安排的下一步</span>
+                                    <strong id="assessment-title">正在读取学习进度</strong>
+                                    <small id="assessment-description">系统会根据前测、练习覆盖和阶段结果决定测验时机。</small>
+                                </div>
+                                <button id="assessment-action" class="button secondary" type="button" disabled>
+                                    <i data-lucide="route"></i><span id="assessment-action-label">加载中</span>
+                                </button>
+                            </section>
                             <textarea id="chat-input" rows="2" placeholder="例如：如何设计可追溯的混合检索链路？" required></textarea>
                             <div class="composer-actions">
-                                <div class="quiz-launcher">
-                                    <select id="quiz-purpose-select" aria-label="选择测验用途">
-                                        <option value="pretest">前测</option>
-                                        <option value="stage_test" selected>阶段测验</option>
-                                        <option value="posttest">后测</option>
-                                    </select>
-                                    <button id="quick-quiz" class="button secondary" type="button"><i data-lucide="list-checks"></i>开始</button>
-                                </div>
+                                <span class="composer-hint">你只需提问或作答，测验阶段由 ECHO 自动安排。</span>
                                 <button class="button primary" type="submit"><i data-lucide="send"></i>发送</button>
                             </div>
                         </form>
                     </section>
-                    <aside class="trace-panel">
-                        <div class="panel-heading"><div><p class="eyebrow">幕后依据</p><h2>这轮如何得出</h2></div><i data-lucide="route"></i></div>
-                        <ol class="agent-loop">
-                            <li data-agent-step="diagnosis"><span>1</span><div><strong>了解现状</strong><small>查看能力、作答与盲区</small></div></li>
-                            <li data-agent-step="retrieval"><span>2</span><div><strong>查找依据</strong><small>检索 Microsoft 官方资料</small></div></li>
-                            <li data-agent-step="generation"><span>3</span><div><strong>组织内容</strong><small>按当前目标生成回复</small></div></li>
-                            <li data-agent-step="verification"><span>4</span><div><strong>核对可靠性</strong><small>检查事实、出处与难度</small></div></li>
-                            <li data-agent-step="decision"><span>5</span><div><strong>安排下一步</strong><small>本轮只执行一个主要动作</small></div></li>
-                        </ol>
-                        <div id="trace-detail" class="trace-detail">等待第一轮交互。</div>
-                    </aside>
                 </div>
             </section>
 
@@ -131,7 +215,7 @@
                         <article class="metric"><span>U · 理解</span><strong id="metric-u">0.00</strong><div><i id="bar-u"></i></div></article>
                         <article class="metric"><span>A · 应用</span><strong id="metric-a">0.00</strong><div><i id="bar-a"></i></div></article>
                         <article class="metric"><span>R · 推理与评估</span><strong id="metric-r">0.00</strong><div><i id="bar-r"></i></div></article>
-                        <article class="metric"><span>近 30 天正确率</span><strong id="metric-accuracy">—</strong><small id="metric-attempts">0 次有效作答</small></article>
+                        <article class="metric"><span>近 30 天正确率</span><strong id="metric-accuracy">暂无</strong><small id="metric-attempts">0 次有效作答</small></article>
                     </div>
                     <div class="chart-band"><div class="panel-heading"><h2>答题趋势</h2><span>近 30 天</span></div><canvas id="trend-chart"></canvas></div>
                 </div>
@@ -163,15 +247,35 @@
 
             <section id="view-evidence" class="view">
                 <div class="section-heading"><div><p class="eyebrow">辅助证据</p><h1>语音与互动记录</h1><p>仅在明确授权后分析，用于调整提示方式，不改写专业能力结果。</p></div></div>
+                <div id="video-evidence-context" class="video-evidence-context hidden" aria-live="polite">
+                    <i data-lucide="circle-play"></i>
+                    <div><strong id="video-evidence-title">来自视频伴学的口述练习</strong><span id="video-evidence-prompt">说明刚刚学习的关键概念。</span></div>
+                    <button id="clear-video-evidence" class="icon-button" type="button" title="取消视频口述上下文"><i data-lucide="x"></i></button>
+                </div>
                 <div class="upload-grid">
-                    <section class="upload-panel">
-                        <div class="panel-heading"><div><h2>学习者单轮录音</h2><span>知识讲解、语音问答、模拟答辩</span></div><i data-lucide="mic"></i></div>
-                        <p>停止录音后才提交分析，避免持续采集。录音前必须明确授权。</p>
-                        <label class="consent"><input id="learner-consent" type="checkbox">已阅读并授权本轮录音用于学习诊断</label>
-                        <button id="record-button" class="button secondary"><i data-lucide="circle"></i><span>开始录音</span></button>
-                        <input id="learner-audio-file" type="file" accept="audio/*">
-                        <button id="upload-learner-audio" class="button primary"><i data-lucide="upload"></i>提交音频</button>
-                        <div id="learner-job-status" class="job-status">尚未提交检测任务。</div>
+                    <section class="upload-panel learner-audio-panel">
+                        <div class="panel-heading audio-panel-heading">
+                            <div><p class="eyebrow">本轮语音</p><h2>学习者单轮录音</h2><span>知识讲解、语音问答、模拟答辩</span></div>
+                            <span class="audio-icon" aria-hidden="true"><i data-lucide="audio-waveform"></i></span>
+                        </div>
+                        <p class="audio-guidance">录音只在停止后提交分析，不会持续采集。你也可以直接选择已有音频。</p>
+                        <label class="consent consent-card">
+                            <input id="learner-consent" type="checkbox">
+                            <span><strong>授权本轮录音用于学习诊断</strong><small>仅用于调整提示节奏和辅导方式，不直接改变能力分数。</small></span>
+                        </label>
+                        <div class="audio-input-grid">
+                            <button id="record-button" class="audio-input-button" type="button" aria-pressed="false">
+                                <span class="audio-action-icon"><i data-lucide="mic"></i></span>
+                                <span class="audio-action-copy"><strong>开始录音</strong><small>使用当前设备麦克风</small></span>
+                            </button>
+                            <label class="audio-input-button audio-file-button" for="learner-audio-file">
+                                <span class="audio-action-icon"><i data-lucide="file-audio"></i></span>
+                                <span class="audio-action-copy"><strong>选择本地音频</strong><small id="learner-audio-file-name">MP3、WAV、M4A 或 WebM</small></span>
+                                <input id="learner-audio-file" class="visually-hidden" type="file" accept="audio/*">
+                            </label>
+                        </div>
+                        <button id="upload-learner-audio" class="button primary full audio-submit"><i data-lucide="arrow-up-from-line"></i>提交本轮音频</button>
+                        <div id="learner-job-status" class="job-status audio-status" data-state="idle"><i data-lucide="activity"></i><span id="learner-job-status-text">等待录音或选择文件</span></div>
                     </section>
                     <section class="upload-panel manager-only">
                         <div class="panel-heading"><div><h2>讲师批量录音</h2><span>培训讨论与辅导录音</span></div><i data-lucide="files"></i></div>
@@ -291,15 +395,15 @@
             <section id="view-demo" class="view">
                 <div class="section-heading"><div><p class="eyebrow">演示模式</p><h1>一轮建议如何形成</h1><p>查看从学情证据到最终建议的完整过程。</p></div></div>
                 <div class="flow-strip">
-                    <article><i data-lucide="scan-search"></i><strong>学情诊断</strong><span>成员 C</span></article>
+                    <article><i data-lucide="scan-search"></i><strong>学情分析</strong><span>学习情况分析 Agent</span></article>
                     <i data-lucide="arrow-right"></i>
-                    <article><i data-lucide="database"></i><strong>PunditRAG 取证</strong><span>成员 A</span></article>
+                    <article><i data-lucide="database"></i><strong>检索官方资料</strong><span>可追溯知识检索</span></article>
                     <i data-lucide="arrow-right"></i>
-                    <article><i data-lucide="file-text"></i><strong>资源生成</strong><span>成员 A</span></article>
+                    <article><i data-lucide="file-text"></i><strong>组织学习内容</strong><span>内容生成 Agent</span></article>
                     <i data-lucide="arrow-right"></i>
-                    <article><i data-lucide="badge-check"></i><strong>内容校验</strong><span>成员 A / D 标准</span></article>
+                    <article><i data-lucide="badge-check"></i><strong>核对内容质量</strong><span>内容检查 Agent</span></article>
                     <i data-lucide="arrow-right"></i>
-                    <article><i data-lucide="git-branch"></i><strong>决策编排</strong><span>成员 A</span></article>
+                    <article><i data-lucide="git-branch"></i><strong>安排下一步</strong><span>下一步安排 Agent</span></article>
                 </div>
                 <div class="demo-metrics">
                     <article><span>幻觉率目标</span><strong>&lt; 5%</strong></article>
@@ -311,6 +415,6 @@
         </main>
     </div>
     <div id="toast" class="toast" role="status"></div>
-    <script src="/web/echo-app.js?v=0.3.0"></script>
+    <script src="/web/echo-app.js?v=0.5.0"></script>
 </body>
 </html>
