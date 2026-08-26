@@ -64,8 +64,9 @@ flowchart TB
 固定题目保存题目用途、难度、答案、评分方法、知识点、官方出处和
 `是否更新 MIRT`。未完成检查的题目不会写入题库。
 
-学习者在同一 ECHO 对话入口选择前测、阶段测验或后测。后端只从对应
-用途的固定题中取题，题目下发时不返回答案和评分方法；学习者提交原始
+学习者只在同一 ECHO 对话入口提问和作答，不手动选择测验阶段。后端根据
+`前测完成状态 -> 知识点练习覆盖 -> 阶段测验结果 -> 后测解锁` 计算唯一下一步，
+页面只展示这一项操作。题目下发时不返回答案和评分方法；学习者提交原始
 答案后由服务器判分并保存记录，再按 `是否更新 MIRT` 决定是否更新画像。
 
 ## 产品角色
@@ -188,9 +189,11 @@ docker compose up --build -d
 docker compose exec echo-api python /workspace/scripts/bootstrap_admin.py --username admin
 ```
 
-基础 Compose 不向宿主机发布 SimpleMem 的 `8020`，ECHO 通过内部容器网络访问它。仅本机
-联调时，显式叠加 `docker-compose.simplemem-dev.yml`；该覆盖只绑定 `127.0.0.1` 并使用固定开发密钥，
-不得用于共享或生产环境。
+基础 Compose 不向宿主机发布 SimpleMem 的 `8020`，ECHO 通过内部容器网络地址
+`http://simplemem:8020` 访问它。仅本机联调时，显式叠加
+`docker-compose.simplemem-dev.yml`；该覆盖同时固定 ECHO 的容器内地址，并把服务绑定到
+宿主机 `127.0.0.1:8020` 供手工检查。`host.docker.internal:8020` 只适用于“服务另行运行在
+宿主机”的场景，不代表 SimpleMem 已经启动。开发覆盖使用固定开发密钥，不得用于共享或生产环境。
 
 需要联调不含真实模型的微表征 Mock 服务时使用：
 
