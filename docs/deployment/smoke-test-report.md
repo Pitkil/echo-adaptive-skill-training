@@ -15,7 +15,7 @@
 | SimpleMem 8020 | connection refused |
 | 微表征 8030 | `status=ok, mode=real, version=echo-wavlm-prototype-v2` |
 
-知识库构建已取得 15 份登记来源，失败 0、重复 0，生成 299 个切片并通过 manifest/chunk/hash
+知识库构建已取得 15 份登记来源，失败 0、重复 0，生成 291 个切片并通过 manifest/chunk/hash
 校验。PunditRAG 未启动，因此没有任何材料被声明为 `indexed`。
 
 ## 干净环境待执行
