@@ -2,11 +2,14 @@
 
 ## 1. 联调范围
 
-- 日期：2026-08-20（Asia/Shanghai）
+- 当前版本复核日期：2026-08-25（Asia/Shanghai）
+- 完整业务路径联调基线日期：2026-08-20（Asia/Shanghai）
 - ECHO 分支：`member/b-micro-signal`
-- 检测服务：`speechproject-prototype-v1`
+- 检测服务：`echo-wavlm-prototype-v2`
 - 服务模式：`real`，不是 Mock
-- 模型：`microsoft/wavlm-base-plus`，本机离线缓存
+- 模型：冻结的 `microsoft/wavlm-base-plus` 离线权重，由 `models/micro_detector/SHA256SUMS.txt` 校验
+- Docker 镜像：`echo-micro-detector-real:competition`
+- 离线镜像归档：`offline-images/echo-competition-images.tar`，由同目录 `SHA256SUMS.txt` 校验
 - 原型阈值：0.51
 - ECHO 接口：`POST /v1/micro/mentor-batches`、任务查询和批次汇总查询
 - 数据环境：隔离的临时 SQLite 数据库
@@ -14,8 +17,16 @@
 - 授权引用：`owner-confirmation-2026-08-19`，适用范围见
   `docs/member-b/micro-data-authorization.md`
 
-检测服务 `/health` 返回 `status=ok`、`mode=real`。以下任务均通过 ECHO 讲师批量入口提交，
-ECHO 再通过正式检测契约上传音频和同步事件。
+2026-08-25 使用已锁定依赖构建并启动上述镜像，检测服务 `/health` 返回
+`status=ok`、`mode=real`、`detector_version=echo-wavlm-prototype-v2`。向真实容器提交一段无个人信息的
+1 秒合成静音 WAV 后，任务从 `queued` 进入 `completed`，`audio_duration_ms=1000`、事件数为 0、
+错误为空；脱敏任务 trace 为 `733b5c4ebd28`。这条合法空结果经过 ffmpeg、WavLM 和原型检索的真实
+离线推理链路，不是 Mock 或预置响应。
+
+当前代码的微表征服务、汇总、评测和契约测试共 28 项通过。第 2 至第 6 节记录 2026-08-20 已完成的
+ECHO 六路径完整业务联调基线；v2 没有改变 HTTP 契约或 ECHO 业务规则，当前版本通过上述真实容器任务
+及同一套契约回归测试复核。以下完整业务任务均通过 ECHO 讲师批量入口提交，ECHO 再通过正式检测
+契约上传音频和同步事件。
 
 为兼顾复查与脱敏，完整批次号和任务号仅保存在 Git 忽略的本地证据中；文档使用编号的
 SHA-256 前 12 位作为稳定引用：
@@ -100,9 +111,10 @@ SHA-256 前 12 位作为稳定引用：
 
 ## 7. 结论
 
-真实服务已完成讲师两文件批量、说话人已确认、说话人未确认、合法空结果、重复提交和服务不可用
-六条路径联调。事件时间、任务状态、同步状态、课次汇总和降级原因均可复查。本记录只证明产品
-接入链路和业务边界，不代表现有模型的识别效果已经达标；模型指标以
+完整业务联调基线已覆盖讲师两文件批量、说话人已确认、说话人未确认、合法空结果、重复提交和
+服务不可用六条路径；当前 `echo-wavlm-prototype-v2` 又完成真实容器健康检查、实际离线推理任务和
+28 项契约回归测试。事件时间、任务状态、同步状态、课次汇总和降级原因均可复查。本记录只证明
+产品接入链路和业务边界，不代表现有模型的识别效果已经达标；模型指标以
 `docs/member-b/micro-evaluation.md` 的真实评测为准。
 
 检测服务任务结果持久化到 Git 忽略的 `data/micro-detector-real/jobs.json`。服务重启后已完成任务

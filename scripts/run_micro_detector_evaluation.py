@@ -1,4 +1,4 @@
-"""Run SpeechProject detection over the controlled labeled ECHO dataset.
+"""Run the frozen ECHO detector over the controlled labeled dataset.
 
 This script reuses precomputed embeddings, so it does not need to re-encode
 audio. It produces raw interval predictions plus clip/type observations that
@@ -9,9 +9,22 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from services.micro_detector_real.detector import (  # noqa: E402
+    STRIDE_SECONDS,
+    WINDOW_SECONDS,
+    _aggregate_windows,
+    _load_prototypes,
+    _merge_events,
+)
 
 LABEL_MAP = {
     "犹豫": "hesitation",
@@ -21,31 +34,20 @@ LABEL_MAP = {
 EVENT_TYPES = tuple(LABEL_MAP.values())
 
 
-def _detector_dependencies(speech_project_root: Path) -> tuple[Any, Any, Any, float, float]:
-    root_text = str(speech_project_root.resolve())
-    if root_text not in sys.path:
-        sys.path.insert(0, root_text)
-    import torch
-    from detection_utils import STRIDE_SEC, WINDOW_SEC, aggregate_windows, merge_events
-
-    return torch, aggregate_windows, merge_events, STRIDE_SEC, WINDOW_SEC
-
-
 def run_detection(
     dataset_root: Path,
-    speech_project_root: Path,
+    model_root: Path,
     threshold: float,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Return raw predictions and clip/type binary observations."""
 
-    torch, aggregate_windows, merge_events, stride_sec, window_sec = _detector_dependencies(
-        speech_project_root
-    )
+    import torch
+
+    os.environ["MICRO_MODEL_ROOT"] = str(model_root.resolve())
     labels_payload = json.loads(
         (dataset_root / "labels" / "ground_truth.json").read_text(encoding="utf-8")
     )
-    prototype_path = dataset_root / "model" / "behavior_prototypes.pt"
-    prototypes = torch.load(prototype_path, map_location="cpu")
+    prototypes = _load_prototypes()
     predictions: list[dict[str, Any]] = []
 
     for sample in labels_payload["samples"]:
@@ -56,8 +58,8 @@ def run_detection(
         )
         if embedding_path is None:
             raise FileNotFoundError(f"embedding not found for {audio_path.name}")
-        frame_embeddings = torch.load(embedding_path, map_location="cpu")
-        window_embeddings = aggregate_windows(frame_embeddings)
+        frame_embeddings = torch.load(embedding_path, map_location="cpu", weights_only=True)
+        window_embeddings = _aggregate_windows(frame_embeddings)
         if window_embeddings is None:
             continue
         raw_events = []
@@ -75,12 +77,12 @@ def run_detection(
                     {
                         "file": sample["sample_id"],
                         "label": event_type,
-                        "start": round(index.item() * stride_sec, 2),
-                        "end": round(index.item() * stride_sec + window_sec, 2),
+                        "start": round(index.item() * STRIDE_SECONDS, 2),
+                        "end": round(index.item() * STRIDE_SECONDS + WINDOW_SECONDS, 2),
                         "score": round(similarities[index].item(), 4),
                     }
                 )
-        for event in merge_events(raw_events):
+        for event in _merge_events(raw_events):
             predictions.append(
                 {
                     "sample_id": sample["sample_id"],
@@ -124,16 +126,16 @@ def run_detection(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the real SpeechProject detector evaluation")
+    parser = argparse.ArgumentParser(description="Run the frozen real ECHO detector evaluation")
     parser.add_argument(
         "--dataset-root",
         type=Path,
         default=Path("data/micro-evaluation"),
     )
     parser.add_argument(
-        "--speech-project-root",
+        "--model-root",
         type=Path,
-        default=Path(r"D:\SpeechProject"),
+        default=Path("models/micro_detector"),
     )
     parser.add_argument("--threshold", type=float, default=0.51)
     args = parser.parse_args()
@@ -142,26 +144,26 @@ def main() -> None:
 
     predictions, observations = run_detection(
         args.dataset_root,
-        args.speech_project_root,
+        args.model_root,
         args.threshold,
     )
     predictions_dir = args.dataset_root / "predictions"
     predictions_dir.mkdir(parents=True, exist_ok=True)
-    (predictions_dir / "speechproject-v1-events.json").write_text(
+    (predictions_dir / "echo-wavlm-v2-events.json").write_text(
         json.dumps({"threshold": args.threshold, "items": predictions}, ensure_ascii=False, indent=2)
         + "\n",
         encoding="utf-8",
     )
     evaluation_input = {
         "dataset_version": "micro-evaluation-130-v1",
-        "detector_version": "speechproject-prototype-v1",
+        "detector_version": "echo-wavlm-prototype-v2",
         "detector_mode": "real-precomputed-embeddings",
         "methodology": "binary presence per 30-second sample and event type",
         "threshold": args.threshold,
         "sample_duration_seconds": 30,
         "observations": observations,
     }
-    input_path = predictions_dir / "speechproject-v1-observations.json"
+    input_path = predictions_dir / "echo-wavlm-v2-observations.json"
     input_path.write_text(
         json.dumps(evaluation_input, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",

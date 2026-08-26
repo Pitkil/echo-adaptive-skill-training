@@ -26,14 +26,16 @@
 报告包含总体和分事件类型的 Accuracy、Precision、Recall、F1，以及每个误检、漏检对应的案例、
 录音编号和时间范围。Mock 输出会被脚本拒绝，避免把接口联调结果伪装成真实检测指标。
 
-## SpeechProject 真实检测器
+## 离线 WavLM 真实检测器
 
-现有 `D:\SpeechProject` 原型通过 `services/micro_detector_real` 独立适配服务接入，不把 PyTorch、FAISS 或 WavLM 依赖加入
-ECHO API 进程。首次使用前，需要在 SpeechProject 虚拟环境中缓存
-`microsoft/wavlm-base-plus`。之后用以下命令启动：
+真实检测器位于 `services/micro_detector_real`，独立使用 PyTorch、FAISS 和 WavLM，不将重依赖加入
+ECHO API 进程。冻结推理制品位于 `models/micro_detector/` 并由 Git LFS 管理；检测过程不访问模型仓库。
+拉取制品并启动：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\start_micro_detector.ps1
+git lfs pull
+powershell -ExecutionPolicy Bypass -File scripts\verify_micro_model.ps1
+docker compose -f docker-compose.yml -f docker-compose.competition.yml up --build
 ```
 
 服务提供 `/health`、`POST /v1/detection/jobs`、任务状态查询和事件查询。默认启用离线模型模式，
@@ -44,12 +46,12 @@ powershell -ExecutionPolicy Bypass -File scripts\start_micro_detector.ps1
 0.51 的真实评测：
 
 ```powershell
-D:\SpeechProject\venv\Scripts\python.exe `
-  scripts\run_micro_detector_evaluation.py
+python scripts\run_micro_detector_evaluation.py `
+  --model-root models\micro_detector
 
 .\.venv\Scripts\python.exe scripts\evaluate_micro_detection.py `
-  data\micro-evaluation\predictions\speechproject-v1-observations.json `
-  --output data\micro-evaluation\reports\speechproject-v1-metrics.json `
+  data\micro-evaluation\predictions\echo-wavlm-v2-observations.json `
+  --output data\micro-evaluation\reports\echo-wavlm-v2-metrics.json `
   --markdown-output docs\member-b\micro-evaluation-report.md
 ```
 

@@ -1,8 +1,4 @@
-"""Expose the existing SpeechProject detector through the ECHO v1 HTTP contract.
-
-Run this module with the Python environment from SpeechProject because that
-environment owns the detector's PyTorch, FAISS, and audio dependencies.
-"""
+"""Expose the offline WavLM detector through the ECHO v1 HTTP contract."""
 
 from __future__ import annotations
 
@@ -10,7 +6,6 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
 import threading
 import uuid
@@ -22,10 +17,10 @@ from typing import Annotated, Any, Literal
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-SERVICE_VERSION = "speechproject-prototype-v1"
-DEFAULT_SPEECH_PROJECT_ROOT = Path(r"D:\SpeechProject")
+SERVICE_VERSION = "echo-wavlm-prototype-v2"
 DEFAULT_JOB_STORE = Path(__file__).resolve().parents[2] / "data" / "micro-detector-real" / "jobs.json"
 SEGMENT_DURATION_SECONDS = 30
+DEFAULT_MAX_AUDIO_BYTES = 100 * 1024 * 1024
 LABEL_MAP = {
     "犹豫": "hesitation",
     "猜测": "guessing",
@@ -69,6 +64,17 @@ _jobs_lock = threading.Lock()
 
 def _job_store_path() -> Path:
     return Path(os.getenv("MICRO_DETECTOR_JOB_STORE", str(DEFAULT_JOB_STORE))).resolve()
+
+
+def _max_audio_bytes() -> int:
+    raw_value = os.getenv("MICRO_DETECTOR_MAX_AUDIO_BYTES", str(DEFAULT_MAX_AUDIO_BYTES))
+    try:
+        max_audio_bytes = int(raw_value)
+    except ValueError as exc:
+        raise RuntimeError("MICRO_DETECTOR_MAX_AUDIO_BYTES must be a positive integer") from exc
+    if max_audio_bytes <= 0:
+        raise RuntimeError("MICRO_DETECTOR_MAX_AUDIO_BYTES must be a positive integer")
+    return max_audio_bytes
 
 
 def _persist_jobs_locked() -> None:
@@ -126,34 +132,23 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    title="ECHO SpeechProject Micro Detector",
+    title="ECHO Offline WavLM Micro Detector",
     version=SERVICE_VERSION,
     lifespan=lifespan,
 )
 
 
-def _speech_project_root() -> Path:
-    return Path(os.getenv("SPEECH_PROJECT_ROOT", str(DEFAULT_SPEECH_PROJECT_ROOT))).resolve()
-
-
 def _load_detector_dependencies() -> tuple[Any, Any, Any]:
-    root = _speech_project_root()
-    pipeline_path = root / "pipeline.py"
-    if not pipeline_path.is_file():
-        raise RuntimeError(f"SpeechProject pipeline not found: {pipeline_path}")
     if os.getenv("MICRO_DETECTOR_OFFLINE_MODE", "true").casefold() == "true":
-        # Competition demos must not depend on a live model-hub request. The
-        # model is provisioned once, then Transformers reads its local cache.
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
         os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-    root_text = str(root)
-    if root_text not in sys.path:
-        sys.path.insert(0, root_text)
-    from detection_utils import merge_events
-    from pipeline import _run_detection
-    from step3 import extract_embeddings_batch
+    from services.micro_detector_real.detector import (
+        extract_embeddings_batch,
+        merge_events,
+        run_detection,
+    )
 
-    return extract_embeddings_batch, _run_detection, merge_events
+    return extract_embeddings_batch, run_detection, merge_events
 
 
 def _segment_audio(input_path: Path, output_dir: Path) -> list[tuple[Path, int]]:
@@ -237,18 +232,11 @@ def _run_time_aligned_pipeline(input_path: Path) -> tuple[list[dict[str, Any]], 
             embedding_dir,
             batch_size=4,
         )
-        final: dict[str, Any] | None = None
-        for progress in run_detection(embedding_dir, 0.51, input_path):
-            if progress.get("stage") == "error":
-                raise RuntimeError(str(progress.get("msg") or "detector pipeline failed"))
-            if progress.get("stage") == "done":
-                final = progress
-        if final is None:
-            raise RuntimeError("detector pipeline returned no final result")
+        raw_results = run_detection(embedding_dir, 0.51, input_path)
         offsets = {segment.name: offset for segment, offset in segments}
         return (
             _restore_original_timeline(
-                final.get("results") or [],
+                raw_results,
                 offsets,
                 merge_events,
                 input_path.name,
@@ -331,18 +319,14 @@ def _detect(job_id: str, audio_path: Path) -> None:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    root = _speech_project_root()
-    required_assets = [
-        root / "pipeline.py",
-        root / "detection_utils.py",
-        root / "step3.py",
-        root / "prototypes" / "behavior_prototypes.pt",
-    ]
-    missing_assets = [str(path) for path in required_assets if not path.is_file()]
-    if missing_assets:
+    from services.micro_detector_real.detector import missing_artifacts
+
+    missing = missing_artifacts()
+    if missing:
+        names = ", ".join(path.name for path in missing)
         raise HTTPException(
             status_code=503,
-            detail=f"SpeechProject detector assets unavailable: {', '.join(missing_assets)}",
+            detail=f"offline detector artifacts unavailable: {names}",
         )
     if shutil.which("ffmpeg") is None:
         raise HTTPException(status_code=503, detail="ffmpeg executable is unavailable")
@@ -380,13 +364,20 @@ async def create_job(
     temp_root = Path(tempfile.gettempdir()) / "echo-micro-detector"
     temp_root.mkdir(parents=True, exist_ok=True)
     audio_path = temp_root / f"{uuid.uuid4().hex}{suffix}"
+    received_bytes = 0
     try:
         with audio_path.open("wb") as target:
             while chunk := await audio.read(1024 * 1024):
+                received_bytes += len(chunk)
+                if received_bytes > _max_audio_bytes():
+                    raise HTTPException(status_code=413, detail="audio file is too large")
                 target.write(chunk)
+    except (HTTPException, OSError, RuntimeError):
+        audio_path.unlink(missing_ok=True)
+        raise
     finally:
         await audio.close()
-    if audio_path.stat().st_size == 0:
+    if received_bytes == 0:
         audio_path.unlink(missing_ok=True)
         raise HTTPException(status_code=422, detail="audio file is empty")
 

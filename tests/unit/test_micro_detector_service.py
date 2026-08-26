@@ -41,13 +41,26 @@ def _form() -> dict[str, str]:
     }
 
 
+def _create_fake_model_root(tmp_path, *, lfs_pointer: bool = False) -> None:
+    wavlm_root = tmp_path / "wavlm-base-plus"
+    wavlm_root.mkdir()
+    (wavlm_root / "config.json").write_text("{}", encoding="utf-8")
+    (wavlm_root / "preprocessor_config.json").write_text("{}", encoding="utf-8")
+    weight_path = wavlm_root / "model.safetensors"
+    if lfs_pointer:
+        weight_path.write_text(
+            "version https://git-lfs.github.com/spec/v1\n",
+            encoding="utf-8",
+        )
+    else:
+        with weight_path.open("wb") as weight:
+            weight.truncate(300 * 1024 * 1024)
+    (tmp_path / "behavior_prototypes.pt").write_bytes(b"prototype")
+
+
 def test_health_identifies_real_detector(tmp_path, monkeypatch) -> None:
-    (tmp_path / "prototypes").mkdir()
-    (tmp_path / "pipeline.py").touch()
-    (tmp_path / "detection_utils.py").touch()
-    (tmp_path / "step3.py").touch()
-    (tmp_path / "prototypes" / "behavior_prototypes.pt").touch()
-    monkeypatch.setenv("SPEECH_PROJECT_ROOT", str(tmp_path))
+    _create_fake_model_root(tmp_path)
+    monkeypatch.setenv("MICRO_MODEL_ROOT", str(tmp_path))
     monkeypatch.setattr(service.shutil, "which", lambda executable: f"/tools/{executable}")
 
     response = TestClient(service.app).get("/health")
@@ -56,12 +69,20 @@ def test_health_identifies_real_detector(tmp_path, monkeypatch) -> None:
     assert response.json()["mode"] == "real"
 
 
+def test_health_rejects_lfs_pointer_instead_of_claiming_real_mode(tmp_path, monkeypatch) -> None:
+    _create_fake_model_root(tmp_path, lfs_pointer=True)
+    monkeypatch.setenv("MICRO_MODEL_ROOT", str(tmp_path))
+    monkeypatch.setattr(service.shutil, "which", lambda executable: f"/tools/{executable}")
+
+    response = TestClient(service.app).get("/health")
+
+    assert response.status_code == 503
+    assert "model.safetensors" in response.json()["detail"]
+
+
 def test_health_rejects_missing_ffmpeg(tmp_path, monkeypatch) -> None:
-    (tmp_path / "prototypes").mkdir()
-    for filename in ("pipeline.py", "detection_utils.py", "step3.py"):
-        (tmp_path / filename).touch()
-    (tmp_path / "prototypes" / "behavior_prototypes.pt").touch()
-    monkeypatch.setenv("SPEECH_PROJECT_ROOT", str(tmp_path))
+    _create_fake_model_root(tmp_path)
+    monkeypatch.setenv("MICRO_MODEL_ROOT", str(tmp_path))
     monkeypatch.setattr(service.shutil, "which", lambda _: None)
 
     response = TestClient(service.app).get("/health")
@@ -190,6 +211,33 @@ def test_detection_job_rejects_missing_consent() -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_detection_job_rejects_oversized_audio_and_removes_temporary_file(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("MICRO_DETECTOR_MAX_AUDIO_BYTES", "16")
+    monkeypatch.setattr(service.tempfile, "gettempdir", lambda: str(tmp_path))
+
+    response = TestClient(service.app).post(
+        "/v1/detection/jobs",
+        data=_form(),
+        files={"audio": ("answer.wav", _wav_bytes(), "audio/wav")},
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "audio file is too large"
+    upload_root = tmp_path / "echo-micro-detector"
+    assert list(upload_root.iterdir()) == []
+
+
+@pytest.mark.parametrize("configured_value", ["0", "-1", "invalid"])
+def test_invalid_audio_size_limit_fails_closed(monkeypatch, configured_value) -> None:
+    monkeypatch.setenv("MICRO_DETECTOR_MAX_AUDIO_BYTES", configured_value)
+
+    with pytest.raises(RuntimeError, match="must be a positive integer"):
+        service._max_audio_bytes()
 
 
 def test_segment_events_are_restored_to_original_recording_timeline() -> None:

@@ -8,3 +8,13 @@
 *.jpg binary
 *.jpeg binary
 *.png binary
+
+# Versioned offline inference artifacts. Keep these paths narrow so runtime
+# databases, uploaded audio, and generated embeddings never enter LFS.
+models/micro_detector/**/*.bin filter=lfs diff=lfs merge=lfs -text
+models/micro_detector/**/*.pt filter=lfs diff=lfs merge=lfs -text
+models/micro_detector/**/*.pth filter=lfs diff=lfs merge=lfs -text
+models/micro_detector/**/*.safetensors filter=lfs diff=lfs merge=lfs -text
+models/micro_detector/**/*.faiss filter=lfs diff=lfs merge=lfs -text
+models/micro_detector/**/*.index filter=lfs diff=lfs merge=lfs -text
+models/micro_detector/*.txt text eol=lf

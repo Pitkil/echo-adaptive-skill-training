@@ -1,0 +1,38 @@
+services:
+  echo-api:
+    image: echo-api:competition
+    environment:
+      MICRO_REPRESENTATION_BASE_URL: http://micro-detector-real:8030
+    depends_on:
+      micro-detector-real:
+        condition: service_healthy
+
+  micro-detector-real:
+    image: echo-micro-detector-real:competition
+    build:
+      context: .
+      dockerfile: services/micro_detector_real/Dockerfile
+    environment:
+      MICRO_MODEL_ROOT: /models
+      MICRO_DETECTOR_OFFLINE_MODE: "true"
+      MICRO_DETECTOR_JOB_STORE: /data/jobs.json
+      MICRO_DETECTOR_MAX_AUDIO_BYTES: ${MICRO_DETECTOR_MAX_AUDIO_BYTES:-104857600}
+    ports:
+      - "127.0.0.1:${MICRO_DETECTOR_PORT:-8030}:8030"
+    volumes:
+      - ./models/micro_detector:/models:ro
+      - micro-detector-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8030/health', timeout=5)
+      interval: 10s
+      timeout: 6s
+      retries: 12
+      start_period: 90s
+    restart: unless-stopped
+
+volumes:
+  micro-detector-data:
