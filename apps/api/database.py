@@ -45,6 +45,7 @@ class EvidenceStatus(StrEnum):
 class TurnStatus(StrEnum):
     PLANNED = "planned"
     COMPLETED = "completed"
+    COMPLETED_WITH_DEGRADATION = "completed_degraded"
     FAILED = "failed"
 
 
@@ -225,6 +226,72 @@ class Upload(Base):
     uploaded_at = Column(DateTime, nullable=False, default=datetime.now)
 
     owner = relationship("User", back_populates="uploads")
+
+
+class CourseVideo(Base):
+    __tablename__ = "course_videos"
+
+    id = Column(Integer, primary_key=True)
+    module_id = Column(Integer, ForeignKey("training_modules.id"), nullable=False, index=True)
+    knowledge_point_id = Column(Integer, ForeignKey("knowledge_points.id"), nullable=True, index=True)
+    title = Column(String(255), nullable=False)
+    filename = Column(String(255), nullable=False)
+    filepath = Column(String(500), nullable=False)
+    content_type = Column(String(100), nullable=False, default="video/mp4")
+    file_size = Column(Integer, nullable=False)
+    duration_seconds = Column(Float, nullable=True)
+    sort_order = Column(Integer, nullable=False, default=0)
+    uploaded_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    uploaded_at = Column(DateTime, nullable=False, default=datetime.now)
+
+    module = relationship("TrainingModule")
+    knowledge_point = relationship("KnowledgePoint")
+
+
+class VideoProgress(Base):
+    __tablename__ = "video_progress"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    video_id = Column(Integer, ForeignKey("course_videos.id"), nullable=False, index=True)
+    module_id = Column(Integer, ForeignKey("training_modules.id"), nullable=False, index=True)
+    current_time = Column(Float, nullable=False, default=0.0)
+    duration = Column(Float, nullable=False, default=0.0)
+    completed = Column(Boolean, nullable=False, default=False)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+    __table_args__ = (
+        UniqueConstraint("user_id", "video_id", name="uq_video_progress_user_video"),
+    )
+
+
+class VideoCheckpoint(Base):
+    __tablename__ = "video_checkpoints"
+
+    id = Column(Integer, primary_key=True)
+    video_id = Column(Integer, ForeignKey("course_videos.id"), nullable=False, index=True)
+    time_offset_seconds = Column(Float, nullable=False)
+    question = Column(Text, nullable=False)
+    expected_points = Column(JSON, nullable=False, default=list)
+    official_sources = Column(JSON, nullable=False, default=list)
+    status = Column(String(20), nullable=False, default="draft")
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+    video = relationship("CourseVideo")
+
+
+class VideoAnalysisJob(Base):
+    __tablename__ = "video_analysis_jobs"
+
+    id = Column(String(64), primary_key=True)
+    video_id = Column(Integer, ForeignKey("course_videos.id"), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="queued")
+    frames_count = Column(Integer, nullable=False, default=0)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+    video = relationship("CourseVideo")
 
 
 class Quiz(Base):

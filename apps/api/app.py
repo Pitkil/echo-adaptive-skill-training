@@ -35,6 +35,7 @@ from catalog import (
 from config import Config
 from database import (
     ChatSession,
+    CourseVideo,
     EvidenceStatus,
     GeneratedResource,
     KnowledgeBase,
@@ -49,6 +50,7 @@ from database import (
     Organization,
     Quiz,
     SessionLocal,
+    StudentQuestionHistory,
     TrainingModule,
     TrainingProgram,
     TurnExecution,
@@ -57,6 +59,9 @@ from database import (
     User,
     UserRole,
     VerificationResult,
+    VideoAnalysisJob,
+    VideoCheckpoint,
+    VideoProgress,
     init_db,
 )
 from fastapi import (
@@ -82,6 +87,7 @@ from integrations.contracts import (
 from integrations.contracts import (
     MicroRepresentationEvent as MicroEventContract,
 )
+from integrations.health import collect_dependency_health
 from integrations.http_client import (
     IntegrationContractError,
     IntegrationTransientError,
@@ -102,6 +108,11 @@ from MIRT.mirt_daily_stats import build_daily_series
 from passlib.context import CryptContext
 from pydantic import BaseModel, Field
 from Quiz.AdaptiveEngine import AdaptiveEngine
+from Quiz.assessment_flow import (
+    AssessmentFlowService,
+    AssessmentProgress,
+    AssessmentProgressResponse,
+)
 from Quiz.grading import grade_quiz_answer
 from Quiz.import_from_document import (
     SUPPORTED_IMPORT_EXTENSIONS,
@@ -114,8 +125,10 @@ from resource_generation import (
     build_personalization_plan,
 )
 from sqlalchemy import and_, or_
+from sqlalchemy import text as sql_text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
+from video_analysis import run_video_analysis
 
 API_DIR = Path(__file__).resolve().parent
 WEB_DIR = API_DIR / "web"
@@ -244,6 +257,23 @@ class QuizSubmit(BaseModel):
     attempt_id: str = Field(default_factory=lambda: uuid4().hex, max_length=64)
     session_id: int | None = None
     stage: str | None = None
+
+
+class DependencyHealthResponse(BaseModel):
+    status: Literal["ok", "unavailable", "not_configured"]
+    detail: str | None = None
+    service: str | None = None
+    version: str | None = None
+    mode: str | None = None
+
+
+class SystemHealthResponse(BaseModel):
+    status: Literal["ok", "degraded"]
+    service: str
+    version: str
+    rag_provider: str
+    unavailable_count: int
+    dependencies: dict[str, DependencyHealthResponse]
 
 
 class ResourceRequest(BaseModel):
@@ -605,14 +635,22 @@ def root():
     return FileResponse(API_DIR / "index.html")
 
 
-@app.get("/health")
-@app.get("/api/health")
-def health():
+@app.get("/health", response_model=SystemHealthResponse)
+@app.get("/api/health", response_model=SystemHealthResponse)
+def health(db: Session = Depends(get_db)):
+    db.execute(sql_text("SELECT 1"))
+    dependencies = collect_dependency_health()
+    dependencies["database"] = {"status": "ok", "service": "business-database"}
+    unavailable_count = sum(
+        item["status"] != "ok" for item in dependencies.values()
+    )
     return {
-        "status": "ok",
+        "status": "degraded" if unavailable_count else "ok",
         "service": "echo-competition",
         "version": Config.app.APP_VERSION,
         "rag_provider": "punditrag",
+        "unavailable_count": unavailable_count,
+        "dependencies": dependencies,
     }
 
 
@@ -1289,7 +1327,9 @@ def extract_answer(text: str) -> str:
 
 def requested_quiz_purpose(text: str) -> Literal[
     "pretest", "posttest", "stage_test", "practice"
-]:
+] | None:
+    """Return an explicitly requested purpose; generic requests follow server progress."""
+
     normalized = TurnOrchestrator.normalize(text)
     if "前测" in normalized:
         return "pretest"
@@ -1297,7 +1337,25 @@ def requested_quiz_purpose(text: str) -> Literal[
         return "posttest"
     if "练习" in normalized:
         return "practice"
-    return "stage_test"
+    if "阶段" in normalized:
+        return "stage_test"
+    return None
+
+
+def recommended_quiz_purpose(progress: AssessmentProgress) -> Literal[
+    "pretest", "posttest", "stage_test", "practice"
+] | None:
+    """Map the server-owned next action to the only assessment purpose to issue."""
+
+    if progress.next_action in {"start_pretest", "continue_pretest"}:
+        return "pretest"
+    if progress.next_action in {"start_stage_test", "continue_stage_test"}:
+        return "stage_test"
+    if progress.next_action in {"start_posttest", "continue_posttest"}:
+        return "posttest"
+    if progress.next_action == "practice":
+        return "practice"
+    return None
 
 
 def public_quiz_payload(quiz: Quiz) -> dict[str, Any]:
@@ -1346,13 +1404,37 @@ def execute_turn(
         session.context_version += 1
         content = f"已切换到“{target.name}”，新的 ECHO 学习循环从唤起阶段开始。"
     elif action is PrimaryAction.GENERATE_QUIZ:
-        purpose = requested_quiz_purpose(request.user_input)
-        quiz = AdaptiveEngine(db).get_adaptive_question(
-            user.id,
-            session.module_id,
-            purpose=purpose,
+        assessment_flow = AssessmentFlowService(
+            db,
+            user_id=user.id,
+            module_id=session.module_id,
         )
-        if quiz is None:
+        assessment_progress = assessment_flow.progress(
+            active_quiz_id=session.active_quiz_id,
+        )
+        purpose = requested_quiz_purpose(request.user_input)
+        purpose = purpose or recommended_quiz_purpose(assessment_progress)
+        if purpose is None:
+            is_allowed = False
+            content = assessment_progress.description
+        else:
+            is_allowed, blocked_message = assessment_flow.can_request(
+                purpose,
+                active_quiz_id=session.active_quiz_id,
+            )
+            if not is_allowed:
+                content = blocked_message
+            else:
+                quiz = AdaptiveEngine(db).get_adaptive_question(
+                    user.id,
+                    session.module_id,
+                    purpose=purpose,
+                )
+                if quiz is not None:
+                    session.active_quiz_id = quiz.id
+                    payload["quiz"] = public_quiz_payload(quiz)
+                    content = quiz.content
+        if purpose is not None and is_allowed and "quiz" not in payload:
             purpose_label = {
                 "pretest": "前测",
                 "posttest": "后测",
@@ -1360,10 +1442,6 @@ def execute_turn(
                 "practice": "练习",
             }[purpose]
             content = f"当前模块还没有可用的{purpose_label}题目，请先导入对应用途的固定题库。"
-        else:
-            session.active_quiz_id = quiz.id
-            payload["quiz"] = public_quiz_payload(quiz)
-            content = quiz.content
     elif action is PrimaryAction.GRADE_ANSWER:
         quiz = db.query(Quiz).filter_by(id=session.active_quiz_id).first()
         if quiz is None:
@@ -1419,9 +1497,15 @@ def execute_turn(
         payload["echo_transition"] = transition
         payload["evidence"] = evidence
     elif action is PrimaryAction.GENERAL_RESPONSE:
-        content = "收到。当前学习状态保持不变，可以继续提问或请求阶段测验。"
+        content = "收到。当前学习状态保持不变，可以继续提问，系统会在合适阶段安排测验。"
     else:
         content = "本轮没有执行学习动作，请提供具体问题、测验请求或模块切换目标。"
+
+    payload["assessment_progress"] = AssessmentFlowService(
+        db,
+        user_id=user.id,
+        module_id=session.module_id,
+    ).progress(active_quiz_id=session.active_quiz_id).public_payload()
 
     db.add(
         Message(
@@ -1469,7 +1553,11 @@ def execute_turn(
             evidence_refs=[ref for ref in evidence_refs if ref],
         )
     )
-    execution.status = TurnStatus.COMPLETED.value
+    execution.status = (
+        TurnStatus.COMPLETED_WITH_DEGRADATION.value
+        if degradation
+        else TurnStatus.COMPLETED.value
+    )
     execution.result = result
     execution.finished_at = datetime.now()
     db.commit()
@@ -1511,7 +1599,10 @@ def chat(
         .filter_by(session_id=session.id, request_id=request.request_id)
         .first()
     )
-    if existing and existing.status == TurnStatus.COMPLETED.value:
+    if existing and existing.status in {
+        TurnStatus.COMPLETED.value,
+        TurnStatus.COMPLETED_WITH_DEGRADATION.value,
+    }:
         return StreamingResponse(stream_result(existing.result), media_type="application/x-ndjson")
 
     context = TurnContext(
@@ -1555,6 +1646,34 @@ def chat(
     return StreamingResponse(stream_result(result), media_type="application/x-ndjson")
 
 
+@app.get(
+    "/v1/modules/{module_id}/assessment-progress",
+    response_model=AssessmentProgressResponse,
+)
+def assessment_progress(
+    module_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """Return the server-owned next assessment action for this learner and module."""
+
+    accessible_module(db, user, module_id)
+    latest_session = (
+        db.query(ChatSession)
+        .filter_by(user_id=user.id, module_id=module_id)
+        .order_by(ChatSession.updated_at.desc(), ChatSession.id.desc())
+        .first()
+    )
+    progress = AssessmentFlowService(
+        db,
+        user_id=user.id,
+        module_id=module_id,
+    ).progress(
+        active_quiz_id=latest_session.active_quiz_id if latest_session else None,
+    )
+    return AssessmentProgressResponse.model_validate(progress.public_payload())
+
+
 @app.get("/v1/quizzes/next")
 def next_fixed_quiz(
     module_id: int,
@@ -1564,6 +1683,13 @@ def next_fixed_quiz(
     user: User = Depends(current_user),
 ):
     accessible_module(db, user, module_id)
+    is_allowed, blocked_message = AssessmentFlowService(
+        db,
+        user_id=user.id,
+        module_id=module_id,
+    ).can_request(purpose)
+    if not is_allowed:
+        raise HTTPException(status_code=409, detail=blocked_message)
     if knowledge_point_id is not None:
         point = (
             db.query(KnowledgePoint)
@@ -1600,6 +1726,20 @@ def submit_quiz(
         session = get_owned_session(db, payload.session_id, user.id)
         if session.active_quiz_id not in {None, quiz.id}:
             raise HTTPException(status_code=409, detail="提交题目与当前待答题目不一致")
+    existing_attempt = (
+        db.query(StudentQuestionHistory)
+        .filter_by(attempt_id=payload.attempt_id)
+        .first()
+    )
+    is_active_question = session is not None and session.active_quiz_id == quiz.id
+    if existing_attempt is None and not is_active_question:
+        is_allowed, blocked_message = AssessmentFlowService(
+            db,
+            user_id=user.id,
+            module_id=quiz.module_id,
+        ).can_request(quiz.purpose)
+        if not is_allowed:
+            raise HTTPException(status_code=409, detail=blocked_message)
     try:
         grade = grade_quiz_answer(quiz, payload.answer)
         ability, updated = AdaptiveEngine(db).update_student_state(
@@ -2630,6 +2770,499 @@ def list_knowledge_documents(
             for row in rows
         ]
     }
+
+
+class VideoProgressRequest(BaseModel):
+    current_time: float = Field(ge=0)
+    duration: float = Field(ge=0)
+    completed: bool = False
+
+
+class VideoProgressResponse(BaseModel):
+    current_time: float
+    duration: float
+    completed: bool
+
+
+class CourseVideoResponse(BaseModel):
+    id: int
+    module_id: int
+    knowledge_point_id: int | None
+    title: str
+    filename: str
+    file_size: int
+    content_type: str
+    duration_seconds: float | None
+    uploaded_at: datetime
+    stream_url: str | None = None
+    progress: VideoProgressResponse | None = None
+
+
+class CourseVideoListResponse(BaseModel):
+    items: list[CourseVideoResponse]
+
+
+class CourseVideoUploadResponse(BaseModel):
+    items: list[CourseVideoResponse]
+    total_size: int
+
+
+def create_media_token(user_id: int, video_id: int) -> str:
+    """Mint a short-lived token so the HTML video element can stream a protected file."""
+
+    return jwt.encode(
+        {
+            "sub": str(user_id),
+            "vid": video_id,
+            "exp": datetime.now(UTC) + timedelta(hours=2),
+        },
+        Config.security.SECRET_KEY,
+        algorithm=Config.security.ALGORITHM,
+    )
+
+
+def _course_video_payload(
+    video: CourseVideo,
+    progress: VideoProgress | None,
+    *,
+    user_id: int,
+) -> dict:
+    return {
+        "id": video.id,
+        "module_id": video.module_id,
+        "knowledge_point_id": video.knowledge_point_id,
+        "title": video.title,
+        "filename": video.filename,
+        "file_size": video.file_size,
+        "content_type": video.content_type,
+        "duration_seconds": video.duration_seconds,
+        "uploaded_at": video.uploaded_at.isoformat(),
+        "stream_url": f"/v1/videos/{video.id}/stream?token={create_media_token(user_id, video.id)}",
+        "progress": (
+            {
+                "current_time": progress.current_time,
+                "duration": progress.duration,
+                "completed": progress.completed,
+            }
+            if progress
+            else None
+        ),
+    }
+
+
+def _range_video_response(path: Path, media_type: str, request: Request):
+    file_size = path.stat().st_size
+    range_header = (request.headers.get("range") or "").strip()
+    match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header)
+    if not match:
+        return FileResponse(path, media_type=media_type)
+
+    start_raw, end_raw = match.groups()
+    if not start_raw and end_raw:
+        start = max(0, file_size - int(end_raw))
+        end = file_size - 1
+    else:
+        start = int(start_raw or 0)
+        end = int(end_raw) if end_raw else file_size - 1
+    end = min(end, file_size - 1)
+    if start >= file_size or start > end:
+        raise HTTPException(status_code=416, detail="请求范围无效")
+
+    def iter_file():
+        remaining = end - start + 1
+        with path.open("rb") as stream:
+            stream.seek(start)
+            while remaining > 0:
+                chunk = stream.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    return StreamingResponse(
+        iter_file(),
+        status_code=206,
+        media_type=media_type,
+        headers={
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(end - start + 1),
+        },
+    )
+
+
+def _stream_identity(
+    db: Session,
+    video_id: int,
+    authorization: str | None,
+    token: str | None,
+) -> User:
+    candidates: list[str] = []
+    if authorization and authorization.lower().startswith("bearer "):
+        candidates.append(authorization.split(" ", 1)[1])
+    if token:
+        candidates.append(token)
+    for raw in candidates:
+        try:
+            payload = jwt.decode(
+                raw,
+                Config.security.SECRET_KEY,
+                algorithms=[Config.security.ALGORITHM],
+            )
+            if "vid" in payload and int(payload["vid"]) != video_id:
+                continue
+            user_id = int(payload["sub"])
+        except (jwt.PyJWTError, KeyError, ValueError):
+            continue
+        user = db.query(User).filter(User.id == user_id, User.status == "active").first()
+        if user is not None:
+            return user
+    raise HTTPException(status_code=401, detail="缺少登录令牌")
+
+
+@app.post("/v1/modules/{module_id}/videos", response_model=CourseVideoUploadResponse)
+def upload_course_videos(
+    module_id: int,
+    files: Annotated[list[UploadFile], File()],
+    knowledge_point_id: Annotated[int | None, Form()] = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    if user.role not in {UserRole.MENTOR.value, UserRole.SYSTEM_ADMIN.value}:
+        raise HTTPException(status_code=403, detail="仅讲师、导师或系统管理员可上传课程视频")
+    module = accessible_module(db, user, module_id)
+    if knowledge_point_id is not None:
+        point = (
+            db.query(KnowledgePoint)
+            .filter_by(id=knowledge_point_id, module_id=module_id)
+            .first()
+        )
+        if point is None:
+            raise HTTPException(status_code=404, detail="知识点不存在")
+
+    destination_dir = UPLOAD_DIR / "videos"
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    created: list[dict] = []
+    total_size = 0
+    max_mb = Config.upload.VIDEO_MAX_FILE_SIZE // (1024 * 1024)
+    for upload in files:
+        original = (upload.filename or "video").strip() or "video"
+        extension = Path(original).suffix.lower()
+        if extension not in Config.upload.VIDEO_ALLOWED_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"不支持的视频格式：{extension or original}")
+        safe_stem = re.sub(r"[^A-Za-z0-9._-]", "_", Path(original).stem) or "video"
+        trace_id = uuid4().hex
+        destination = destination_dir / f"{trace_id}_{safe_stem}{extension}"
+        size = 0
+        exceeded = False
+        with destination.open("wb") as output:
+            while True:
+                chunk = upload.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > Config.upload.VIDEO_MAX_FILE_SIZE:
+                    exceeded = True
+                    break
+                output.write(chunk)
+        if exceeded:
+            destination.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail=f"视频文件超过 {max_mb} MB 上限")
+        if size == 0:
+            destination.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail="不能上传空视频文件")
+        video = CourseVideo(
+            module_id=module.id,
+            knowledge_point_id=knowledge_point_id,
+            title=Path(original).stem,
+            filename=original,
+            filepath=str(destination),
+            content_type=upload.content_type or f"video/{extension.lstrip('.')}",
+            file_size=size,
+            sort_order=0,
+            uploaded_by_user_id=user.id,
+        )
+        db.add(video)
+        db.flush()
+        created.append(_course_video_payload(video, None, user_id=user.id))
+        total_size += size
+    db.commit()
+    return {"items": created, "total_size": total_size}
+
+
+@app.get("/v1/modules/{module_id}/videos", response_model=CourseVideoListResponse)
+def list_course_videos(
+    module_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    accessible_module(db, user, module_id)
+    videos = (
+        db.query(CourseVideo)
+        .filter_by(module_id=module_id)
+        .order_by(CourseVideo.sort_order, CourseVideo.id)
+        .all()
+    )
+    video_ids = [video.id for video in videos]
+    progress_map = {
+        row.video_id: row
+        for row in (
+            db.query(VideoProgress)
+            .filter(VideoProgress.user_id == user.id)
+            .filter(VideoProgress.video_id.in_(video_ids))
+            .all()
+        )
+    } if video_ids else {}
+    return {
+        "items": [
+            _course_video_payload(video, progress_map.get(video.id), user_id=user.id)
+            for video in videos
+        ]
+    }
+
+
+@app.get("/v1/videos/{video_id}/stream")
+def stream_course_video(
+    video_id: int,
+    request: Request,
+    token: str | None = None,
+    db: Session = Depends(get_db),
+):
+    user = _stream_identity(
+        db,
+        video_id,
+        request.headers.get("authorization"),
+        token,
+    )
+    video = db.query(CourseVideo).filter_by(id=video_id).first()
+    if video is None:
+        raise HTTPException(status_code=404, detail="视频不存在")
+    accessible_module(db, user, video.module_id)
+    path = Path(video.filepath)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="视频文件缺失")
+    return _range_video_response(path, video.content_type, request)
+
+
+@app.put("/v1/videos/{video_id}/progress", response_model=VideoProgressResponse)
+def save_course_video_progress(
+    video_id: int,
+    payload: VideoProgressRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    video = db.query(CourseVideo).filter_by(id=video_id).first()
+    if video is None:
+        raise HTTPException(status_code=404, detail="视频不存在")
+    accessible_module(db, user, video.module_id)
+    progress = (
+        db.query(VideoProgress)
+        .filter_by(user_id=user.id, video_id=video_id)
+        .first()
+    )
+    if progress is None:
+        progress = VideoProgress(
+            user_id=user.id,
+            video_id=video_id,
+            module_id=video.module_id,
+        )
+        db.add(progress)
+    progress.current_time = payload.current_time
+    progress.duration = payload.duration
+    progress.completed = payload.completed
+    progress.updated_at = datetime.now()
+    db.commit()
+    return {
+        "current_time": progress.current_time,
+        "duration": progress.duration,
+        "completed": progress.completed,
+    }
+
+
+class VideoCheckpointResponse(BaseModel):
+    id: int
+    video_id: int
+    time_offset_seconds: float
+    question: str
+    expected_points: list[str]
+    official_sources: list[str]
+    status: str
+
+
+class VideoCheckpointListResponse(BaseModel):
+    items: list[VideoCheckpointResponse]
+
+
+class VideoCheckpointEditRequest(BaseModel):
+    time_offset_seconds: float | None = None
+    question: str | None = Field(default=None, min_length=1)
+    expected_points: list[str] | None = None
+    official_sources: list[str] | None = None
+
+
+class VideoAnalysisJobResponse(BaseModel):
+    job_id: str
+    status: str
+    frames_count: int
+    error: str | None
+
+
+def _video_checkpoint_payload(checkpoint: VideoCheckpoint) -> dict:
+    return {
+        "id": checkpoint.id,
+        "video_id": checkpoint.video_id,
+        "time_offset_seconds": checkpoint.time_offset_seconds,
+        "question": checkpoint.question,
+        "expected_points": checkpoint.expected_points,
+        "official_sources": checkpoint.official_sources,
+        "status": checkpoint.status,
+    }
+
+
+def run_video_analysis_task(job_id: str) -> None:
+    db = SessionLocal()
+    try:
+        run_video_analysis(db, job_id)
+    finally:
+        db.close()
+
+
+@app.post(
+    "/v1/videos/{video_id}/generate-checkpoints",
+    response_model=VideoAnalysisJobResponse,
+)
+def generate_video_checkpoints(
+    video_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    if user.role not in {UserRole.MENTOR.value, UserRole.SYSTEM_ADMIN.value}:
+        raise HTTPException(status_code=403, detail="仅讲师、导师或系统管理员可生成视频口述题")
+    video = db.query(CourseVideo).filter_by(id=video_id).first()
+    if video is None:
+        raise HTTPException(status_code=404, detail="视频不存在")
+    accessible_module(db, user, video.module_id)
+    job = VideoAnalysisJob(id=uuid4().hex, video_id=video_id, status="queued")
+    db.add(job)
+    db.commit()
+    background_tasks.add_task(run_video_analysis_task, job.id)
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "frames_count": 0,
+        "error": None,
+    }
+
+
+@app.get("/v1/video-analysis/{job_id}", response_model=VideoAnalysisJobResponse)
+def get_video_analysis_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    job = db.query(VideoAnalysisJob).filter_by(id=job_id).first()
+    if job is None:
+        raise HTTPException(status_code=404, detail="分析任务不存在")
+    video = db.get(CourseVideo, job.video_id)
+    if video is not None:
+        accessible_module(db, user, video.module_id)
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "frames_count": job.frames_count,
+        "error": job.error,
+    }
+
+
+@app.get("/v1/videos/{video_id}/checkpoints", response_model=VideoCheckpointListResponse)
+def list_video_checkpoints(
+    video_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    video = db.get(CourseVideo, video_id)
+    if video is None:
+        raise HTTPException(status_code=404, detail="视频不存在")
+    accessible_module(db, user, video.module_id)
+    query = (
+        db.query(VideoCheckpoint)
+        .filter_by(video_id=video_id)
+        .order_by(VideoCheckpoint.time_offset_seconds, VideoCheckpoint.id)
+    )
+    if user.role not in {UserRole.MENTOR.value, UserRole.SYSTEM_ADMIN.value}:
+        query = query.filter(VideoCheckpoint.status == "frozen")
+    return {"items": [_video_checkpoint_payload(item) for item in query.all()]}
+
+
+@app.put(
+    "/v1/videos/{video_id}/checkpoints/{checkpoint_id}",
+    response_model=VideoCheckpointResponse,
+)
+def edit_video_checkpoint(
+    video_id: int,
+    checkpoint_id: int,
+    payload: VideoCheckpointEditRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    if user.role not in {UserRole.MENTOR.value, UserRole.SYSTEM_ADMIN.value}:
+        raise HTTPException(status_code=403, detail="仅讲师、导师或系统管理员可编辑口述题")
+    video = db.get(CourseVideo, video_id)
+    if video is None:
+        raise HTTPException(status_code=404, detail="视频不存在")
+    accessible_module(db, user, video.module_id)
+    checkpoint = (
+        db.query(VideoCheckpoint)
+        .filter_by(id=checkpoint_id, video_id=video_id)
+        .first()
+    )
+    if checkpoint is None:
+        raise HTTPException(status_code=404, detail="口述题不存在")
+    if payload.time_offset_seconds is not None:
+        checkpoint.time_offset_seconds = payload.time_offset_seconds
+    if payload.question is not None:
+        checkpoint.question = payload.question
+    if payload.expected_points is not None:
+        checkpoint.expected_points = payload.expected_points
+    if payload.official_sources is not None:
+        checkpoint.official_sources = payload.official_sources
+    checkpoint.updated_at = datetime.now()
+    db.commit()
+    return _video_checkpoint_payload(checkpoint)
+
+
+@app.post(
+    "/v1/videos/{video_id}/checkpoints/freeze",
+    response_model=VideoCheckpointListResponse,
+)
+def freeze_video_checkpoints(
+    video_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    if user.role not in {UserRole.MENTOR.value, UserRole.SYSTEM_ADMIN.value}:
+        raise HTTPException(status_code=403, detail="仅讲师、导师或系统管理员可冻结口述题")
+    video = db.get(CourseVideo, video_id)
+    if video is None:
+        raise HTTPException(status_code=404, detail="视频不存在")
+    accessible_module(db, user, video.module_id)
+    checkpoints = (
+        db.query(VideoCheckpoint)
+        .filter_by(video_id=video_id, status="draft")
+        .all()
+    )
+    for item in checkpoints:
+        item.status = "frozen"
+        item.updated_at = datetime.now()
+    db.commit()
+    frozen = (
+        db.query(VideoCheckpoint)
+        .filter_by(video_id=video_id)
+        .order_by(VideoCheckpoint.time_offset_seconds, VideoCheckpoint.id)
+        .all()
+    )
+    return {"items": [_video_checkpoint_payload(item) for item in frozen]}
 
 
 @app.get("/v1/resources")

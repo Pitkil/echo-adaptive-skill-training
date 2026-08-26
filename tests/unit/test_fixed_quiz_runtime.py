@@ -134,8 +134,9 @@ def test_fixed_quiz_is_selected_by_purpose_and_scored_on_server() -> None:
     db.close()
 
 
-def test_requested_quiz_purpose_defaults_to_fixed_stage_test() -> None:
+def test_requested_quiz_purpose_only_accepts_an_explicit_phase() -> None:
     assert app_module.requested_quiz_purpose("开始当前模块前测") == "pretest"
     assert app_module.requested_quiz_purpose("请给我一道阶段测验") == "stage_test"
     assert app_module.requested_quiz_purpose("开始当前模块后测") == "posttest"
     assert app_module.requested_quiz_purpose("来一道练习题") == "practice"
+    assert app_module.requested_quiz_purpose("我想测试一下") is None

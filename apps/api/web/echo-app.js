@@ -13,10 +13,22 @@
         microLearners: [],
         quizPreviewId: null,
         sessionId: null,
+        assessmentProgress: null,
         authMode: "login",
         mediaRecorder: null,
         mediaChunks: [],
         recordedBlob: null,
+        activeVideoId: null,
+        activeVideoProgress: null,
+        videos: [],
+        activeCheckpoints: [],
+        triggeredCheckpointIds: new Set(),
+        activeCheckpoint: null,
+        selectedAdminVideoId: null,
+        adminVideos: [],
+        videoCheckpoints: new Set(),
+        videoEvidenceContext: null,
+        lastVideoProgressSave: 0,
         charts: {},
     };
 
@@ -94,6 +106,7 @@
     }
 
     function logout() {
+        releaseVideoObjectUrl();
         ["echo_token", "echo_user_id", "echo_username", "echo_role"].forEach((key) => localStorage.removeItem(key));
         state.token = "";
         state.userId = 0;
@@ -106,6 +119,18 @@
         state.microLearners = [];
         state.quizPreviewId = null;
         state.sessionId = null;
+        state.assessmentProgress = null;
+        state.activeVideoId = null;
+        state.activeVideoProgress = null;
+        state.videos = [];
+        state.activeCheckpoints = [];
+        state.triggeredCheckpointIds = new Set();
+        state.activeCheckpoint = null;
+        state.videoCheckpoints = new Set();
+        state.videoEvidenceContext = null;
+        $("#video-empty-state").classList.remove("hidden");
+        $("#video-progress-label").textContent = "尚未开始";
+        $("#video-checkpoint").classList.add("hidden");
         resetPrivilegedViews();
         showView("workspace");
         $("#auth-password").value = "";
@@ -128,7 +153,7 @@
 
     async function enterApp() {
         resetPrivilegedViews();
-        showView("workspace");
+        showView("courses");
         $("#auth-screen").classList.add("hidden");
         $("#app-shell").classList.remove("hidden");
         $("#user-name").textContent = state.username || `学习者 ${state.userId}`;
@@ -142,7 +167,8 @@
         await loadCatalog();
         await loadMicroLearners();
         await Promise.all([restoreLatestSession(), checkHealth()]);
-        await Promise.all([loadInsight(), loadResources()]);
+        await Promise.all([loadInsight(), loadResources(), loadAssessmentProgress()]);
+        renderCourseCenter();
         iconRefresh();
     }
 
@@ -151,13 +177,38 @@
     }
 
     async function checkHealth() {
+        const node = $("#service-status");
+        node.classList.remove("healthy", "degraded", "offline");
         try {
             const response = await api("/api/health");
-            await response.json();
-            $("#service-status").innerHTML = '<span class="status-dot"></span>系统在线';
+            const payload = await response.json();
+            if (payload.status === "ok") {
+                node.classList.add("healthy");
+                node.innerHTML = '<span class="status-dot"></span>系统在线';
+                node.title = "业务数据库与辅助服务均可用";
+                return;
+            }
+            const unavailable = Object.entries(payload.dependencies || {})
+                .filter(([, item]) => item.status !== "ok")
+                .map(([name]) => dependencyLabel(name));
+            node.classList.add("degraded");
+            node.innerHTML = `<span class="status-dot"></span>核心在线 · ${Number(payload.unavailable_count || unavailable.length)} 项降级`;
+            node.title = unavailable.length ? `暂不可用：${unavailable.join("、")}` : "部分辅助服务暂不可用";
         } catch (error) {
-            $("#service-status").textContent = "服务异常";
+            node.classList.add("offline");
+            node.innerHTML = '<span class="status-dot"></span>核心服务异常';
+            node.title = error.message;
         }
+    }
+
+    function dependencyLabel(name) {
+        return {
+            database: "业务数据库",
+            punditrag_import: "知识库导入",
+            punditrag_query: "官方知识检索",
+            simplemem: "长期记忆",
+            micro_representation: "语音微表征",
+        }[name] || name;
     }
 
     async function loadCatalog() {
@@ -175,6 +226,7 @@
             .join("");
         select.value = String(state.moduleId || "");
         populateImportModuleSelects();
+        renderCourseCenter();
     }
 
     async function restoreLatestSession() {
@@ -195,6 +247,7 @@
         if (!messages.length) return;
         $("#chat-messages").innerHTML = "";
         messages.forEach((message) => appendMessage(message.role, message.content));
+        renderCourseCenter();
     }
 
     function stageLabel(stage) {
@@ -214,12 +267,320 @@
         const options = state.modules
             .map((item) => `<option value="${item.id}">${escapeHtml(item.code)} · ${escapeHtml(item.name)}</option>`)
             .join("");
-        ["#material-module-select", "#quiz-module-select"].forEach((selector) => {
+        ["#material-module-select", "#quiz-module-select", "#video-module-select"].forEach((selector) => {
             const select = $(selector);
             if (!select) return;
             select.innerHTML = options;
             select.value = String(state.moduleId || state.modules[0]?.id || "");
         });
+    }
+
+    function renderCourseCenter() {
+        if (!state.program) return;
+        $("#course-center-title").textContent = state.program.name;
+        $("#course-center-description").textContent = state.program.description
+            || "围绕 Kernel、Agent、流程、部署与质量评测开展可追溯的对话训练。";
+        $("#available-course-count").textContent = "1 门";
+        $("#course-module-count").textContent = `${state.modules.length} 个模块`;
+        const activeModule = currentModule() || state.modules[0];
+        $("#course-current-module").textContent = activeModule
+            ? `当前：${activeModule.code} ${activeModule.name}`
+            : "尚未配置模块";
+        const continueButton = $("#course-continue");
+        const videoButton = $("#course-video");
+        continueButton.disabled = !activeModule;
+        videoButton.disabled = !activeModule;
+        continueButton.querySelector("span").textContent = state.sessionId ? "继续上次学习" : "进入 ECHO 学习";
+        $("#course-module-list").innerHTML = state.modules.length
+            ? state.modules.map((item) => `
+                <button class="course-module-item ${item.id === Number(state.moduleId) ? "active" : ""}" type="button" data-course-module-id="${item.id}">
+                    <span>${escapeHtml(item.code)}</span>
+                    <div><strong>${escapeHtml(item.name)}</strong><small>${courseModuleDescription(item.code)}</small></div>
+                    <em>${item.id === Number(state.moduleId) ? "当前学习" : "进入模块"}</em>
+                    <i data-lucide="arrow-right"></i>
+                </button>`).join("")
+            : '<div class="course-empty"><strong>暂时没有可学习模块</strong><span>请联系讲师检查课程目录。</span></div>';
+        $$("[data-course-module-id]").forEach((button) => {
+            button.addEventListener("click", () => selectCourseModule(Number(button.dataset.courseModuleId)));
+        });
+        updateVideoHeading();
+        iconRefresh();
+    }
+
+    function courseModuleDescription(code) {
+        return {
+            M1: "Kernel、模型服务、提示词、插件与函数调用",
+            M2: "Agent、对话状态、记忆与多智能体协作",
+            M3: "流程框架、可观测、安全、部署与质量评测",
+        }[code] || "按学习进度完成对话、练习与测验";
+    }
+
+    async function selectCourseModule(moduleId) {
+        if (!state.modules.some((item) => item.id === moduleId)) return;
+        if (moduleId !== Number(state.moduleId)) {
+            $("#module-select").value = String(moduleId);
+            await changeModule();
+        }
+        showView("workspace");
+    }
+
+    function openCourseWorkspace() {
+        if (!currentModule()) return;
+        showView("workspace");
+        $("#chat-input").focus();
+    }
+
+    function openVideoLearning() {
+        if (!currentModule()) return;
+        updateVideoHeading();
+        loadCourseVideos();
+        showView("video");
+    }
+
+    function updateVideoHeading() {
+        const module = currentModule();
+        if (!module) return;
+        $("#video-module-label").textContent = `${module.code} ${module.name}`;
+        if (!state.activeVideoId) $("#video-lesson-title").textContent = "选择一段课程视频";
+    }
+
+    async function loadVideoKnowledgePoints() {
+        const select = $("#video-knowledge-point");
+        if (!state.moduleId) {
+            select.innerHTML = '<option value="">尚未选择模块</option>';
+            return;
+        }
+        select.disabled = true;
+        select.innerHTML = '<option value="">读取知识点中</option>';
+        try {
+            const response = await api(`/v1/catalog/modules/${state.moduleId}/knowledge-points`);
+            const items = await response.json();
+            select.innerHTML = items.length
+                ? items.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")
+                : '<option value="">本模块暂无知识点</option>';
+            select.disabled = !items.length;
+        } catch (error) {
+            select.innerHTML = '<option value="">知识点加载失败</option>';
+            select.disabled = true;
+        }
+    }
+
+    function releaseVideoObjectUrl() {
+        const player = $("#course-video-player");
+        if (player) {
+            player.pause();
+            player.removeAttribute("src");
+            player.load();
+        }
+        state.activeVideoId = null;
+        state.activeVideoProgress = null;
+        state.videos = [];
+        state.videoCheckpoints = new Set();
+        const list = $("#course-video-list");
+        if (list) list.innerHTML = "";
+    }
+
+    async function loadCourseVideos() {
+        const module = currentModule();
+        if (!module) return;
+        const list = $("#course-video-list");
+        list.innerHTML = '<small class="muted">正在读取课程视频…</small>';
+        try {
+            const response = await api(`/v1/modules/${module.id}/videos`);
+            const payload = await response.json();
+            state.videos = payload.items;
+            renderCourseVideoList();
+        } catch (error) {
+            list.innerHTML = `<small class="muted">${escapeHtml(error.message)}</small>`;
+        }
+    }
+
+    function renderCourseVideoList() {
+        const list = $("#course-video-list");
+        if (!state.videos.length) {
+            list.innerHTML = '<small class="muted">当前模块还没有课程视频，请联系讲师上传。</small>';
+            return;
+        }
+        list.innerHTML = state.videos.map((video) => {
+            const progress = video.progress;
+            const label = progress
+                ? (progress.completed ? "已看完" : `上次看到 ${formatVideoTime(progress.current_time)}`)
+                : "尚未开始";
+            return `<button class="video-list-item ${video.id === state.activeVideoId ? "active" : ""}" type="button" data-video-id="${video.id}">
+                <i data-lucide="circle-play"></i>
+                <span><strong>${escapeHtml(video.title)}</strong><small>${label} · ${formatBytes(video.file_size)}</small></span>
+            </button>`;
+        }).join("");
+        $$("[data-video-id]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const video = state.videos.find((item) => item.id === Number(button.dataset.videoId));
+                if (video) playCourseVideo(video);
+            });
+        });
+        iconRefresh();
+    }
+
+    function playCourseVideo(video) {
+        const player = $("#course-video-player");
+        player.src = video.stream_url;
+        state.activeVideoId = video.id;
+        state.activeVideoProgress = video.progress;
+        state.videoCheckpoints = new Set();
+        state.activeCheckpoints = [];
+        state.triggeredCheckpointIds = new Set();
+        state.activeCheckpoint = null;
+        state.lastVideoProgressSave = 0;
+        $("#video-empty-state").classList.add("hidden");
+        $("#video-lesson-title").textContent = video.title;
+        $("#video-progress-label").textContent = "读取视频信息";
+        $("#video-checkpoint").classList.add("hidden");
+        renderCourseVideoList();
+        loadCourseCheckpoints(video.id);
+        player.load();
+    }
+
+    async function loadCourseCheckpoints(videoId) {
+        try {
+            const response = await api(`/v1/videos/${videoId}/checkpoints`);
+            const payload = await response.json();
+            state.activeCheckpoints = payload.items
+                .filter((item) => item.status === "frozen")
+                .sort((a, b) => a.time_offset_seconds - b.time_offset_seconds);
+        } catch (_) {
+            state.activeCheckpoints = [];
+        }
+    }
+
+    function restoreVideoProgress() {
+        const player = $("#course-video-player");
+        if (!state.activeVideoId || !Number.isFinite(player.duration)) return;
+        const saved = state.activeVideoProgress;
+        if (saved?.current_time > 0 && saved.current_time < player.duration - 3) {
+            player.currentTime = Math.min(saved.current_time, player.duration);
+        }
+        updateVideoProgressLabel();
+    }
+
+    function saveVideoProgress(force = false) {
+        const player = $("#course-video-player");
+        if (!state.activeVideoId || !Number.isFinite(player.duration) || !player.duration) return;
+        const now = Date.now();
+        if (!force && now - state.lastVideoProgressSave < 5000) return;
+        state.lastVideoProgressSave = now;
+        api(`/v1/videos/${state.activeVideoId}/progress`, {
+            method: "PUT",
+            body: JSON.stringify({
+                current_time: Math.round(player.currentTime * 10) / 10,
+                duration: Math.round(player.duration * 10) / 10,
+                completed: player.ended,
+            }),
+        }).catch(() => undefined);
+    }
+
+    function updateVideoProgressLabel() {
+        const player = $("#course-video-player");
+        if (!Number.isFinite(player.duration) || !player.duration) {
+            $("#video-progress-label").textContent = "尚未开始";
+            return;
+        }
+        const percent = Math.min(100, Math.round(player.currentTime / player.duration * 100));
+        $("#video-progress-label").textContent = player.ended
+            ? "已看完"
+            : `${formatVideoTime(player.currentTime)} / ${formatVideoTime(player.duration)}  ${percent}%`;
+    }
+
+    function handleVideoTimeUpdate() {
+        const player = $("#course-video-player");
+        updateVideoProgressLabel();
+        saveVideoProgress();
+        if (!Number.isFinite(player.duration)) return;
+        if (state.activeCheckpoints.length) {
+            const pending = state.activeCheckpoints.find(
+                (item) => player.currentTime >= item.time_offset_seconds
+                    && !state.triggeredCheckpointIds.has(item.id)
+            );
+            if (!pending) return;
+            state.triggeredCheckpointIds.add(pending.id);
+            player.pause();
+            showVideoCheckpoint(pending);
+            return;
+        }
+        if (player.duration < 40) return;
+        const ratio = player.currentTime / player.duration;
+        const threshold = [0.25, 0.5, 0.75].find((item) => ratio >= item && !state.videoCheckpoints.has(item));
+        if (!threshold) return;
+        state.videoCheckpoints.add(threshold);
+        player.pause();
+        showVideoCheckpoint();
+    }
+
+    function showVideoCheckpoint(checkpoint = null) {
+        state.activeCheckpoint = checkpoint;
+        const panel = $("#video-checkpoint");
+        panel.classList.remove("hidden");
+        if (checkpoint) {
+            $("#video-checkpoint-title").textContent = "完成这道口述练习";
+            $("#video-checkpoint-prompt").textContent = checkpoint.question;
+        } else {
+            $("#video-checkpoint-title").textContent = "用自己的话讲清本节内容";
+            $("#video-checkpoint-prompt").textContent = "请用 30-90 秒说明你刚刚理解的关键概念，并举一个应用例子。";
+        }
+        panel.scrollIntoView({block: "nearest"});
+        iconRefresh();
+    }
+
+    function skipVideoCheckpoint() {
+        $("#video-checkpoint").classList.add("hidden");
+        const player = $("#course-video-player");
+        if (player.src) player.play().catch(() => undefined);
+    }
+
+    function startVideoEvidence() {
+        const player = $("#course-video-player");
+        player.pause();
+        saveVideoProgress(true);
+        const select = $("#video-knowledge-point");
+        const selectedOption = select.options[select.selectedIndex];
+        const module = currentModule();
+        state.videoEvidenceContext = {
+            moduleId: state.moduleId,
+            moduleLabel: module ? `${module.code} ${module.name}` : "当前模块",
+            knowledgePointId: Number(select.value) || null,
+            knowledgePointLabel: selectedOption?.textContent || "本节知识点",
+            promptText: state.activeCheckpoint?.question || null,
+            progressPercent: Number.isFinite(player.duration) && player.duration
+                ? Math.round(player.currentTime / player.duration * 100)
+                : null,
+        };
+        $("#learner-consent").checked = false;
+        renderVideoEvidenceContext();
+        showView("evidence");
+        setLearnerJobStatus("等待你授权并开始录音", "idle");
+        $("#video-evidence-context").scrollIntoView({block: "start"});
+    }
+
+    function renderVideoEvidenceContext() {
+        const context = state.videoEvidenceContext;
+        const panel = $("#video-evidence-context");
+        panel.classList.toggle("hidden", !context);
+        if (!context) return;
+        $("#video-evidence-title").textContent = `视频口述练习：${context.moduleLabel}`;
+        const progress = context.progressPercent == null ? "" : `，视频进度 ${context.progressPercent}%`;
+        const promptText = context.promptText
+            || `请用 30-90 秒说明“${context.knowledgePointLabel}”${progress}。录音提交后只作为提示方式的辅助证据。`;
+        $("#video-evidence-prompt").textContent = promptText;
+        iconRefresh();
+    }
+
+    function clearVideoEvidenceContext() {
+        state.videoEvidenceContext = null;
+        renderVideoEvidenceContext();
+    }
+
+    function formatVideoTime(value) {
+        const seconds = Math.max(0, Math.floor(Number(value) || 0));
+        const minutes = Math.floor(seconds / 60);
+        return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
     }
 
     async function changeModule() {
@@ -228,14 +589,63 @@
         if (state.sessionId) {
             await sendMessage("切换到所选培训模块", nextId);
         }
+        releaseVideoObjectUrl();
+        clearVideoEvidenceContext();
+        $("#video-empty-state").classList.remove("hidden");
+        $("#video-progress-label").textContent = "尚未开始";
         state.moduleId = nextId;
         $("#echo-stage").textContent = "E · 唤起";
-        await Promise.all([loadInsight(), loadResources()]);
+        renderCourseCenter();
+        await Promise.all([loadInsight(), loadResources(), loadAssessmentProgress()]);
+    }
+
+    async function loadAssessmentProgress() {
+        if (!state.moduleId) return;
+        try {
+            const response = await api(`/v1/modules/${state.moduleId}/assessment-progress`);
+            renderAssessmentProgress(await response.json());
+        } catch (error) {
+            renderAssessmentProgress({
+                state: "unavailable",
+                title: "学习进度暂不可用",
+                description: error.message,
+                button_label: "稍后重试",
+                button_enabled: false,
+            });
+        }
+    }
+
+    function renderAssessmentProgress(progress) {
+        state.assessmentProgress = progress || null;
+        const panel = $("#assessment-next");
+        panel.dataset.state = progress?.state || "unavailable";
+        $("#assessment-title").textContent = progress?.title || "正在读取学习进度";
+        $("#assessment-description").textContent = progress?.description
+            || "系统会根据作答证据安排下一步。";
+        $("#assessment-action-label").textContent = progress?.button_label || "加载中";
+        $("#assessment-action").disabled = !progress?.button_enabled;
+        iconRefresh();
+    }
+
+    async function triggerAssessmentAction() {
+        const progress = state.assessmentProgress;
+        if (!progress?.button_enabled) return;
+        if (progress.next_action === "view_report") {
+            showView("insight");
+            return;
+        }
+        if (progress.command_text) await sendMessage(progress.command_text);
     }
 
     function showView(viewName) {
-        $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.view === viewName));
+        $$(".nav-item").forEach((button) => button.classList.toggle(
+            "active",
+            button.dataset.view === viewName || (viewName === "video" && button.dataset.view === "courses"),
+        ));
         $$(".view").forEach((view) => view.classList.toggle("active", view.id === `view-${viewName}`));
+        document.body.dataset.view = viewName;
+        if (viewName === "courses") renderCourseCenter();
+        if (viewName === "video") loadVideoKnowledgePoints();
         if (viewName === "insight") loadInsight();
         if (viewName === "resources") loadResources();
         if (viewName === "content") {
@@ -303,6 +713,11 @@
             appendMessage("assistant", result.content || "本轮已完成。");
             renderTrace(result.meta || {});
             renderQuiz(result.meta?.quiz);
+            if (result.meta?.assessment_progress) {
+                renderAssessmentProgress(result.meta.assessment_progress);
+            } else {
+                await loadAssessmentProgress();
+            }
             setEchoStage(result.meta?.echo_state || "E");
         } catch (error) {
             appendMessage("assistant", `本轮执行失败：${error.message}`);
@@ -313,7 +728,7 @@
         if (!quiz) return;
         const container = $("#chat-messages");
         const note = document.createElement("div");
-        note.className = "trace-detail";
+        note.className = "quiz-note";
         const purpose = {
             pretest: "前测",
             posttest: "后测",
@@ -335,36 +750,8 @@
     }
 
     function renderTrace(meta) {
-        $$(".agent-loop li").forEach((item) => item.classList.remove("active"));
-        const action = meta.primary_action || "";
-        const active = action === "LEARNING_DIALOGUE"
-            ? ["diagnosis", "retrieval", "decision"]
-            : action === "GENERATE_QUIZ" || action === "GRADE_ANSWER"
-                ? ["diagnosis", "decision"]
-                : ["decision"];
-        active.forEach((step) => $(`[data-agent-step="${step}"]`)?.classList.add("active"));
         const degraded = (meta.degradation || []).filter(Boolean);
-        $("#trace-detail").textContent = [
-            `意图：${meta.intent || "—"}`,
-            `主要动作：${action || "—"}`,
-            `Trace：${meta.trace_id || "—"}`,
-            degraded.length ? `降级：${degraded.join("；")}` : "依赖服务：正常或未触发",
-        ].join("\n");
-        loadTurns();
-    }
-
-    async function loadTurns() {
-        if (!state.sessionId) return;
-        try {
-            const response = await api(`/v1/sessions/${state.sessionId}/turns`);
-            const payload = await response.json();
-            const latest = payload.items?.[0];
-            if (latest) {
-                $("#trace-detail").textContent += `\n状态：${latest.status}`;
-            }
-        } catch (_) {
-            // The current turn metadata already provides a useful trace.
-        }
+        if (degraded.length) toast("部分辅助能力暂不可用，本轮学习记录已保留");
     }
 
     async function loadInsight() {
@@ -388,20 +775,10 @@
             $(`#bar-${key}`).style.width = `${Math.min(100, Math.max(0, (value + 3) / 6 * 100))}%`;
         });
         $("#metric-accuracy").textContent = abilityView.average_accuracy == null
-            ? "—"
+            ? "暂无"
             : `${Math.round(abilityView.average_accuracy * 100)}%`;
         $("#metric-attempts").textContent = `${ability.attempt_count || 0} 次有效作答`;
         $("#diagnosis-confidence").textContent = `诊断置信度 ${Math.round((evidenceView.diagnosis_confidence || 0) * 100)}%`;
-        renderTags("#mastered-list", evidenceView.mastered_knowledge_points, "暂无已掌握知识点");
-        renderTags("#blind-list", evidenceView.knowledge_blind_spots, "暂无已确认知识盲区");
-        renderRecords("#micro-evidence-list", evidenceView.micro_evidence?.items, "暂无已确认微表征证据", (item) => ({
-            title: `${eventLabel(item.event_type)} · ${Math.round(item.confidence * 100)}%`,
-            detail: item.transcript || "未提供短转写",
-        }));
-        renderRecords("#memory-list", evidenceView.memory_summary, "暂无长期记忆摘要", (item) => ({
-            title: memoryLabel(item.memory_type || item.type),
-            detail: item.content || item.summary || "已检索到相关记忆",
-        }));
         renderLearningPath(pathView.learning_path || []);
         $("#recommendation-reason").textContent = pathView.recommendation_reason || "先完成模块前测以建立推荐基线。";
         renderTrendChart(abilityView.daily_series || []);
@@ -446,8 +823,8 @@
                 datasets: [{
                     label: "正确率",
                     data: visible.map((item) => item.attempt_count ? item.correct_count / item.attempt_count : null),
-                    borderColor: "#1565c0",
-                    backgroundColor: "rgba(21,101,192,.1)",
+                    borderColor: "#466270",
+                    backgroundColor: "rgba(70,98,112,.12)",
                     pointRadius: 3,
                     tension: .25,
                 }],
@@ -462,8 +839,8 @@
             data: {
                 labels: items.map((_, index) => `作答 ${index + 1}`),
                 datasets: [
-                    {label: "预计答对概率", data: items.map((item) => item.predicted_probability), backgroundColor: "#1565c0"},
-                    {label: "实际结果", data: items.map((item) => item.actual_result ? 1 : 0), backgroundColor: "#23835c"},
+                    {label: "预计答对概率", data: items.map((item) => item.predicted_probability), backgroundColor: "#466270"},
+                    {label: "实际结果", data: items.map((item) => item.actual_result ? 1 : 0), backgroundColor: "#78909c"},
                 ],
             },
             options: {responsive: true, maintainAspectRatio: false, scales: {y: {min: 0, max: 1}}},
@@ -491,7 +868,6 @@
             });
             const payload = await response.json();
             renderResourcePlan(payload.plan);
-            activateAgentSteps(["diagnosis", "retrieval", "generation", "verification", "decision"]);
             const verified = (payload.items || []).filter((item) => item.verification_passed).length;
             toast(
                 payload.degradation?.length || verified < 3
@@ -601,15 +977,13 @@
         }
     }
 
-    function activateAgentSteps(steps) {
-        $$(".agent-loop li").forEach((item) => item.classList.toggle("active", steps.includes(item.dataset.agentStep)));
-    }
-
     async function startOrStopRecording() {
         const button = $("#record-button");
         if (state.mediaRecorder?.state === "recording") {
             state.mediaRecorder.stop();
-            button.querySelector("span").textContent = "开始录音";
+            button.classList.remove("is-recording");
+            button.setAttribute("aria-pressed", "false");
+            button.querySelector("strong").textContent = "开始录音";
             return;
         }
         if (!navigator.mediaDevices?.getUserMedia) {
@@ -624,14 +998,22 @@
             state.mediaRecorder.onstop = () => {
                 state.recordedBlob = new Blob(state.mediaChunks, {type: state.mediaRecorder.mimeType || "audio/webm"});
                 stream.getTracks().forEach((track) => track.stop());
-                $("#learner-job-status").textContent = "录音已停止，可提交本轮音频。";
+                setLearnerJobStatus("录音已就绪，可以提交本轮音频", "ready");
             };
             state.mediaRecorder.start();
-            button.querySelector("span").textContent = "停止录音";
-            $("#learner-job-status").textContent = "正在录音，仅在停止后提交。";
+            button.classList.add("is-recording");
+            button.setAttribute("aria-pressed", "true");
+            button.querySelector("strong").textContent = "停止录音";
+            setLearnerJobStatus("正在录音，停止后才会生成待提交音频", "recording");
         } catch (error) {
             toast(`无法开始录音：${error.message}`);
         }
+    }
+
+    function setLearnerJobStatus(message, status = "idle") {
+        const statusBox = $("#learner-job-status");
+        statusBox.dataset.state = status;
+        $("#learner-job-status-text").textContent = message;
     }
 
     async function uploadLearnerAudio() {
@@ -644,13 +1026,20 @@
         data.append("source_type", "learner_voice");
         data.append("consent_granted", "true");
         if (state.sessionId) data.append("session_id", String(state.sessionId));
+        if (
+            state.videoEvidenceContext?.moduleId === state.moduleId
+            && state.videoEvidenceContext.knowledgePointId
+        ) {
+            data.append("knowledge_point_id", String(state.videoEvidenceContext.knowledgePointId));
+        }
         data.append("audio", blob, selected?.name || "learner-turn.webm");
         try {
+            setLearnerJobStatus("正在提交并创建检测任务", "processing");
             const response = await api("/v1/micro/detection-jobs", {method: "POST", body: data});
             const payload = await response.json();
-            $("#learner-job-status").textContent = `任务 ${payload.job_id} 已提交，状态：${payload.status}`;
+            setLearnerJobStatus(`任务 ${payload.job_id} 已提交，状态：${payload.status}`, "submitted");
         } catch (error) {
-            $("#learner-job-status").textContent = error.message;
+            setLearnerJobStatus(error.message, "error");
         }
     }
 
@@ -761,7 +1150,188 @@
         });
         if (tabName === "materials") loadKnowledgeDocuments();
         if (tabName === "quizzes") loadQuizKnowledgePoints();
+        if (tabName === "videos") {
+            loadVideoKnowledgePoints();
+            loadAdminVideos();
+        }
         iconRefresh();
+    }
+
+    async function loadVideoKnowledgePoints() {
+        const module = moduleFromSelect("#video-module-select");
+        const select = $("#video-knowledge-point-select");
+        if (!module || !select) return;
+        try {
+            const response = await api(`/v1/catalog/modules/${module.id}/knowledge-points`);
+            const items = await response.json();
+            select.innerHTML = [
+                '<option value="">不指定</option>',
+                ...items.map((item) => `<option value="${item.id}">${escapeHtml(item.code)} · ${escapeHtml(item.name)}</option>`),
+            ].join("");
+        } catch (error) {
+            select.innerHTML = '<option value="">知识点加载失败</option>';
+        }
+    }
+
+    async function loadAdminVideos() {
+        const module = moduleFromSelect("#video-module-select");
+        if (!module || !["mentor", "system_admin"].includes(state.role)) return;
+        try {
+            const response = await api(`/v1/modules/${module.id}/videos`);
+            const payload = await response.json();
+            state.adminVideos = payload.items;
+            renderAdminVideos(state.adminVideos);
+        } catch (error) {
+            $("#video-upload-status").textContent = error.message;
+        }
+    }
+
+    function renderAdminVideos(items) {
+        const node = $("#admin-video-list");
+        if (!items.length) {
+            node.innerHTML = '<small class="muted">当前模块尚未上传课程视频。</small>';
+            return;
+        }
+        node.innerHTML = items.map((item) => `
+            <article class="admin-video-item ${item.id === state.selectedAdminVideoId ? "is-selected" : ""}">
+                <div><strong>${escapeHtml(item.title)}</strong><small>${formatBytes(item.file_size)} · ${item.knowledge_point_id ? `知识点 ${item.knowledge_point_id}` : "未绑定知识点"}</small></div>
+                <div class="row-actions">
+                    <button class="button secondary" type="button" data-admin-video-select="${item.id}"><i data-lucide="list-video"></i>口述题</button>
+                    <button class="button primary" type="button" data-admin-video-generate="${item.id}"><i data-lucide="sparkles"></i>生成口述题</button>
+                </div>
+            </article>`).join("");
+        $$("[data-admin-video-select]").forEach((button) => {
+            button.addEventListener("click", () => selectAdminVideo(Number(button.dataset.adminVideoSelect)));
+        });
+        $$("[data-admin-video-generate]").forEach((button) => {
+            button.addEventListener("click", () => generateCheckpoints(Number(button.dataset.adminVideoGenerate)));
+        });
+        iconRefresh();
+    }
+
+    function selectAdminVideo(videoId) {
+        state.selectedAdminVideoId = videoId;
+        renderAdminVideos(state.adminVideos);
+        const selected = state.adminVideos.find((item) => item.id === videoId);
+        $("#admin-checkpoint-video-label").textContent = selected?.title || "";
+        $("#generate-checkpoints").disabled = false;
+        $("#freeze-checkpoints").disabled = false;
+        loadAdminCheckpoints();
+    }
+
+    async function loadAdminCheckpoints() {
+        if (!state.selectedAdminVideoId) return;
+        try {
+            const response = await api(`/v1/videos/${state.selectedAdminVideoId}/checkpoints`);
+            const payload = await response.json();
+            renderAdminCheckpoints(payload.items);
+        } catch (error) {
+            $("#admin-checkpoint-status").textContent = error.message;
+        }
+    }
+
+    function renderAdminCheckpoints(items) {
+        const node = $("#admin-checkpoint-list");
+        if (!items.length) {
+            node.innerHTML = '<small class="muted">该视频还没有口述题，点击“生成口述题”。</small>';
+            return;
+        }
+        node.innerHTML = items.map((item) => `
+            <article class="checkpoint-item" data-checkpoint-id="${item.id}">
+                <div class="checkpoint-head"><strong>${formatVideoTime(item.time_offset_seconds)} · ${item.status === "frozen" ? "已冻结" : "草稿"}</strong></div>
+                <label>题干<textarea data-checkpoint-field="question">${escapeHtml(item.question)}</textarea></label>
+                <label>参考要点（可选，每行一条）<textarea data-checkpoint-field="points">${escapeHtml((item.expected_points || []).join("\n"))}</textarea></label>
+                <label>官方出处（可选，每行一个 URL）<textarea data-checkpoint-field="sources">${escapeHtml((item.official_sources || []).join("\n"))}</textarea></label>
+                <div class="row-actions"><button class="button secondary" type="button" data-checkpoint-save="${item.id}"><i data-lucide="save"></i>保存</button></div>
+            </article>`).join("");
+        $$("[data-checkpoint-save]").forEach((button) => {
+            button.addEventListener("click", () => saveCheckpoint(Number(button.dataset.checkpointSave)));
+        });
+        iconRefresh();
+    }
+
+    async function saveCheckpoint(checkpointId) {
+        const row = $(`[data-checkpoint-id="${checkpointId}"]`);
+        const question = row.querySelector('[data-checkpoint-field="question"]').value.trim();
+        const points = row.querySelector('[data-checkpoint-field="points"]').value
+            .split("\n").map((item) => item.trim()).filter(Boolean);
+        const sources = row.querySelector('[data-checkpoint-field="sources"]').value
+            .split("\n").map((item) => item.trim()).filter(Boolean);
+        try {
+            await api(`/v1/videos/${state.selectedAdminVideoId}/checkpoints/${checkpointId}`, {
+                method: "PUT",
+                body: JSON.stringify({question, expected_points: points, official_sources: sources}),
+            });
+            $("#admin-checkpoint-status").textContent = "已保存口述题修改。";
+        } catch (error) {
+            $("#admin-checkpoint-status").textContent = error.message;
+        }
+    }
+
+    async function generateCheckpoints(videoId) {
+        const status = $("#admin-checkpoint-status");
+        status.textContent = "正在提交抽帧识别任务…";
+        try {
+            const response = await api(`/v1/videos/${videoId}/generate-checkpoints`, {method: "POST"});
+            const payload = await response.json();
+            status.textContent = `任务 ${payload.job_id} 已提交，正在抽帧识别。`;
+            pollVideoAnalysisJob(payload.job_id);
+        } catch (error) {
+            status.textContent = error.message;
+        }
+    }
+
+    async function pollVideoAnalysisJob(jobId) {
+        for (let index = 0; index < 30; index++) {
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+            try {
+                const response = await api(`/v1/video-analysis/${jobId}`);
+                const payload = await response.json();
+                if (["completed", "failed", "requires_manual"].includes(payload.status)) {
+                    $("#admin-checkpoint-status").textContent = payload.status === "completed"
+                        ? `已生成口述题草稿，请逐条核对后冻结。`
+                        : (payload.error || "生成失败");
+                    loadAdminCheckpoints();
+                    return;
+                }
+                $("#admin-checkpoint-status").textContent = `识别中（${payload.status}）…`;
+            } catch (_) {
+                // Keep polling while the background task is still running.
+            }
+        }
+    }
+
+    async function freezeCheckpoints() {
+        if (!state.selectedAdminVideoId) return;
+        try {
+            const response = await api(`/v1/videos/${state.selectedAdminVideoId}/checkpoints/freeze`, {method: "POST"});
+            const payload = await response.json();
+            $("#admin-checkpoint-status").textContent = `已冻结 ${payload.items.length} 条口述题。`;
+            loadAdminCheckpoints();
+        } catch (error) {
+            $("#admin-checkpoint-status").textContent = error.message;
+        }
+    }
+
+    async function uploadVideos() {
+        const module = moduleFromSelect("#video-module-select");
+        const files = $("#video-files").files;
+        const knowledgePointId = Number($("#video-knowledge-point-select").value) || null;
+        if (!module || !files.length) return toast("请选择学习模块和至少一个视频文件");
+        const data = new FormData();
+        if (knowledgePointId) data.append("knowledge_point_id", String(knowledgePointId));
+        Array.from(files).forEach((file) => data.append("files", file));
+        const status = $("#video-upload-status");
+        status.textContent = `正在上传 ${files.length} 个视频…`;
+        try {
+            const response = await api(`/v1/modules/${module.id}/videos`, {method: "POST", body: data});
+            const payload = await response.json();
+            status.textContent = `已上传 ${payload.items.length} 个视频，共 ${formatBytes(payload.total_size)}。`;
+            $("#video-files").value = "";
+            await loadAdminVideos();
+        } catch (error) {
+            status.textContent = error.message;
+        }
     }
 
     async function loadQuizKnowledgePoints() {
@@ -941,6 +1511,9 @@
             $("#quiz-preview-section").classList.add("hidden");
             $("#quiz-file").value = "";
             toast("固定题库导入完成");
+            if (Number($("#quiz-module-select").value) === Number(state.moduleId)) {
+                await loadAssessmentProgress();
+            }
         } catch (error) {
             $("#quiz-import-status").textContent = error.message;
             updateQuizPreviewValidation();
@@ -966,21 +1539,34 @@
         $("#auth-form").addEventListener("submit", submitAuth);
         $("#auth-mode-toggle").addEventListener("click", () => setAuthMode(state.authMode === "login" ? "register" : "login"));
         $("#logout-button").addEventListener("click", logout);
+        $("#course-continue").addEventListener("click", openCourseWorkspace);
+        $("#course-video").addEventListener("click", openVideoLearning);
+        $("#video-back-to-course").addEventListener("click", () => showView("courses"));
+        $("#course-video-player").addEventListener("loadedmetadata", restoreVideoProgress);
+        $("#course-video-player").addEventListener("timeupdate", handleVideoTimeUpdate);
+        $("#course-video-player").addEventListener("pause", () => saveVideoProgress(true));
+        $("#course-video-player").addEventListener("ended", () => {
+            saveVideoProgress(true);
+            updateVideoProgressLabel();
+        });
+        $("#course-video-player").addEventListener("play", () => $("#video-checkpoint").classList.add("hidden"));
+        $("#video-start-evidence").addEventListener("click", startVideoEvidence);
+        $("#video-manual-evidence").addEventListener("click", () => {
+            $("#course-video-player").pause();
+            showVideoCheckpoint();
+        });
+        $("#video-skip-checkpoint").addEventListener("click", skipVideoCheckpoint);
+        $("#clear-video-evidence").addEventListener("click", clearVideoEvidenceContext);
         $("#module-select").addEventListener("change", changeModule);
         $$(".nav-item").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
         $("#chat-form").addEventListener("submit", (event) => {
             event.preventDefault();
             sendMessage($("#chat-input").value);
         });
-        $("#quick-quiz").addEventListener("click", () => {
-            const purpose = $("#quiz-purpose-select").value;
-            const prompt = {
-                pretest: "开始当前模块前测",
-                stage_test: "请给我一道当前模块的阶段测验",
-                posttest: "开始当前模块后测",
-            }[purpose];
-            sendMessage(prompt);
+        $$('[data-chat-prompt]').forEach((button) => {
+            button.addEventListener("click", () => sendMessage(button.dataset.chatPrompt || ""));
         });
+        $("#assessment-action").addEventListener("click", triggerAssessmentAction);
         $$(".segmented button").forEach((button) => button.addEventListener("click", () => {
             $$(".segmented button").forEach((item) => item.classList.toggle("active", item === button));
             $$(".insight-pane").forEach((pane) => pane.classList.toggle("active", pane.id === `insight-${button.dataset.insightTab}`));
@@ -989,6 +1575,11 @@
         $("#generate-resources").addEventListener("click", generateResources);
         $("#refresh-members").addEventListener("click", loadMembers);
         $("#record-button").addEventListener("click", startOrStopRecording);
+        $("#learner-audio-file").addEventListener("change", (event) => {
+            const selected = event.target.files[0];
+            $("#learner-audio-file-name").textContent = selected?.name || "MP3、WAV、M4A 或 WebM";
+            if (selected) setLearnerJobStatus("已选择本地音频，可以提交", "ready");
+        });
         $("#upload-learner-audio").addEventListener("click", uploadLearnerAudio);
         $("#upload-mentor-audio").addEventListener("click", uploadMentorAudio);
         $("#speaker-confirmed").addEventListener("change", syncSpeakerBindingControl);
@@ -998,6 +1589,18 @@
             setImportStep(1);
             loadQuizKnowledgePoints();
         });
+        $("#video-module-select").addEventListener("change", () => {
+            state.selectedAdminVideoId = null;
+            $("#admin-checkpoint-video-label").textContent = "未选择视频";
+            $("#generate-checkpoints").disabled = true;
+            $("#freeze-checkpoints").disabled = true;
+            $("#admin-checkpoint-list").innerHTML = "";
+            loadVideoKnowledgePoints();
+            loadAdminVideos();
+        });
+        $("#upload-videos").addEventListener("click", uploadVideos);
+        $("#generate-checkpoints").addEventListener("click", () => generateCheckpoints(state.selectedAdminVideoId));
+        $("#freeze-checkpoints").addEventListener("click", freezeCheckpoints);
         $$("[data-import-tab]").forEach((button) => {
             button.addEventListener("click", () => switchImportTab(button.dataset.importTab));
         });

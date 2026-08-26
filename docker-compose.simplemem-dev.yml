@@ -2,6 +2,7 @@ services:
   echo-api:
     environment:
       SIMPLEMEM_API_KEY: simplemem-loopback-development-key
+      SIMPLEMEM_BASE_URL: http://simplemem:8020
 
   simplemem:
     environment:
