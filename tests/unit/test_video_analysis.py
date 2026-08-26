@@ -117,6 +117,67 @@ def test_video_analysis_generates_draft_checkpoints(monkeypatch, tmp_path) -> No
     app.dependency_overrides.clear()
 
 
+def test_llm_generates_question_from_ocr_text(monkeypatch, tmp_path) -> None:
+    client, db, mentor, learner, module, point, tmp_path = _build_client(monkeypatch, tmp_path)
+    video = _add_video(db, module, point, mentor, tmp_path)
+    job = VideoAnalysisJob(id="job-llm", video_id=video.id, status="queued")
+    db.add(job)
+    db.commit()
+
+    monkeypatch.setattr(
+        video_analysis,
+        "extract_frames",
+        lambda *args, **kwargs: [(30.0, tmp_path / "f30.jpg")],
+    )
+    monkeypatch.setattr(
+        video_analysis,
+        "read_frame",
+        lambda path, backend=None: {"text": "Kernel 组织插件并调用", "topic": "", "question": ""},
+    )
+    monkeypatch.setattr(
+        video_analysis,
+        "_llm_question_from_text",
+        lambda text, kp: {"question": "请说明 Kernel 如何组织插件调用。"},
+    )
+
+    video_analysis.run_video_analysis(db, "job-llm")
+
+    checkpoint = db.query(VideoCheckpoint).filter_by(video_id=video.id).one()
+    assert checkpoint.question == "请说明 Kernel 如何组织插件调用。"
+    assert checkpoint.status == "draft"
+    app.dependency_overrides.clear()
+
+
+def test_llm_falls_back_to_template_when_unavailable(monkeypatch, tmp_path) -> None:
+    client, db, mentor, learner, module, point, tmp_path = _build_client(monkeypatch, tmp_path)
+    video = _add_video(db, module, point, mentor, tmp_path)
+    job = VideoAnalysisJob(id="job-fb", video_id=video.id, status="queued")
+    db.add(job)
+    db.commit()
+
+    def _raise_unavailable(text, kp):
+        raise video_analysis.OcrUnavailable("无可用大模型")
+
+    monkeypatch.setattr(
+        video_analysis,
+        "extract_frames",
+        lambda *args, **kwargs: [(30.0, tmp_path / "f30.jpg")],
+    )
+    monkeypatch.setattr(
+        video_analysis,
+        "read_frame",
+        lambda path, backend=None: {"text": "Kernel 组织插件", "topic": "", "question": ""},
+    )
+    monkeypatch.setattr(video_analysis, "_llm_question_from_text", _raise_unavailable)
+
+    video_analysis.run_video_analysis(db, "job-fb")
+
+    checkpoint = db.query(VideoCheckpoint).filter_by(video_id=video.id).one()
+    assert "请用自己的话说明" in checkpoint.question
+    assert "Kernel 组织插件" in checkpoint.question
+    app.dependency_overrides.clear()
+
+
 def test_checkpoint_freeze_gates_learner_visibility(monkeypatch, tmp_path) -> None:
     client, db, mentor, learner, module, point, tmp_path = _build_client(monkeypatch, tmp_path)
     video = _add_video(db, module, point, mentor, tmp_path)

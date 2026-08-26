@@ -172,6 +172,49 @@ def _template_question(text: str, knowledge_point_name: str | None) -> str:
     return f"请用自己的话说明「{subject}」的关键内容，并举一个应用例子。"
 
 
+def _llm_question_from_text(text: str, knowledge_point_name: str | None) -> dict:
+    """Turn OCR text into an oral-practice question using an LLM."""
+    api_key = os.getenv("VISION_API_KEY") or os.getenv("OPENAI_API_KEY") or ""
+    base_url = os.getenv("VISION_BASE_URL") or os.getenv("OPENAI_BASE_URL") or ""
+    model = os.getenv("VISION_MODEL") or os.getenv("OPENAI_MODEL") or ""
+    if not api_key or not model:
+        raise OcrUnavailable("大模型未配置（缺少 VISION_* / OPENAI_* 的模型名或密钥）")
+    import openai
+
+    client = openai.OpenAI(api_key=api_key, base_url=base_url or None)
+    subject = knowledge_point_name or "本节内容"
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "你是课程口述练习的出题助手。下面是教学视频某一帧画面识别出的文字"
+                    f"（可能包含 OCR 误差），对应知识点是「{subject}」。\n"
+                    "请基于这些内容，拟一道适合学习者口头回答的开放式问题，"
+                    "鼓励说明理解、举例子或讲步骤，不要只问定义。\n"
+                    '只返回 JSON：{"topic":"画面主题","question":"口述问题"}，不要输出多余内容。\n\n'
+                    f"画面文字：\n{text}"
+                ),
+            }
+        ],
+        temperature=0.4,
+    )
+    return _parse_model_json(response.choices[0].message.content or "")
+
+
+def _generate_question(text: str, knowledge_point_name: str | None) -> str:
+    """Generate an oral-practice question, falling back to a fixed template."""
+    try:
+        reading = _llm_question_from_text(text, knowledge_point_name)
+        question = (reading.get("question") or "").strip()
+        if question:
+            return question
+    except Exception:
+        pass
+    return _template_question(text, knowledge_point_name)
+
+
 def run_video_analysis(db: Session, job_id: str) -> None:
     """Run frame extraction + OCR and persist draft checkpoints for one job."""
 
@@ -206,14 +249,16 @@ def run_video_analysis(db: Session, job_id: str) -> None:
             question = (reading.get("question") or "").strip()
             if not question and not text:
                 continue
+            if not question:
+                question = _generate_question(
+                    text,
+                    knowledge_point.name if knowledge_point else None,
+                )
             db.add(
                 VideoCheckpoint(
                     video_id=video.id,
                     time_offset_seconds=time_offset,
-                    question=question or _template_question(
-                        text,
-                        knowledge_point.name if knowledge_point else None,
-                    ),
+                    question=question,
                     expected_points=[],
                     official_sources=[],
                     status="draft",
