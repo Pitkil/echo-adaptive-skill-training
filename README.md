@@ -1,119 +1,140 @@
+<div align="center">
+
+<img src="docs/assets/readme/echo-hero.png" alt="ECHO 以对话串联学习证据、知识检索、内容校验与下一步决策" width="100%">
+
 # ECHO Adaptive Skill Training
 
-ECHO 是以对话为主要入口的 Semantic Kernel 企业技能训练系统。学习资料、题目、长期记忆、
-课堂微表征和学习报告都服务于同一条对话学习流程。
+**以对话为入口，把真实作答、官方证据、能力变化与下一步训练组织成一条可追溯的学习路径。**
 
-下文描述比赛版本的目标形态；当前已完成内容和剩余缺口见
-[赛题要求映射](docs/competition-requirements.md)。
+[![CI](https://github.com/Pitkil/echo-adaptive-skill-training/actions/workflows/ci.yml/badge.svg)](https://github.com/Pitkil/echo-adaptive-skill-training/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-3.11--3.13-1d3246?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-API-426f62?logo=fastapi&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-ready-466270?logo=docker&logoColor=white)
 
-## 系统做什么
+[产品全景](#产品全景) · [学习闭环](#学习闭环) · [界面预览](#界面预览) · [快速开始](#快速开始) · [部署与服务](#部署与服务) · [开发文档](#开发文档)
 
-- 围绕三个固定模块开展 Semantic Kernel 技能训练。
-- 根据前测、答题记录和 MIRT 结果判断知识盲区与合适难度。
-- 通过基于多路召回与混合向量的可追溯 RAG 检索引擎检索 Microsoft 官方材料，支持回答、资源生成和动态出题。
-- 生成定制学习资料、实操指南和阶段测试，并在展示前检查答案、难度和出处。
-- 使用 SimpleMem 保存跨会话的稳定误区、有效解释方式和历史干预效果。
-- 接入课堂微表征结果，根据犹豫、停顿和答案修正调整提示方式。
-- 提供知识盲区、难度匹配和个性化学习路径报告。
+</div>
 
-## 对话学习流程
+## 产品全景
+
+ECHO 是面向企业技能培训的多智能体学习系统。学习者始终只与一个 ECHO 对话；系统在后台读取作答和学习进度，检索 Microsoft 官方资料，生成并检查学习内容，再给出唯一的下一步。
+
+当前竞赛版本聚焦 **“基于 Microsoft Semantic Kernel 的企业级智能体应用开发”**，包含三个连续模块：
+
+| 模块 | 训练范围 | 目标产出 |
+| --- | --- | --- |
+| M1 · Kernel 与插件 | 模型服务、提示词、插件、函数调用 | 能调用插件的对话应用 |
+| M2 · Agent 与多智能体协作 | Agent、线程状态、记忆、协作流程 | 有明确职责与状态传递的智能体流程 |
+| M3 · 流程、部署与质量评测 | Process Framework、部署、安全、可观测、评测 | 可部署、可诊断、可验证的智能体应用 |
+
+> 仓库的数据模型支持多个培训项目，但当前只有这一门课程具备正式目录。界面中的其他课程方向是扩展示例，不会产生虚假课时或进度。
+
+### 设计原则
+
+| 原则 | 系统约束 |
+| --- | --- |
+| 一个对话入口 | 后台 Agent 不伪装成多个面向学习者的聊天角色 |
+| 一轮一个动作 | 判题、出题、资源生成和阶段推进不会在同一轮并发发生 |
+| 证据优先 | 正式内容只引用 Microsoft Learn 与 `microsoft/semantic-kernel` 官方仓库或示例 |
+| 能力与信号分层 | 只有可评分答案更新 U/A/R；语音微表征与长期记忆只调整诊断置信度和辅导方式 |
+| 失败必须可见 | 外部服务不可用时记录降级原因，不伪造检索、记忆或检测结果 |
+
+## 学习闭环
 
 ```mermaid
 flowchart LR
-    A["学习者提出问题或作答"] --> B["读取当前模块、画像与长期记忆"]
-    B --> C["学习情况分析"]
-    C --> D["基于多路召回与混合向量的可追溯 RAG 检索引擎"]
-    D --> E["回答、生成资源或提出题目"]
-    E --> F["内容检查"]
-    F --> G["ECHO 在对话中展示"]
-    G --> H["判分并更新学习情况"]
-    H --> I["决定继续解释、降低难度或进入下一步"]
-    I --> A
+    L[学习者提问或作答] --> O[TurnOrchestrator<br/>选择本轮唯一动作]
+    O --> A[学习情况分析<br/>U/A/R · 盲区 · 记忆]
+    A --> R[可追溯 RAG<br/>检索 Microsoft 官方资料]
+    R --> G[内容生成<br/>回答 · 资料 · 指南 · 测试]
+    G --> V{内容检查<br/>事实 · 难度 · 引用}
+    V -->|局部重做| G
+    V -->|通过| D[下一步安排<br/>解释 · 提示 · 练习 · 推进]
+    D --> E[ECHO 唯一回复]
+    E --> S[服务端判分与事实记录]
+    S --> L
+
+    classDef human fill:#f4fafd,stroke:#1d3246,color:#161d1f,stroke-width:2px;
+    classDef core fill:#e5f0f4,stroke:#466270,color:#161d1f;
+    classDef verify fill:#e5efeb,stroke:#426f62,color:#161d1f;
+    classDef decision fill:#f4eee7,stroke:#8a652d,color:#161d1f;
+    class L,E human;
+    class O,A,R,G core;
+    class V,S verify;
+    class D decision;
 ```
 
-后台由学习情况分析、内容生成、内容检查和下一步安排四个 Agent 协作；学习者始终只与 ECHO 对话。
+四个后台 Agent 分别保存输入、结果、失败原因和最终决定。PunditRAG 是知识检索与证据服务，不是第五个课程专家 Agent；SimpleMem 只保存跨会话语义记忆，不替代业务数据库。
 
-## 三个学习模块
+## 核心能力
 
-| 模块 | 学习内容 | 完成目标 |
-|---|---|---|
-| M1 Kernel 与插件 | Kernel、模型接入、提示词、插件与函数调用 | 完成能够调用插件的对话应用 |
-| M2 Agent 与多智能体协作 | Agent、对话状态、记忆与多个 Agent 协作 | 完成有明确分工的智能体流程 |
-| M3 流程、部署与质量评测 | Process Framework、可观测、安全、部署与评测 | 部署并检查智能体应用质量 |
+| 能力 | 已落地的行为 |
+| --- | --- |
+| ECHO 对话导学 | 保留 E/C/H/O 状态流转，根据当前模块与历史记录解释、追问、提示或迁移 |
+| 固定测评闭环 | 前测、阶段测试、后测与练习按用途隔离；客户端只提交原始答案，服务端判分并防止重复计分 |
+| MIRT 能力画像 | 按 M1/M2/M3 维护理解 U、应用 A、推理与评估 R，并输出能力趋势、证据盲区与学习路线 |
+| 可追溯 RAG | 对接 PunditRAG 导入与查询双服务，保存知识库、文档、任务、章节、版本和官方链接 |
+| 三类个性化资源 | 每轮只生成一种资源；逐条事实、引用、代码、步骤和测试维度校验，自动通过后进入人工发布门禁 |
+| 长期记忆 | 内置 SimpleMem 服务，支持组织与用户作用域、增删改查、合并、反馈闭环和异常降级 |
+| 语音微表征 | 支持学习者授权录音与讲师批量录音；未确认说话人不进入个人画像，信号不直接修改 U/A/R |
+| 视频伴学 | 上传课程视频、保存观看进度、生成并人工确认口述检查点；播放行为不会自动开启麦克风 |
+| 多角色治理 | 学习者、讲师/导师、系统管理员三类权限；内容导入、成员管理与 Demo Trace 按角色显示 |
+| 隐私删除 | 用户可发起幂等的数据删除请求，同步清理业务库、上传文件、SimpleMem 和用户自有 PunditRAG 文档 |
+| 竞赛评测 | 冻结 50 组案例，校验真实运行结果并导出逐案失败原因与五项指标报告 |
 
-权威内容限定为 Microsoft Learn Semantic Kernel 文档和
-`microsoft/semantic-kernel` 官方仓库及示例。
+## 界面预览
 
-## 两个独立导入入口
+<p align="center">
+  <img src="docs/assets/readme/02-course-center.png" alt="ECHO 课程中心与三个 Semantic Kernel 学习模块" width="92%">
+</p>
 
-```mermaid
-flowchart TB
-    A["课程材料导入"] --> B["选择学习模块"]
-    B --> C["上传 PDF / DOCX / TXT / MD"]
-    C --> D["基于多路召回与混合向量的可追溯 RAG 检索引擎自动切片、索引和记录来源"]
-    D --> E["用于检索、回答和动态出题"]
+<p align="center"><sub>课程中心只把真实开放课程标记为可学习，并统一进入 ECHO 对话或视频伴学。</sub></p>
 
-    F["固定题库导入"] --> G["选择学习模块和知识点"]
-    G --> H["上传 PDF / DOCX / TXT / MD"]
-    H --> I["预览识别结果"]
-    I --> J["检查答案、评分方法和官方出处"]
-    J --> K["确认写入 Quiz 题库"]
-    K --> L["用于前测、后测和阶段测试"]
-```
+<p align="center">
+  <img src="docs/assets/readme/03-learning-workspace.png" alt="ECHO 导学工作台与系统安排的唯一下一步" width="92%">
+</p>
 
-固定题目保存题目用途、难度、答案、评分方法、知识点、官方出处和
-`是否更新 MIRT`。未完成检查的题目不会写入题库。
+<p align="center"><sub>导学工作台把自由对话与服务端安排的测评阶段放在同一入口；外部服务状态在顶部显式呈现。</sub></p>
 
-学习者只在同一 ECHO 对话入口提问和作答，不手动选择测验阶段。后端根据
-`前测完成状态 -> 知识点练习覆盖 -> 阶段测验结果 -> 后测解锁` 计算唯一下一步，
-页面只展示这一项操作。题目下发时不返回答案和评分方法；学习者提交原始
-答案后由服务器判分并保存记录，再按 `是否更新 MIRT` 决定是否更新画像。
+## 用户路径
 
-## 产品角色
+### 学习者
 
-- 学习者：通过 ECHO 对话完成学习、练习、前后测并查看个人报告。
-- 讲师/导师：维护课程材料和固定题库，查看学习情况与微表征结果。
-- 系统管理员：管理成员身份，配置系统、权限、服务状态和审计记录。
-- Demo 模式：位于管理界面，用于展示多智能体闭环，不是独立角色。
+1. 从课程中心进入当前模块，或继续上次视频进度。
+2. 在 ECHO 中提问、完成系统安排的前测、练习、阶段测试与后测。
+3. 查看 U/A/R 能力变化、有作答依据的知识盲区和推荐路线。
+4. 获取定制学习资料、实操指南和阶段测试。
+5. 仅在主动授权后提交口述录音，辅助系统调整提示节奏。
 
-## 第一次参与项目先看什么
+### 讲师与管理员
 
-| 需要了解的问题 | 阅读文档 |
-|---|---|
-| 系统要做什么、有哪些功能、完整流程是什么 | [系统功能与架构说明](docs/system-overview.md) |
-| A、B、C、D 分别做什么、先后顺序是什么 | [四人任务与时间线](docs/team-ownership.md) |
-| 数据怎样在主系统、检索引擎、SimpleMem 和微表征之间传递 | [服务接口契约](docs/service-contracts.md) |
-| 分支、Commit、PR、命名和合并要求 | [协作与开发规范](docs/collaboration.md) |
-| 改完后需要通过哪些测试 | [测试与质量门禁](docs/testing-and-quality.md) |
-| 功能是否满足赛题、最终看哪些指标 | [赛题要求映射](docs/competition-requirements.md) |
+1. 分别导入官方课程材料、固定题库与课程视频。
+2. 在预览中核对题目答案、评分方法、用途、难度和官方出处后再确认入库。
+3. 查看授权范围内的学习情况、语音任务、服务状态和后台决策记录。
+4. 使用 Demo 模式展示“分析、检索、生成、检查、下一步安排”的完整闭环。
 
-固定题库的准备格式见 [题库导入模板](docs/quiz-import-template.md)。完整文档导航见
-[docs/README.md](docs/README.md)。
+## 实现边界
 
-## 团队怎样协作
+README 只描述代码已经提供的能力，不把样例数据或适配器写成正式比赛结果。
 
-本项目使用 Private 仓库。负责人在 GitHub `Settings -> Collaborators` 中邀请固定成员，
-成员接受邀请后直接 Clone 同一个仓库，不使用 Fork。
+| 范围 | 当前仓库状态 | 正式演示前仍需完成 |
+| --- | --- | --- |
+| 课程与前端 | 单课程、三模块、三角色工作台已实现 | 用最终账号与真实数据走完演示脚本 |
+| 固定题库 | 63 道正式题已冻结，导入器与运行流程已实现 | 在交付数据库执行正式导入并核对完整前后测 |
+| 官方知识库 | PunditRAG 原生双服务适配、异步状态与引用过滤已实现 | 导入许可确认的 Microsoft 原文并完成真实检索验证 |
+| 个性化资源 | 规划、生成、校验、草稿降级和持久化入口已实现 | 用正式证据运行三类资源并保存检查与重做记录 |
+| 微表征 | Mock 联调服务与真实 WavLM 推理服务均有独立实现 | 使用授权标注音频完成正式准确率、召回率与 F1 评测 |
+| 竞赛评测 | 50 组冻结案例与计分导出脚本已具备 | 填入真实运行输出并完成人工事实复核后才能发布指标 |
 
-四个人各使用一个固定工作分支：
+## 快速开始
 
-```text
-member/a-integration       负责人：主系统与总集成
-member/b-micro-signal      成员 B：微表征接入
-member/c-mirt-memory       成员 C：MIRT、学习总结与 SimpleMem
-member/d-content-data      成员 D：官方材料、题库与评测数据
-```
+### 环境要求
 
-`main` 只保存已经检查并能够运行的版本。日常流程为：
+- Git
+- Python 3.11、3.12 或 3.13
+- Docker Desktop，仅容器部署时需要
 
-```text
-在自己的分支修改 -> Commit -> Push -> 创建 PR -> 自动检查 -> 负责人审核 -> 合并到 main
-```
-
-B、C、D 的 PR 由负责人审核并合并。负责人在 `member/a-integration` 工作，自动检查
-通过后可以自行合并。所有人都不直接向 `main` 推送，也不需要为每个小任务重新创建分支。
-
-第一次下载仓库：
+### 本地开发
 
 ```powershell
 git clone https://github.com/Pitkil/echo-adaptive-skill-training.git
@@ -121,138 +142,124 @@ cd echo-adaptive-skill-training
 powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
 ```
 
-开始修改前，必须先阅读：
+在自动生成的 `.env` 中配置模型接口；至少填写：
 
-1. [AGENTS.md](AGENTS.md)：系统目标、边界和 Agent 工作要求。
-2. [四人任务与时间线](docs/team-ownership.md)：确认自己的任务、交付和配合对象。
-3. [协作与开发规范](docs/collaboration.md)：确认分支、Commit、PR 和合并要求。
-
-阅读完成后，由每名成员自行创建并首次 Push 自己的固定分支。以成员 B 为例：
-
-```powershell
-git switch main
-git pull origin main
-git switch -c member/b-micro-signal
-git push -u origin member/b-micro-signal
+```dotenv
+OPENAI_API_KEY=your-key
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=your-model
 ```
 
-每次开始工作前，在自己的分支同步最新 `main`：
+启动主系统：
 
 ```powershell
-git fetch origin
-git merge origin/main
-```
-
-完成一个可以检查的阶段后：
-
-```powershell
-git add .
-git commit -m "feat(scope): describe the completed change"
-git push origin <自己的固定分支>
-```
-
-随后在 GitHub 创建目标为 `main` 的 Pull Request。详细要求见
-[协作与开发规范](docs/collaboration.md)。
-
-## 本地启动
-
-准备条件：
-
-- Git
-- Python 3.11、3.12 或 3.13
-- Docker Desktop（使用容器启动时需要）
-
-首次获取仓库后执行：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
-# 填写 .env 中的 OPENAI_API_KEY、OPENAI_BASE_URL 和 OPENAI_MODEL
 powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
 ```
 
-`setup.ps1` 会自动创建 `.venv`、安装开发和测试依赖，并在缺少时生成 `.env`。
-默认访问 `http://127.0.0.1:8010`。独立运行的 PunditRAG 导入服务默认使用
-`http://127.0.0.1:8000`，查询服务默认使用 `http://127.0.0.1:8001`。
-
-公开注册的账号默认是学习者。首次部署时创建系统管理员：
+访问 `http://127.0.0.1:8010`。公开注册账号始终是学习者；首次部署使用脚本创建管理员：
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\bootstrap_admin.py --username admin
 ```
 
-使用 Docker 启动：
+### Docker
 
 ```powershell
 Copy-Item .env.example .env
-# 为 SIMPLEMEM_API_KEY 生成并填写至少 32 字节的随机密钥
+# 填写模型配置，并为 SIMPLEMEM_API_KEY 设置至少 32 字节的随机密钥
 docker compose up --build -d
 docker compose exec echo-api python /workspace/scripts/bootstrap_admin.py --username admin
 ```
 
-基础 Compose 不向宿主机发布 SimpleMem 的 `8020`，ECHO 通过内部容器网络地址
-`http://simplemem:8020` 访问它。仅本机联调时，显式叠加
-`docker-compose.simplemem-dev.yml`；该覆盖同时固定 ECHO 的容器内地址，并把服务绑定到
-宿主机 `127.0.0.1:8020` 供手工检查。`host.docker.internal:8020` 只适用于“服务另行运行在
-宿主机”的场景，不代表 SimpleMem 已经启动。开发覆盖使用固定开发密钥，不得用于共享或生产环境。
-
-需要联调不含真实模型的微表征 Mock 服务时使用：
+基础 Compose 不向宿主机公开 SimpleMem 的 `8020`，ECHO 通过容器内部网络访问它。代码、Dockerfile 或依赖变更后使用以下命令重建本地环境：
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.micro-mock.yml --profile micro-mock up --build -d
+docker compose down
+docker compose build --no-cache
+docker compose up -d
+docker compose ps
+Invoke-WebRequest http://127.0.0.1:8010/health
 ```
 
-该覆盖配置让 ECHO 容器通过 `http://micro-detector:8030` 访问 Mock，并等待其健康检查通过。
-Mock 服务只用于接口联调，不能作为真实诊断，也不能用于检测准确率、Precision、Recall 或 F1 评测。
+Docker Desktop 的 WSL 数据根目录应保持在专用磁盘（当前维护记录为 `D:\DockerDesktopData`），不要执行
+“Reset to factory defaults”；重装或升级时同时指定 `--installation-dir` 和 `--wsl-default-data-root`。
 
-需要运行真实离线 WavLM 微表征检测时，先拉取 Git LFS 制品并校验：
+## 部署与服务
+
+| 服务 | 默认地址 | 仓库关系 | 作用 |
+| --- | --- | --- | --- |
+| ECHO API 与 Web | `http://127.0.0.1:8010` | 本仓库 | 认证、会话、Quiz、MIRT、资源、管理端与前端 |
+| PunditRAG Import | `http://127.0.0.1:8000` | 外部服务 | 材料导入、切片和索引任务 |
+| PunditRAG Query | `http://127.0.0.1:8001` | 外部服务 | 多路召回、重排、证据与引用 |
+| SimpleMem | `http://127.0.0.1:8020` | 本仓库独立服务 | 跨会话语义记忆与变更审计 |
+| Micro Detector | `http://127.0.0.1:8030` | Mock 与真实服务均在本仓库 | 授权语音的停顿、犹豫和自我修正信号 |
+
+外部依赖不可用时，`GET /health` 与前端状态栏会报告具体降级项；业务数据库中的会话、答题和能力记录仍可使用。进入管理端“决策演示”可以查看当前会话的 Agent 输入、输出、证据、校验明细和重做记录。完整生产配置、比赛覆盖、模型校验和导出流程见 [部署与安全说明](docs/deployment-and-security.md)。
+
+## 正式数据与评测
 
 ```powershell
-git lfs install
-git lfs pull
-powershell -ExecutionPolicy Bypass -File scripts\verify_micro_model.ps1
-powershell -ExecutionPolicy Bypass -File scripts\start_competition.ps1
+# 校验 63 道正式题；添加 --apply 才写入当前运行数据库
+.\.venv\Scripts\python.exe scripts\import_formal_quiz.py
+
+# 根据一次真实运行目录生成指标与逐案失败清单
+.\.venv\Scripts\python.exe scripts\score_competition_evaluation.py --run-dir <run-directory>
 ```
 
-真实服务的 `/health` 必须返回 `mode: real`。提交组委会前，负责人使用
-`scripts/export_competition.ps1` 生成包含实际权重、不包含 `.git` 和密钥的交付文件夹。比赛覆盖配置
-只把 8030 发布到 `127.0.0.1`，单次音频默认限制为 100 MiB；如需调整，可在 `.env` 中设置
-`MICRO_DETECTOR_MAX_AUDIO_BYTES`。启动脚本会在构建前校验 `SIMPLEMEM_API_KEY` 至少为 32 字节。
+正式报告必须同时满足 50 组实际输出齐全和人工事实复核完成。目标指标为：幻觉率 `< 5%`、难度适配率 `>= 85%`、核心知识覆盖率 `>= 90%`、引用可追溯率 `100%`、闭环记录完整率 `100%`。
 
-已有账号可追加 `--promote-existing` 提升为系统管理员。系统管理员登录后在“成员管理”
-中把负责维护内容的账号设为“讲师/导师”。只有讲师/导师和系统管理员能看到“内容导入”，
-只有系统管理员能看到“成员管理”。
+## 隐私与安全
 
-外部服务未启动时，主系统保留业务记录并显示降级原因：
+- 音频必须有明确授权；学习者单轮录音绑定本人，讲师批量录音必须确认说话人后才能进入个人画像。
+- 语音微表征与 SimpleMem 不直接修改 U/A/R，避免弱证据污染专业能力结果。
+- 题目接口不返回答案与评分方法，客户端不能自行决定正确性或权限。
+- 业务数据、上传材料、视频、音频、SQLite 数据库、密钥和评测运行输出不进入 Git。
+- SimpleMem 查询包含组织与用户作用域，身份切换和退出登录会清理无权限页面状态。
+- Mock 微表征服务只用于接口联调，不能用于宣称真实检测准确率。
 
-- PunditRAG 导入服务：`http://127.0.0.1:8000`
-- PunditRAG 查询服务：`http://127.0.0.1:8001`
-- SimpleMem：`http://127.0.0.1:8020`
-- 微表征检测：`http://127.0.0.1:8030`
-
-仓库已内置可独立运行的 SimpleMem 服务。本地联调时可在另一个终端启动：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\start_simplemem.ps1 -AllowInsecureDevelopment
-```
-
-macOS / Linux 可执行：
-
-```bash
-PYTHONPATH=services/simplemem SIMPLEMEM_DB_PATH=data/simplemem.db \
-SIMPLEMEM_HOST=127.0.0.1 SIMPLEMEM_ALLOW_INSECURE_DEV=true \
-.venv/bin/python -m simplemem
-```
-
-SimpleMem 使用 SQLite 保存长期记忆与变更审计，详细配置和独立部署方式见
-[`services/simplemem/README.md`](services/simplemem/README.md)。
-
-## 质量检查
+## 质量门禁
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\quality.ps1
 powershell -ExecutionPolicy Bypass -File scripts\test.ps1
+python -m compileall apps/api services
 docker compose config
 ```
 
-完整流程、架构和功能说明见 [系统功能与架构说明](docs/system-overview.md)，
-其他工程文档见 [docs/README.md](docs/README.md)。
+CI 在 Push 与 Pull Request 上执行 Ruff、Python 编译检查、Compose 配置校验和完整测试。关键边界包括单动作编排、服务端判分、重复提交保护、权限隔离、外部服务降级，以及桌面端和 390px 移动端布局。
+
+## 项目结构
+
+```text
+apps/api/                     FastAPI 主系统、业务模型与 Web 前端
+  agent/                      ECHO 状态机与单动作编排
+  MIRT/                       U/A/R 能力估计、学情分析与记忆协调
+  Quiz/                       选题、判分、阶段流程与题库导入
+  integrations/               PunditRAG、SimpleMem、微表征适配器
+services/simplemem/           可独立运行的长期记忆服务
+services/micro_detector/      接口联调用 Mock 服务
+services/micro_detector_real/ WavLM 真实推理服务
+docs/member-d/                正式题库、材料清单与 50 组冻结案例
+scripts/                      启动、导入、评测、校验与交付脚本
+tests/                        单元测试与跨服务契约测试
+```
+
+## 开发文档
+
+- [系统功能与完整流程](docs/system-overview.md)
+- [架构与数据边界](docs/architecture.md)
+- [跨服务接口契约](docs/service-contracts.md)
+- [赛题要求与真实进度](docs/competition-requirements.md)
+- [测试与质量门禁](docs/testing-and-quality.md)
+- [文档导航](docs/README.md)
+- [旧版详细开发说明](docs/development-guide.md)
+
+## 许可证
+
+本仓库当前按私有竞赛项目管理，根目录尚未声明统一的开源许可证，请勿据此推定代码可自由复制或再分发。微表征模型相关第三方许可单独记录在 [`models/micro_detector/LICENSE-WAVLM.txt`](models/micro_detector/LICENSE-WAVLM.txt)。
+
+---
+
+<div align="center">
+  <sub>ECHO · evidence-grounded adaptive skill training</sub>
+</div>

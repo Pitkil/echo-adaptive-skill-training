@@ -159,6 +159,59 @@ def _passes(metric: str, value: float | None) -> bool | None:
     return value >= threshold["value"]
 
 
+def completed_human_review(review: dict) -> bool:
+    """Require two named human reviews; AI-only or anonymous reviews never qualify."""
+
+    if str(review.get("status") or "") != "completed":
+        return False
+    reviewers = review.get("reviewers")
+    if not isinstance(reviewers, list):
+        return False
+    completed_ids = {
+        str(item.get("reviewer_id") or "").strip()
+        for item in reviewers
+        if isinstance(item, dict)
+        and str(item.get("status") or "") == "completed"
+        and str(item.get("reviewer_type") or "human") == "human"
+        and str(item.get("reviewer_id") or "").strip()
+    }
+    return len(completed_ids) >= 2
+
+
+def has_complete_persisted_agent_records(result: dict) -> bool:
+    """Verify the closed loop from recorded facts instead of trusting a score flag."""
+
+    actual_output = result.get("actual_output")
+    if not isinstance(actual_output, dict) or not actual_output:
+        return False
+    records = result.get("agent_records")
+    if not isinstance(records, dict) or set(AGENT_NAMES) - set(records):
+        return False
+    for name in AGENT_NAMES:
+        record = records[name]
+        if not isinstance(record, dict):
+            return False
+        status = record.get("status")
+        if status not in {
+            "completed",
+            "observed",
+            "completed_with_degradation",
+            "failed",
+        }:
+            return False
+        if status == "failed" and not record.get("failure_reason"):
+            return False
+        if record.get("persisted_in_system") is not True:
+            return False
+        if record.get("output") is None:
+            return False
+        if not record.get("started_at") or not record.get("finished_at"):
+            return False
+    if not actual_output.get("primary_action"):
+        return False
+    return bool(actual_output.get("echo_reply") or actual_output.get("selected_resource"))
+
+
 def score_results(cases: list[dict], results: list[dict]) -> dict:
     """Calculate auditable metrics without treating missing reviews as passes."""
 
@@ -197,7 +250,7 @@ def score_results(cases: list[dict], results: list[dict]) -> dict:
 
         review = result.get("human_review") or {}
         review_status = str(review.get("status") or "pending")
-        if review_status == "completed":
+        if completed_human_review(review):
             completed_human_reviews += 1
             reviewed_case_count += 1
             claims = int(review.get("verifiable_claim_count") or 0)
@@ -227,7 +280,11 @@ def score_results(cases: list[dict], results: list[dict]) -> dict:
             raise EvaluationDataError(f"Invalid citation counts for case {case_id}.")
         required_citations += required
         traceable_citations += traceable
-        closed_loop_cases += int(flags.get("closed_loop_complete") is True)
+        closed_loop_complete = (
+            flags.get("closed_loop_complete") is True
+            and has_complete_persisted_agent_records(result)
+        )
+        closed_loop_cases += int(closed_loop_complete)
 
         rows.append(
             {
@@ -237,7 +294,7 @@ def score_results(cases: list[dict], results: list[dict]) -> dict:
                 "difficulty_match": difficulty,
                 "knowledge_coverage": coverage,
                 "source_traceable": flags.get("source_traceable"),
-                "closed_loop_complete": flags.get("closed_loop_complete"),
+                "closed_loop_complete": closed_loop_complete,
                 "failure_reason_count": len(result.get("failure_reasons") or []),
             }
         )
@@ -309,7 +366,7 @@ def score_results(cases: list[dict], results: list[dict]) -> dict:
         "missing_result_count": len(cases) - len(results),
         "missing_actual_output_count": missing_actual_output,
         "completed_human_review_count": completed_human_reviews,
-        "pending_human_review_count": pending_human_reviews,
+        "pending_human_review_count": pending_human_reviews + (len(cases) - len(results)),
         "formal_ready": formal_ready,
         "all_thresholds_passed": threshold_passed,
         "metrics": metrics,

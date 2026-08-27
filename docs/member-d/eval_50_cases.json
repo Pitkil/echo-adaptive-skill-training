@@ -1083,9 +1083,9 @@
         "primary_action": "GRADE_ANSWER",
         "knowledge_point": "多轮对话与执行设置",
         "difficulty": "advanced",
-        "source_title": "Chat history",
-        "source_url": "https://learn.microsoft.com/en-us/semantic-kernel/concepts/ai-services/chat-completion/chat-history",
-        "source_section": "Creating a chat history object",
+        "source_title": "OpenAIPromptExecutionSettings.Temperature Property",
+        "source_url": "https://learn.microsoft.com/zh-cn/dotnet/api/microsoft.semantickernel.connectors.openai.openaipromptexecutionsettings.temperature",
+        "source_section": "Temperature",
         "output_characteristics": "应判断为正确，更新 MIRT",
         "publish_resource": false,
         "update_mirt": true

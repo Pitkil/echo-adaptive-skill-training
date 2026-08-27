@@ -7,20 +7,27 @@
 !.env.example
 
 __pycache__
+**/__pycache__
 *.py[cod]
 .pytest_cache
+**/.pytest_cache
 .ruff_cache
+**/.ruff_cache
 *.egg-info
 
 data
 logs
 temp
 tmp
+tmp/**
 output
 outputs
 
 tests
-docs
+docs/*
+!docs/member-d/
+!docs/member-d/**
+!docs/member-c/learner-profile-samples.json
 *.db
 *.sqlite
 *.sqlite3

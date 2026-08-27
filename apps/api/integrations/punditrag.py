@@ -66,20 +66,22 @@ class PunditRAGClient:
         module_id: int,
         *,
         external_knowledge_base_id: str | None = None,
+        external_document_ids: list[str] | None = None,
         trace_id: str | None = None,
         knowledge_point_ids: list[int] | None = None,
         top_k: int | None = None,
     ) -> list[dict]:
         del top_k  # PunditRAG applies its configured retrieval and reranking limits.
+        document_ids = list(dict.fromkeys(external_document_ids or []))
         payload = self.query_http.request(
             "POST",
             "/query",
             {
                 "query": query,
                 "session_id": trace_id,
-                "scope_mode": "knowledge_base",
+                "scope_mode": "documents" if document_ids else "knowledge_base",
                 "kb_ids": [external_knowledge_base_id or str(knowledge_base_id)],
-                "document_ids": [],
+                "document_ids": document_ids,
                 "is_stream": False,
                 "enable_web_search": False,
             },
@@ -156,6 +158,14 @@ class PunditRAGClient:
         payload = self.import_http.request("GET", f"/status/{task_id}")
         if not isinstance(payload, dict) or str(payload.get("task_id") or "") != task_id:
             raise ValueError("PunditRAG returned an invalid import status.")
+        return payload
+
+    def delete_document(self, document_id: str) -> dict:
+        """Remove a user-owned document from the import service."""
+
+        payload = self.import_http.request("DELETE", f"/documents/{document_id}")
+        if not isinstance(payload, dict):
+            raise ValueError("PunditRAG delete response must be an object.")
         return payload
 
     def health(self) -> dict:

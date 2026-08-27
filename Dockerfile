@@ -19,6 +19,8 @@ RUN pip install --upgrade pip \
 
 COPY apps ./apps
 COPY scripts ./scripts
+COPY docs/member-d ./docs/member-d
+COPY docs/member-c/learner-profile-samples.json ./docs/member-c/learner-profile-samples.json
 
 WORKDIR /workspace/apps/api
 EXPOSE 8000
