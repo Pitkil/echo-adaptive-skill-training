@@ -261,6 +261,11 @@ docker compose config
 
 ## 十、运行环境维护记录
 
+- 2026-08-27：本地 ECHO/PunditRAG 正式知识库按 manifest v1.2 复核完成，外部 kb 为
+  `b91a91086ffc4399aa6152d37b6e1d60`；15 份活动材料导入完成，固定 12 个知识点检索在关闭网页搜索、
+  限定活动 document_ids 后 12/12 通过。`MS-SK-CONCEPTS-COMPONENTS` upload 20 已标记 `removed`，
+  不得从旧交付包恢复；v1.2 审核包位于 `data/deliveries/b-v1.2-final/`（运行数据不提交 Git）。
+
 - 2026-08-26：负责人 Windows 主机的 Docker Desktop 已升级并验证为 4.88.1。程序安装目录为
   `D:\Docker\Docker`，WSL 默认数据根和 `CustomWslDistroDir` 均为
   `D:\DockerDesktopData`。镜像、容器和卷位于

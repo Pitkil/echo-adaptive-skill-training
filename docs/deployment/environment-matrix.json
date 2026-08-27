@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "recorded_at": "2026-08-26T00:00:00+08:00",
+  "git_branch": "member/b-micro-signal",
+  "git_commit": "record-at-final-verification",
+  "environments": [{
+    "name": "current-windows-workstation",
+    "os": "Windows",
+    "python": "3.12.12",
+    "docker": "29.6.2",
+    "echo": "not_checked",
+    "database": "not_checked",
+    "model": "not_checked",
+    "punditrag_import": "unavailable_connection_refused",
+    "punditrag_query": "unavailable_connection_refused",
+    "simplemem": "unavailable_connection_refused",
+    "micro_representation": {"status":"healthy","mode":"real","version":"echo-wavlm-prototype-v2"},
+    "notes": "Service probe only; not a clean-machine deployment pass."
+  }]
+}

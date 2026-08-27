@@ -1,0 +1,21 @@
+{
+  "version":"1.1","status":"pending_real_punditrag_run","handoff_document":"docs/member-b-punditrag-handoff.md",
+  "rules":{"enable_web_search":false,"allowed_hosts":["learn.microsoft.com","github.com"],"required_metadata":["source_title","source_url","source_section","version","chunk_id"]},
+  "cases":[
+    {"case_id":"R01","module_id":"M1","knowledge_point_id":"M1-KP1","query":"Kernel 的职责以及如何接入聊天完成服务？","expected_material_ids":["MS-SK-CONCEPTS-KERNEL","MS-SK-TRAINING-BUILD-KERNEL"]},
+    {"case_id":"R02","module_id":"M1","knowledge_point_id":"M1-KP2","query":"prompt template 如何使用变量和函数？","expected_material_ids":["MS-SK-TRAINING-PROMPT-TEMPLATES"]},
+    {"case_id":"R03","module_id":"M1","knowledge_point_id":"M1-KP3","query":"如何定义并注册 native plugin？","expected_material_ids":["MS-SK-CONCEPTS-PLUGINS","MS-SK-TRAINING-NATIVE-PLUGINS"]},
+    {"case_id":"R04","module_id":"M1","knowledge_point_id":"M1-KP4","query":"如何维护 ChatHistory 和多轮上下文？","expected_material_ids":["MS-SK-CHAT-HISTORY"]},
+    {"case_id":"R05","module_id":"M2","knowledge_point_id":"M2-KP1","query":"Agent 核心抽象和指令如何定义？","expected_material_ids":["MS-SK-AGENT-ARCHITECTURE","MS-SK-AGENT-PYTHON-API"]},
+    {"case_id":"R06","module_id":"M2","knowledge_point_id":"M2-KP2","query":"Agent thread 如何保存对话状态？","expected_material_ids":["MS-SK-AGENT-ARCHITECTURE"]},
+    {"case_id":"R07","module_id":"M2","knowledge_point_id":"M2-KP3","query":"Vector Store connector 用于什么场景？","expected_material_ids":["MS-SK-VECTOR-STORE"]},
+    {"case_id":"R08","module_id":"M2","knowledge_point_id":"M2-KP4","query":"Concurrent orchestration 如何并行运行多个 Agent？","expected_material_ids":["MS-SK-AGENT-CONCURRENT"]},
+    {"case_id":"R09","module_id":"M2","knowledge_point_id":"M2-KP4","query":"Sequential orchestration 如何依次传递输出？","expected_material_ids":["MS-SK-AGENT-SEQUENTIAL"]},
+    {"case_id":"R10","module_id":"M3","knowledge_point_id":"M3-KP1","query":"Process Framework 的步骤和事件如何协作？","expected_material_ids":["MS-SK-PROCESS-FIRST"]},
+    {"case_id":"R11","module_id":"M3","knowledge_point_id":"M3-KP1","query":"如何创建第一个 Semantic Kernel Process？","expected_material_ids":["MS-SK-PROCESS-FIRST"]},
+    {"case_id":"R12","module_id":"M3","knowledge_point_id":"M3-KP2","query":"如何接入 OpenTelemetry traces metrics logs？","expected_material_ids":["MS-SK-OBSERVABILITY"]},
+    {"case_id":"R13","module_id":"M3","knowledge_point_id":"M3-KP3","query":"filters 如何处理函数调用安全和异常？","expected_material_ids":["MS-SK-FILTERS"]},
+    {"case_id":"R14","module_id":"M3","knowledge_point_id":"M3-KP4","query":"如何利用流程审计、日志、指标和跟踪评估 Semantic Kernel 应用质量？","expected_material_ids":["MS-SK-OBSERVABILITY","MS-SK-PROCESS-OVERVIEW"],"manual_review_required":true,"gap_policy":"证据不能同时支持部署与质量评测时记录覆盖缺口并补充官方来源，不强行判定通过"},
+    {"case_id":"R15","module_id":"M3","knowledge_point_id":"M3-KP3","query":"未登记网页结果能否作为正式引用？","expected_behavior":"reject_unregistered_or_untraceable_sources"}
+  ]
+}
