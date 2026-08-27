@@ -19,9 +19,12 @@ services:
       SIMPLEMEM_BASE_URL: ${SIMPLEMEM_DOCKER_BASE_URL:-http://simplemem:8020}
       SIMPLEMEM_API_KEY: ${SIMPLEMEM_API_KEY:-}
       MICRO_REPRESENTATION_BASE_URL: ${MICRO_REPRESENTATION_DOCKER_BASE_URL:-http://host.docker.internal:8030}
+      ASR_BASE_URL: ${ASR_DOCKER_BASE_URL:-http://asr:8040}
       EVALUATION_PROFILE_SEED_KEY: ${EVALUATION_PROFILE_SEED_KEY:-}
     depends_on:
       simplemem:
+        condition: service_healthy
+      asr:
         condition: service_healthy
     ports:
       - "${ECHO_PORT:-8010}:8000"
@@ -54,6 +57,23 @@ services:
       - "${MICRO_DETECTOR_PORT:-8030}:8030"
     restart: unless-stopped
 
+  asr:
+    build:
+      context: services/asr
+      dockerfile: Dockerfile
+    environment:
+      ASR_MODEL_ID: ${ASR_MODEL_ID:-Systran/faster-whisper-tiny}
+      ASR_DEVICE: ${ASR_DEVICE:-cpu}
+      ASR_COMPUTE_TYPE: ${ASR_COMPUTE_TYPE:-int8}
+      ASR_DOWNLOAD_ROOT: /models
+      ASR_MAX_AUDIO_BYTES: ${ASR_MAX_AUDIO_BYTES:-104857600}
+    ports:
+      - "${ASR_PORT:-8040}:8040"
+    volumes:
+      - asr-model-cache:/models
+    restart: unless-stopped
+
 volumes:
   echo-data:
   simplemem-data:
+  asr-model-cache:

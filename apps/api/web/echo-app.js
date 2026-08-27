@@ -1153,6 +1153,33 @@
         $("#learner-job-status-text").textContent = message;
     }
 
+    async function pollLearnerTranscription(jobId) {
+        if (!jobId) return;
+        for (let attempt = 0; attempt < 30; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            try {
+                const response = await api(`/v1/micro/detection-jobs/${jobId}`);
+                const payload = await response.json();
+                if (payload.transcription_status === "completed") {
+                    const transcript = payload.transcript || "（未识别到清晰语音）";
+                    setLearnerJobStatus(`转写完成：${transcript}`, "completed");
+                    return;
+                }
+                if (["failed", "unavailable"].includes(payload.transcription_status)) {
+                    setLearnerJobStatus(
+                        `转写${payload.transcription_status === "unavailable" ? "暂不可用" : "失败"}：${payload.transcription_error || "未知原因"}`,
+                        "error",
+                    );
+                    return;
+                }
+            } catch (error) {
+                setLearnerJobStatus(`读取转写状态失败：${error.message}`, "error");
+                return;
+            }
+        }
+        setLearnerJobStatus("转写仍在处理中，请稍后刷新任务状态", "submitted");
+    }
+
     async function uploadLearnerAudio() {
         if (!$("#learner-consent").checked) return toast("请先确认本轮录音授权");
         const selected = $("#learner-audio-file").files[0];
@@ -1175,6 +1202,7 @@
             const response = await api("/v1/micro/detection-jobs", {method: "POST", body: data});
             const payload = await response.json();
             setLearnerJobStatus(`任务 ${payload.job_id} 已提交，状态：${payload.status}`, "submitted");
+            pollLearnerTranscription(payload.job_id);
         } catch (error) {
             setLearnerJobStatus(error.message, "error");
         }

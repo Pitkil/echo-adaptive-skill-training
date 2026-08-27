@@ -402,6 +402,11 @@ class MicroDetectionJob(Base):
     audio_duration_ms = Column(Integer, nullable=True)
     audio_sha256 = Column(String(64), nullable=True, index=True)
     dedupe_key = Column(String(64), nullable=True)
+    transcript = Column(Text, nullable=True)
+    transcription_language = Column(String(20), nullable=True)
+    transcription_status = Column(String(20), nullable=False, default="pending")
+    transcription_error = Column(Text, nullable=True)
+    transcribed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.now)
     updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
     __table_args__ = (
@@ -642,6 +647,11 @@ def _ensure_micro_job_columns() -> None:
         "audio_duration_ms": "INTEGER",
         "audio_sha256": "VARCHAR(64)",
         "dedupe_key": "VARCHAR(64)",
+        "transcript": "TEXT",
+        "transcription_language": "VARCHAR(20)",
+        "transcription_status": "VARCHAR(20) DEFAULT 'pending' NOT NULL",
+        "transcription_error": "TEXT",
+        "transcribed_at": "DATETIME",
     }
     with engine.begin() as connection:
         for column_name, definition in additions.items():

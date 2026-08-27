@@ -19,6 +19,7 @@ def collect_dependency_health() -> dict[str, dict[str, Any]]:
         "punditrag_query": os.getenv("PUNDITRAG_QUERY_BASE_URL", "").strip(),
         "simplemem": os.getenv("SIMPLEMEM_BASE_URL", "").strip(),
         "micro_representation": os.getenv("MICRO_REPRESENTATION_BASE_URL", "").strip(),
+        "asr": os.getenv("ASR_BASE_URL", "").strip(),
     }
     with ThreadPoolExecutor(max_workers=len(targets)) as executor:
         futures = {

@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlparse, urlsplit
+from urllib.request import url2pathname
 from uuid import uuid4
 
 import jwt
@@ -82,6 +83,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from integrations.asr import ASRClient
 from integrations.contracts import (
     MemoryIntent,
     MemoryRecord,
@@ -404,6 +406,9 @@ class MicroBatchJobStatus(BaseModel):
     events_sync_status: str
     error_message: str | None = None
     audio_duration_ms: int | None = None
+    transcript: str | None = None
+    transcription_status: str = "pending"
+    transcription_error: str | None = None
 
 
 class MicroBatchTrend(BaseModel):
@@ -445,6 +450,11 @@ class MicroJobDetail(BaseModel):
     audio_duration_ms: int | None
     error_message: str | None
     degradation: str | None
+    transcript: str | None = None
+    transcription_language: str | None = None
+    transcription_status: str = "pending"
+    transcription_error: str | None = None
+    transcribed_at: datetime | None = None
 
 
 class MicroEventIngestResult(BaseModel):
@@ -2763,6 +2773,58 @@ def submit_micro_job(job_id: str) -> None:
         db.close()
 
 
+def transcribe_micro_job(job_id: str) -> None:
+    """Transcribe a persisted recording without changing micro-signal evidence."""
+
+    db = SessionLocal()
+    try:
+        job = db.query(MicroDetectionJob).filter_by(id=job_id).first()
+        if job is None or job.transcription_status == "completed":
+            return
+        client = ASRClient()
+        if not client.configured:
+            job.transcription_status = "unavailable"
+            job.transcription_error = "ASR 服务未配置。"
+            db.commit()
+            return
+        parsed = urlparse(job.audio_uri)
+        if parsed.scheme != "file":
+            job.transcription_status = "failed"
+            job.transcription_error = "ASR 仅支持 ECHO 本地录音文件。"
+            db.commit()
+            return
+        audio_path = Path(url2pathname(unquote(parsed.path)))
+        if os.name == "nt" and len(str(audio_path)) >= 3 and str(audio_path)[0] == "/":
+            audio_path = Path(str(audio_path)[1:])
+        job.transcription_status = "processing"
+        job.transcription_error = None
+        db.commit()
+        try:
+            result = client.transcribe_file(audio_path)
+        except IntegrationTransientError as exc:
+            job.transcription_status = "unavailable"
+            job.transcription_error = str(exc)
+        except (IntegrationContractError, IntegrationUnavailable, OSError, ValueError) as exc:
+            job.transcription_status = "failed"
+            job.transcription_error = str(exc)
+        else:
+            job.transcript = result["text"]
+            job.transcription_language = result.get("language")
+            job.transcription_status = "completed"
+            job.transcribed_at = datetime.now()
+            job.transcription_error = None
+        db.commit()
+    finally:
+        db.close()
+
+
+def process_micro_job(job_id: str) -> None:
+    """Run detector submission and ASR for one recording as one queued task."""
+
+    submit_micro_job(job_id)
+    transcribe_micro_job(job_id)
+
+
 def save_audio_file(job_id: str, audio: UploadFile) -> tuple[Path, str, int]:
     """Validate and stream an audio upload while computing its complete hash."""
 
@@ -3011,7 +3073,7 @@ def create_micro_job(
         raise HTTPException(status_code=500, detail="failed to save micro detection job") from exc
     retry_scheduled = False
     if creation.is_created:
-        background_tasks.add_task(submit_micro_job, job.id)
+        background_tasks.add_task(process_micro_job, job.id)
     elif job.status == "awaiting_detector" and not job.external_job_id:
         retry_scheduled = queue_awaiting_micro_job_retry(db, job, background_tasks)
     if (
@@ -3162,7 +3224,7 @@ def create_mentor_batch(
         cleanup_audio_files(created_paths)
         raise HTTPException(status_code=500, detail="failed to save mentor batch") from exc
     for job in created_jobs:
-        background_tasks.add_task(submit_micro_job, job.id)
+        background_tasks.add_task(process_micro_job, job.id)
     for job in retry_jobs:
         queue_awaiting_micro_job_retry(db, job, background_tasks)
     for job in jobs:
@@ -3226,6 +3288,9 @@ def get_mentor_batch(
                 "events_sync_status": job.events_sync_status,
                 "error_message": job.error_message,
                 "audio_duration_ms": job.audio_duration_ms,
+                "transcript": job.transcript,
+                "transcription_status": job.transcription_status,
+                "transcription_error": job.transcription_error,
             }
             for link in links
             if (job := jobs_by_id.get(link.job_id)) is not None
@@ -3269,7 +3334,7 @@ def queue_awaiting_micro_job_retry(
         return False
     db.commit()
     db.refresh(job)
-    background_tasks.add_task(submit_micro_job, job.id)
+    background_tasks.add_task(process_micro_job, job.id)
     return True
 
 
@@ -3329,6 +3394,11 @@ def get_micro_job(
         "audio_duration_ms": job.audio_duration_ms,
         "error_message": job.error_message,
         "degradation": degradation,
+        "transcript": job.transcript,
+        "transcription_language": job.transcription_language,
+        "transcription_status": job.transcription_status,
+        "transcription_error": job.transcription_error,
+        "transcribed_at": job.transcribed_at,
     }
 
 
