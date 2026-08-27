@@ -40,13 +40,16 @@ from database import (
     GeneratedResource,
     KnowledgeBase,
     KnowledgePoint,
+    KnowledgePointReviewState,
     LearnerAbility,
     LearningDecision,
+    MemoryAudit,
     Message,
     MicroDetectionJob,
     MicroMentorBatch,
     MicroMentorBatchJob,
     MicroRepresentationEvent,
+    MirtDailyModuleStats,
     Organization,
     Quiz,
     SessionLocal,
@@ -57,6 +60,7 @@ from database import (
     TurnStatus,
     Upload,
     User,
+    UserDataDeletionJob,
     UserRole,
     VerificationResult,
     VideoAnalysisJob,
@@ -80,7 +84,9 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from integrations.contracts import (
     MemoryIntent,
+    MemoryRecord,
     MemorySearchRequest,
+    MemoryType,
     MicroDetectionRequest,
     MicroSource,
 )
@@ -104,6 +110,12 @@ from integrations.micro_sync import (
 from integrations.punditrag import PunditRAGClient
 from integrations.simplemem import SimpleMemClient
 from MIRT.analysis_agent import LearnerInsightService
+from MIRT.memory_service import (
+    LearnerMemoryService,
+    MemoryCandidate,
+    MemoryEvidence,
+    MemoryEvidenceType,
+)
 from MIRT.mirt_daily_stats import build_daily_series
 from passlib.context import CryptContext
 from pydantic import BaseModel, Field
@@ -120,6 +132,7 @@ from Quiz.import_from_document import (
     validate_quiz_item,
 )
 from resource_generation import (
+    RESOURCE_TYPES,
     ContentVerificationAgent,
     ResourceGenerationAgent,
     build_personalization_plan,
@@ -247,6 +260,7 @@ class ChatRequest(BaseModel):
     request_id: str = Field(default_factory=lambda: uuid4().hex, max_length=64)
     program_id: int | None = None
     module_id: int | None = None
+    knowledge_point_id: int | None = None
     requested_module_id: int | None = None
 
 
@@ -280,6 +294,55 @@ class ResourceRequest(BaseModel):
     user_id: int
     module_id: int
     knowledge_point_id: int | None = None
+    resource_type: Literal["custom_note", "practice_guide", "staged_test"] | None = None
+    request_id: str = Field(default_factory=lambda: uuid4().hex, max_length=64)
+
+
+class LearningFeedbackRequest(BaseModel):
+    user_id: int
+    module_id: int
+    session_id: int | None = None
+    knowledge_point_id: int | None = None
+    memory_type: Literal["learning_preference", "intervention_outcome"]
+    content: str = Field(min_length=1, max_length=2000)
+    evidence: list[MemoryEvidence] = Field(min_length=2, max_length=50)
+    request_id: str = Field(default_factory=lambda: uuid4().hex, max_length=64)
+
+
+class DataDeletionRequest(BaseModel):
+    request_id: str = Field(default_factory=lambda: uuid4().hex, max_length=64)
+    confirm: bool = Field(description="必须显式确认删除用户级学习数据")
+
+
+class EvaluationProfileRequest(BaseModel):
+    user_id: int
+    module_id: int
+    profile_id: Literal["P1", "P2", "P3"]
+
+
+class EvaluationQuizContextRequest(BaseModel):
+    user_id: int
+    module_id: int
+    knowledge_point_id: int
+    source_url: str = Field(min_length=1, max_length=500)
+
+
+def load_evaluation_profile_definitions() -> tuple[dict[str, dict[str, Any]], str]:
+    """Load the frozen P1/P2/P3 inputs used only by the gated evaluation API."""
+
+    path = API_DIR.parents[1] / "docs" / "member-c" / "learner-profile-samples.json"
+    if not path.is_file():
+        raise HTTPException(status_code=503, detail="固定学习者画像文件不存在")
+    raw = path.read_bytes()
+    payload = json.loads(raw.decode("utf-8-sig"))
+    profiles = {
+        str(item.get("profile_id")): item
+        for item in payload.get("profiles", [])
+        if isinstance(item, dict) and item.get("profile_id")
+    }
+    if set(profiles) != {"P1", "P2", "P3"}:
+        raise HTTPException(status_code=503, detail="固定学习者画像文件不完整")
+    return profiles, hashlib.sha256(raw).hexdigest()
 
 
 class UserRoleUpdate(BaseModel):
@@ -1135,6 +1198,240 @@ def clear_messages(
     return {"status": "ok"}
 
 
+@app.post("/v1/users/me/data-deletion")
+def request_user_data_deletion(
+    request: DataDeletionRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """Delete one learner's owned data and synchronize external stores."""
+
+    if not request.confirm:
+        raise HTTPException(status_code=400, detail="必须明确确认删除用户级学习数据")
+    existing = db.query(UserDataDeletionJob).filter_by(request_id=request.request_id).first()
+    if existing is not None:
+        if existing.user_id != user.id:
+            raise HTTPException(status_code=403, detail="删除请求不属于当前用户")
+        return {
+            "request_id": existing.request_id,
+            "status": existing.status,
+            "result": existing.result,
+            "error_message": existing.error_message,
+        }
+
+    job = UserDataDeletionJob(
+        id=uuid4().hex,
+        request_id=request.request_id,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        status="processing",
+        result={},
+    )
+    db.add(job)
+    db.commit()
+
+    result: dict[str, Any] = {
+        "local": {},
+        "simplemem": [],
+        "punditrag": [],
+        "files": {"deleted": 0, "failed": []},
+    }
+    errors: list[str] = []
+    try:
+        sessions = db.query(ChatSession).filter_by(user_id=user.id).all()
+        session_ids = [item.id for item in sessions]
+        resource_rows = db.query(GeneratedResource).filter_by(user_id=user.id).all()
+        resource_ids = [item.id for item in resource_rows]
+        upload_rows = db.query(Upload).filter_by(user_id=user.id).all()
+        upload_paths = [str(item.filepath or "") for item in upload_rows]
+        external_documents = [
+            str(item.external_document_id)
+            for item in upload_rows
+            if item.external_document_id
+        ]
+        owned_videos = db.query(CourseVideo).filter_by(uploaded_by_user_id=user.id).all()
+        owned_video_ids = [item.id for item in owned_videos]
+        owned_video_paths = [str(item.filepath or "") for item in owned_videos]
+        micro_jobs = db.query(MicroDetectionJob).filter(
+            or_(
+                MicroDetectionJob.learner_id == user.id,
+                MicroDetectionJob.created_by_user_id == user.id,
+            )
+        ).all()
+        micro_job_ids = [item.id for item in micro_jobs]
+        owned_batches = db.query(MicroMentorBatch).filter_by(created_by_user_id=user.id).all()
+        owned_batch_ids = [item.id for item in owned_batches]
+
+        if session_ids:
+            db.query(MicroRepresentationEvent).filter(
+                MicroRepresentationEvent.session_id.in_(session_ids)
+            ).delete(synchronize_session=False)
+            db.query(LearningDecision).filter(
+                LearningDecision.session_id.in_(session_ids)
+            ).delete(synchronize_session=False)
+            db.query(TurnExecution).filter(
+                TurnExecution.session_id.in_(session_ids)
+            ).delete(synchronize_session=False)
+            db.query(Message).filter(Message.session_id.in_(session_ids)).delete(
+                synchronize_session=False
+            )
+        if micro_job_ids:
+            db.query(MicroMentorBatchJob).filter(
+                MicroMentorBatchJob.job_id.in_(micro_job_ids)
+            ).delete(synchronize_session=False)
+            db.query(MicroRepresentationEvent).filter(
+                MicroRepresentationEvent.job_id.in_(micro_job_ids)
+            ).delete(synchronize_session=False)
+            db.query(MicroDetectionJob).filter(
+                MicroDetectionJob.id.in_(micro_job_ids)
+            ).delete(synchronize_session=False)
+        if owned_batch_ids:
+            db.query(MicroMentorBatchJob).filter(
+                MicroMentorBatchJob.batch_id.in_(owned_batch_ids)
+            ).delete(synchronize_session=False)
+            db.query(MicroMentorBatch).filter(
+                MicroMentorBatch.id.in_(owned_batch_ids)
+            ).delete(synchronize_session=False)
+        db.query(VideoProgress).filter_by(user_id=user.id).delete(synchronize_session=False)
+        if owned_video_ids:
+            db.query(VideoCheckpoint).filter(
+                VideoCheckpoint.video_id.in_(owned_video_ids)
+            ).delete(synchronize_session=False)
+            db.query(VideoAnalysisJob).filter(
+                VideoAnalysisJob.video_id.in_(owned_video_ids)
+            ).delete(synchronize_session=False)
+            db.query(CourseVideo).filter(
+                CourseVideo.id.in_(owned_video_ids)
+            ).delete(synchronize_session=False)
+        if resource_ids:
+            db.query(VerificationResult).filter(
+                VerificationResult.resource_id.in_(resource_ids)
+            ).delete(synchronize_session=False)
+        db.query(StudentQuestionHistory).filter_by(user_id=user.id).delete(
+            synchronize_session=False
+        )
+        db.query(LearnerAbility).filter_by(user_id=user.id).delete(
+            synchronize_session=False
+        )
+        db.query(KnowledgePointReviewState).filter_by(user_id=user.id).delete(
+            synchronize_session=False
+        )
+        db.query(MirtDailyModuleStats).filter_by(user_id=user.id).delete(
+            synchronize_session=False
+        )
+        db.query(GeneratedResource).filter_by(user_id=user.id).delete(
+            synchronize_session=False
+        )
+        db.query(Upload).filter_by(user_id=user.id).delete(synchronize_session=False)
+        db.query(MemoryAudit).filter_by(user_id=user.id).update(
+            {MemoryAudit.memory_record: None, MemoryAudit.reason: "user data deleted"},
+            synchronize_session=False,
+        )
+        for session in sessions:
+            db.delete(session)
+        db.commit()
+        result["local"] = {
+            "sessions": len(session_ids),
+            "resources": len(resource_ids),
+            "uploads": len(upload_rows),
+            "quiz_attempts": "deleted",
+            "abilities": "deleted",
+            "micro_jobs": len(micro_job_ids),
+            "mentor_batches": len(owned_batch_ids),
+            "video_progress": "deleted",
+            "owned_videos": len(owned_video_ids),
+        }
+
+        root = UPLOAD_DIR.resolve()
+        for raw_path in [*upload_paths, *owned_video_paths]:
+            if not raw_path:
+                continue
+            path = Path(raw_path).resolve()
+            if not str(path).startswith(str(root) + os.sep):
+                errors.append(f"拒绝删除上传目录外文件：{path}")
+                continue
+            try:
+                if path.is_file():
+                    path.unlink()
+                    result["files"]["deleted"] += 1
+            except OSError as exc:
+                result["files"]["failed"].append(str(path))
+                errors.append(f"文件删除失败：{exc}")
+
+        modules = (
+            db.query(TrainingModule)
+            .join(TrainingProgram, TrainingProgram.id == TrainingModule.program_id)
+            .filter(TrainingProgram.organization_id == user.organization_id)
+            .all()
+        )
+        memory_client = SimpleMemClient()
+        if memory_client.configured:
+            for module in modules:
+                try:
+                    result["simplemem"].append(
+                        memory_client.purge_scope(
+                            organization_id=user.organization_id,
+                            user_id=user.id,
+                            program_id=module.program_id,
+                            module_id=module.id,
+                        )
+                    )
+                except (IntegrationUnavailable, ValueError) as exc:
+                    errors.append(f"SimpleMem 删除失败（模块 {module.id}）：{exc}")
+        else:
+            errors.append("SimpleMem 未配置，无法完成外部记忆删除")
+
+        pundit = PunditRAGClient()
+        if pundit.import_configured:
+            for document_id in external_documents:
+                try:
+                    result["punditrag"].append(pundit.delete_document(document_id))
+                except (IntegrationUnavailable, ValueError) as exc:
+                    errors.append(f"PunditRAG 删除失败（文档 {document_id}）：{exc}")
+        elif external_documents:
+            errors.append("PunditRAG 未配置，无法完成用户材料外部删除")
+
+        job.status = "completed_with_degradation" if errors else "completed"
+        job.result = result
+        job.error_message = "；".join(errors) if errors else None
+        job.completed_at = datetime.now()
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        job = db.query(UserDataDeletionJob).filter_by(id=job.id).first()
+        if job is not None:
+            job.status = "failed"
+            job.error_message = str(exc)
+            job.completed_at = datetime.now()
+            db.commit()
+        raise HTTPException(status_code=500, detail="用户数据删除失败，已记录任务状态") from exc
+    return {
+        "request_id": request.request_id,
+        "status": job.status,
+        "result": result,
+        "error_message": job.error_message,
+    }
+
+
+@app.get("/v1/users/me/data-deletion/{request_id}")
+def get_user_data_deletion(
+    request_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    job = db.query(UserDataDeletionJob).filter_by(request_id=request_id, user_id=user.id).first()
+    if job is None:
+        raise HTTPException(status_code=404, detail="删除请求不存在")
+    return {
+        "request_id": job.request_id,
+        "status": job.status,
+        "result": job.result,
+        "error_message": job.error_message,
+        "requested_at": job.requested_at.isoformat(),
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+    }
+
+
 def create_session(db: Session, user: User, request: ChatRequest) -> ChatSession:
     program, default_module = default_context(db)
     module = default_module
@@ -1227,6 +1524,7 @@ def enrich_official_evidence(
                 "source_url": upload.source_url,
                 "source_section": upload.source_section,
                 "version": upload.source_version,
+                "document_id": external_document_id,
                 "knowledge_base_id": knowledge_base_id,
                 "module_id": module_id,
             }
@@ -1252,15 +1550,57 @@ def search_official_evidence(
     client = PunditRAGClient()
     if not client.configured:
         return [], "PunditRAG查询服务未配置"
-    try:
-        raw_evidence = client.search(
-            query,
-            knowledge_base_id,
-            module_id,
-            external_knowledge_base_id=knowledge_base.external_ref,
-            trace_id=trace_id,
-            knowledge_point_ids=knowledge_point_ids,
+    allowed_document_ids = [
+        str(value)
+        for (value,) in (
+            db.query(Upload.external_document_id)
+            .filter(
+                Upload.knowledge_base_id == knowledge_base_id,
+                Upload.module_id == module_id,
+                Upload.index_status == "completed",
+                Upload.external_document_id.isnot(None),
+            )
+            .all()
         )
+        if value
+    ]
+    if not allowed_document_ids:
+        return [], "当前模块没有已完成索引的Microsoft官方材料"
+    search_queries = [query]
+    if knowledge_point_ids:
+        points = (
+            db.query(KnowledgePoint)
+            .filter(
+                KnowledgePoint.module_id == module_id,
+                KnowledgePoint.id.in_(knowledge_point_ids),
+            )
+            .order_by(KnowledgePoint.sequence, KnowledgePoint.id)
+            .all()
+        )
+        fallback_query = " ".join(
+            dict.fromkeys(
+                value.strip()
+                for point in points
+                for value in (point.code or "", point.name or "")
+                if value.strip()
+            )
+        )
+        if fallback_query and fallback_query.casefold() != query.strip().casefold():
+            search_queries.append(fallback_query)
+    try:
+        raw_evidence: list[dict] = []
+        for search_query in search_queries:
+            raw_evidence = client.search(
+                search_query,
+                knowledge_base_id,
+                module_id,
+                external_knowledge_base_id=knowledge_base.external_ref,
+                external_document_ids=allowed_document_ids,
+                trace_id=trace_id,
+                knowledge_point_ids=knowledge_point_ids,
+            )
+            if raw_evidence:
+                break
     except (IntegrationUnavailable, ValueError) as exc:
         return [], str(exc)
     evidence = enrich_official_evidence(
@@ -1274,7 +1614,13 @@ def search_official_evidence(
     return evidence, None
 
 
-def safe_retrieve(db: Session, plan, query: str) -> tuple[list[dict], str | None]:
+def safe_retrieve(
+    db: Session,
+    plan,
+    query: str,
+    *,
+    knowledge_point_ids: list[int] | None = None,
+) -> tuple[list[dict], str | None]:
     if not plan.use_rag:
         return [], None
     return search_official_evidence(
@@ -1283,6 +1629,7 @@ def safe_retrieve(db: Session, plan, query: str) -> tuple[list[dict], str | None
         knowledge_base_id=plan.context.knowledge_base_id,
         module_id=plan.context.module_id,
         trace_id=plan.trace_id,
+        knowledge_point_ids=knowledge_point_ids,
     )
 
 
@@ -1321,8 +1668,45 @@ def _module_memory_query(
 
 
 def extract_answer(text: str) -> str:
-    normalized = re.sub(r"^(答案是|我的答案是|我选|提交答案)[:：]?", "", text.strip())
+    normalized = re.sub(
+        r"^(?:(?:答对后|重复提交)[:：]?\s*)?"
+        r"(?:答案是|我的答案是|我提交的答案(?:是)?|我选择|我选|提交答案)[:：]?\s*",
+        "",
+        text.strip(),
+    )
     return normalized.strip()
+
+
+def fixed_quiz_source(db: Session, session: ChatSession, quiz: Quiz) -> dict[str, Any] | None:
+    """Return registered provenance for a scored fixed question, not a RAG hit."""
+
+    source_url = str(quiz.source_url or "").strip()
+    if not source_url or not is_official_microsoft_source_url(source_url):
+        return None
+    normalized_url = source_url.rstrip("/")
+    upload = next(
+        (
+            item
+            for item in db.query(Upload)
+            .filter_by(
+                knowledge_base_id=session.knowledge_base_id,
+                module_id=session.module_id,
+                index_status="completed",
+            )
+            .all()
+            if str(item.source_url or "").strip().rstrip("/") == normalized_url
+        ),
+        None,
+    )
+    return {
+        "source_title": quiz.source_title or (upload.source_title if upload else None),
+        "source_url": source_url,
+        "source_section": quiz.source_section or (upload.source_section if upload else None),
+        "source_version": upload.source_version if upload else None,
+        "document_id": upload.external_document_id if upload else None,
+        "chunk_id": None,
+        "evidence_origin": "fixed_quiz_source",
+    }
 
 
 def requested_quiz_purpose(text: str) -> Literal[
@@ -1340,6 +1724,77 @@ def requested_quiz_purpose(text: str) -> Literal[
     if "阶段" in normalized:
         return "stage_test"
     return None
+
+
+def _persist_misconception_feedback(
+    db: Session,
+    *,
+    user: User,
+    session: ChatSession,
+    quiz: Quiz,
+    request_id: str,
+    trace_id: str,
+) -> dict[str, Any]:
+    """Create stable misconception memory only after two distinct wrong attempts."""
+
+    rows = (
+        db.query(StudentQuestionHistory)
+        .filter_by(user_id=user.id, question_id=quiz.id, is_correct=False)
+        .order_by(StudentQuestionHistory.created_at.desc())
+        .limit(2)
+        .all()
+    )
+    if len(rows) < 2:
+        return {
+            "operation": "create",
+            "status": "rejected",
+            "reason": "稳定误区至少需要两个不同的错误作答证据。",
+            "memory_record": None,
+        }
+    evidence = [
+        MemoryEvidence(
+            reference_id=row.attempt_id,
+            evidence_type=MemoryEvidenceType.SCORED_ATTEMPT,
+            occurred_at=(row.created_at.replace(tzinfo=UTC) if row.created_at.tzinfo is None else row.created_at),
+            attempt_id=row.attempt_id,
+            question_id=quiz.id,
+            knowledge_point_id=quiz.knowledge_point_id,
+            is_correct=False,
+            score=row.score,
+            misconception_key=f"question-{quiz.id}",
+            session_id=row.session_id,
+            confidence=1.0,
+        )
+        for row in reversed(rows)
+    ]
+    candidate = MemoryCandidate(
+        organization_id=user.organization_id,
+        user_id=user.id,
+        program_id=session.program_id,
+        module_id=session.module_id,
+        knowledge_point_id=quiz.knowledge_point_id,
+        session_id=session.id,
+        content=f"在“{quiz.knowledge_point.name}”相关题目中重复出现同类错误理解。",
+        memory_type=MemoryType.MISCONCEPTION,
+        evidence=evidence,
+        metadata={"trace_id": trace_id, "request_id": request_id},
+    )
+    lifecycle = LearnerMemoryService().create(candidate)
+    payload = lifecycle.to_dict()
+    record = payload.get("memory_record")
+    db.add(
+        MemoryAudit(
+            id=uuid4().hex,
+            request_id=request_id,
+            organization_id=user.organization_id,
+            user_id=user.id,
+            operation=payload["operation"],
+            status=payload["status"],
+            memory_record=record,
+            reason=payload.get("reason"),
+        )
+    )
+    return payload
 
 
 def recommended_quiz_purpose(progress: AssessmentProgress) -> Literal[
@@ -1383,6 +1838,20 @@ def execute_turn(
     content = ""
     payload: dict = {}
     degradation: list[str] = []
+    analysis_started_at = datetime.now(UTC)
+    analysis_output = LearnerInsightService(db).build_profile(user.id, session.module_id)
+    analysis_finished_at = datetime.now(UTC)
+    generation_started_at = datetime.now(UTC)
+    requested_point = None
+    misconception_feedback_quiz: Quiz | None = None
+    if request.knowledge_point_id is not None:
+        requested_point = (
+            db.query(KnowledgePoint)
+            .filter_by(id=request.knowledge_point_id, module_id=session.module_id)
+            .first()
+        )
+        if requested_point is None:
+            raise ValueError("知识点不属于当前培训模块。")
 
     if action is PrimaryAction.RESPOND_GREETING:
         content = f"你好，当前学习模块是“{session.module.name}”。可以直接提出知识问题、请求测验或进行语音讲解。"
@@ -1428,6 +1897,7 @@ def execute_turn(
                 quiz = AdaptiveEngine(db).get_adaptive_question(
                     user.id,
                     session.module_id,
+                    knowledge_point_id=(requested_point.id if requested_point else None),
                     purpose=purpose,
                 )
                 if quiz is not None:
@@ -1459,6 +1929,8 @@ def execute_turn(
             stage=session.echo_state,
         )
         session.active_quiz_id = None
+        if not grade.is_correct and quiz.counts_for_mirt:
+            misconception_feedback_quiz = quiz
         payload["assessment"] = {
             "is_correct": grade.is_correct,
             "score": grade.score,
@@ -1467,6 +1939,24 @@ def execute_turn(
             "updated": updated,
             "ability": {"U": ability.U, "A": ability.A, "R": ability.R},
         }
+        assessment_source = fixed_quiz_source(db, session, quiz)
+        if assessment_source is not None:
+            payload["assessment"]["source"] = assessment_source
+        evidence, rag_error = search_official_evidence(
+            db,
+            query=" ".join(
+                value
+                for value in (quiz.content, quiz.source_title, quiz.source_section)
+                if value
+            ),
+            knowledge_base_id=session.knowledge_base_id,
+            module_id=session.module_id,
+            trace_id=plan.trace_id,
+            knowledge_point_ids=[quiz.knowledge_point_id],
+        )
+        payload["evidence"] = evidence
+        if rag_error:
+            degradation.append(rag_error)
         if grade.is_correct:
             content = (
                 "回答正确，能力画像已更新。"
@@ -1475,8 +1965,28 @@ def execute_turn(
             )
         else:
             content = f"本题需要巩固。参考要点：{quiz.answer}"
+        if evidence:
+            metadata = evidence[0].get("metadata") or {}
+            source_label = metadata.get("source_title") or metadata.get("title")
+            source_section = metadata.get("source_section") or metadata.get("chapter")
+            content += f"\n\n依据：[1] {source_label} - {source_section}"
+        elif assessment_source is not None:
+            content += (
+                f"\n\n依据：[1] {assessment_source['source_title']} - "
+                f"{assessment_source['source_section']}"
+            )
     elif action is PrimaryAction.LEARNING_DIALOGUE:
-        evidence, rag_error = safe_retrieve(db, plan, request.user_input)
+        retrieval_query = request.user_input
+        knowledge_point_ids = None
+        if requested_point is not None:
+            retrieval_query = f"{requested_point.name} {request.user_input}"
+            knowledge_point_ids = [requested_point.id]
+        evidence, rag_error = safe_retrieve(
+            db,
+            plan,
+            retrieval_query,
+            knowledge_point_ids=knowledge_point_ids,
+        )
         memories, memory_error = safe_memories(plan, user, request.user_input)
         if rag_error:
             degradation.append(rag_error)
@@ -1506,6 +2016,7 @@ def execute_turn(
         user_id=user.id,
         module_id=session.module_id,
     ).progress(active_quiz_id=session.active_quiz_id).public_payload()
+    generation_finished_at = datetime.now(UTC)
 
     db.add(
         Message(
@@ -1553,6 +2064,78 @@ def execute_turn(
             evidence_refs=[ref for ref in evidence_refs if ref],
         )
     )
+    validation_started_at = datetime.now(UTC)
+    validation_issues: list[str] = []
+    if plan.use_rag and not payload.get("evidence"):
+        validation_issues.append("需要专业知识的对话未获得可追溯官方证据")
+    if action is PrimaryAction.GRADE_ANSWER and not payload.get("assessment"):
+        validation_issues.append("服务端判分结果缺失")
+    if (
+        action is PrimaryAction.GRADE_ANSWER
+        and payload.get("assessment")
+        and not payload["assessment"].get("source")
+        and not payload.get("evidence")
+    ):
+        validation_issues.append("固定题判分结果缺少官方出处")
+    if not content.strip():
+        validation_issues.append("最终回复为空")
+    validation_finished_at = datetime.now(UTC)
+    next_action_started_at = datetime.now(UTC)
+    result["agent_records"] = {
+        "analysis": {
+            "status": "completed",
+            "input_summary": {
+                "user_id": user.id,
+                "module_id": session.module_id,
+                "active_quiz_id": plan.context.active_quiz_id,
+                "echo_state": plan.context.echo_state,
+            },
+            "output": analysis_output,
+            "failure_reason": None,
+            "started_at": analysis_started_at.isoformat(),
+            "finished_at": analysis_finished_at.isoformat(),
+            "persisted_in_system": True,
+        },
+        "generation": {
+            "status": "completed_with_degradation" if degradation else "completed",
+            "input_summary": {
+                "primary_action": plan.primary_action.value,
+                "use_rag": plan.use_rag,
+                "use_memory": plan.use_memory,
+            },
+            "output": {"content": content, "payload": payload, "degradation": degradation},
+            "failure_reason": "；".join(degradation) if degradation else None,
+            "started_at": generation_started_at.isoformat(),
+            "finished_at": generation_finished_at.isoformat(),
+            "persisted_in_system": True,
+        },
+        "validation": {
+            "status": "failed" if validation_issues else "completed",
+            "input_summary": {
+                "primary_action": plan.primary_action.value,
+                "evidence_count": len(payload.get("evidence") or []),
+            },
+            "output": {"passed": not validation_issues, "issues": validation_issues},
+            "failure_reason": "；".join(validation_issues) if validation_issues else None,
+            "started_at": validation_started_at.isoformat(),
+            "finished_at": validation_finished_at.isoformat(),
+            "persisted_in_system": True,
+        },
+        "next_action": {
+            "status": "completed",
+            "input_summary": {"intent": plan.intent.value, "trace_id": plan.trace_id},
+            "output": {
+                "primary_action": plan.primary_action.value,
+                "reason": plan.reason,
+                "assessment_progress": payload["assessment_progress"],
+                "resulting_echo_state": session.echo_state,
+            },
+            "failure_reason": None,
+            "started_at": next_action_started_at.isoformat(),
+            "finished_at": datetime.now(UTC).isoformat(),
+            "persisted_in_system": True,
+        },
+    }
     execution.status = (
         TurnStatus.COMPLETED_WITH_DEGRADATION.value
         if degradation
@@ -1561,6 +2144,19 @@ def execute_turn(
     execution.result = result
     execution.finished_at = datetime.now()
     db.commit()
+    if misconception_feedback_quiz is not None:
+        memory_feedback = _persist_misconception_feedback(
+            db,
+            user=user,
+            session=session,
+            quiz=misconception_feedback_quiz,
+            request_id=request.request_id,
+            trace_id=plan.trace_id,
+        )
+        result["payload"]["memory_feedback"] = memory_feedback
+        result["agent_records"]["analysis"]["output"]["memory_feedback"] = memory_feedback
+        execution.result = result
+        db.commit()
     return result
 
 
@@ -1877,6 +2473,239 @@ def learning_insight(
     )
     profile["degradation"] = [memory_error] if memory_error else []
     return profile
+
+
+@app.post("/v1/evaluation/learner-profile")
+def initialize_evaluation_learner_profile(
+    request: EvaluationProfileRequest,
+    x_evaluation_key: Annotated[str | None, Header(alias="X-Evaluation-Key")] = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """Materialize one frozen synthetic learner profile for an auditable test run.
+
+    The endpoint is absent unless a deployment explicitly sets a strong
+    ``EVALUATION_PROFILE_SEED_KEY``. It may only initialize the authenticated
+    learner's own synthetic account and is not part of the production flow.
+    """
+
+    configured_key = os.getenv("EVALUATION_PROFILE_SEED_KEY", "").strip()
+    if not configured_key:
+        raise HTTPException(status_code=404, detail="评测画像初始化未启用")
+    if not x_evaluation_key or not hmac.compare_digest(x_evaluation_key, configured_key):
+        raise HTTPException(status_code=403, detail="评测画像初始化密钥无效")
+    if request.user_id != user.id or user.role != UserRole.LEARNER.value:
+        raise HTTPException(status_code=403, detail="只能初始化当前评测学习者")
+
+    module = accessible_module(db, user, request.module_id)
+    profiles, source_sha256 = load_evaluation_profile_definitions()
+    profile_input = profiles[request.profile_id]
+    points = (
+        db.query(KnowledgePoint)
+        .filter_by(module_id=module.id)
+        .order_by(KnowledgePoint.sequence, KnowledgePoint.id)
+        .all()
+    )
+    if len(points) < 4:
+        raise HTTPException(status_code=409, detail="评测模块至少需要四个知识点")
+    quiz_by_point: dict[int, Quiz] = {}
+    for point in points[:4]:
+        quiz = (
+            db.query(Quiz)
+            .filter_by(
+                module_id=module.id,
+                knowledge_point_id=point.id,
+                counts_for_mirt=True,
+            )
+            .order_by(Quiz.id)
+            .first()
+        )
+        if quiz is None:
+            raise HTTPException(status_code=409, detail=f"知识点 {point.code} 没有固定题目")
+        quiz_by_point[point.id] = quiz
+
+    outcome_plan = {
+        "P1": [(0, False), (0, False), (0, True), (1, False), (1, False), (1, True)],
+        "P2": [
+            (0, True), (0, True), (0, True),
+            (1, True), (1, True), (1, True),
+            (2, False), (3, False),
+        ],
+        "P3": [
+            (0, True), (0, True), (0, True),
+            (1, True), (1, True),
+            (2, True), (2, True),
+            (3, False),
+        ],
+    }[request.profile_id]
+    module_quiz_ids = [row.id for row in db.query(Quiz.id).filter_by(module_id=module.id).all()]
+    if module_quiz_ids:
+        db.query(StudentQuestionHistory).filter(
+            StudentQuestionHistory.user_id == user.id,
+            StudentQuestionHistory.question_id.in_(module_quiz_ids),
+        ).delete(synchronize_session=False)
+    ability = (
+        db.query(LearnerAbility)
+        .filter_by(user_id=user.id, module_id=module.id)
+        .first()
+    )
+    if ability is None:
+        ability = LearnerAbility(user_id=user.id, module_id=module.id)
+        db.add(ability)
+    ability.U = float(profile_input["ability"]["U"])
+    ability.A = float(profile_input["ability"]["A"])
+    ability.R = float(profile_input["ability"]["R"])
+    ability.attempt_count = int(profile_input["attempt_count"])
+    ability.updated_at = datetime.now(UTC)
+
+    attempt_ids: list[str] = []
+    for sequence, (point_index, is_correct) in enumerate(outcome_plan, start=1):
+        point = points[point_index]
+        attempt_id = f"eval-{user.id}-{module.code}-{request.profile_id}-{sequence:02d}"
+        attempt_ids.append(attempt_id)
+        db.add(
+            StudentQuestionHistory(
+                attempt_id=attempt_id,
+                user_id=user.id,
+                question_id=quiz_by_point[point.id].id,
+                submitted_answer="[frozen synthetic evaluation input]",
+                is_correct=is_correct,
+                score=1.0 if is_correct else 0.0,
+                stage="EVAL",
+            )
+        )
+    db.commit()
+
+    memory_results: list[dict[str, Any]] = []
+    memory_items: list[dict[str, Any]] = []
+    memory_degradation: list[str] = []
+    for index, hint in enumerate(profile_input.get("memory_hints") or [], start=1):
+        memory_type = (
+            MemoryType.MISCONCEPTION
+            if request.profile_id == "P1"
+            else MemoryType.LEARNING_PREFERENCE
+        )
+        hash_input = f"{user.organization_id}:{user.id}:{module.id}:{request.profile_id}:{index}"
+        idempotency_key = hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
+        conflict_input = f"{user.organization_id}:{user.id}:{module.id}:{memory_type.value}"
+        record = MemoryRecord(
+            organization_id=user.organization_id,
+            user_id=user.id,
+            program_id=module.program_id,
+            module_id=module.id,
+            knowledge_point_id=points[0].id if memory_type is MemoryType.MISCONCEPTION else None,
+            content=str(hint),
+            memory_type=memory_type,
+            idempotency_key=idempotency_key,
+            conflict_key=hashlib.sha256(conflict_input.encode("utf-8")).hexdigest(),
+            confidence=1.0,
+            evidence_refs=attempt_ids[:3],
+            metadata={
+                "source": "frozen_evaluation_profile",
+                "profile_id": request.profile_id,
+                "source_sha256": source_sha256,
+            },
+        )
+        try:
+            memory_results.append(SimpleMemClient().upsert(record))
+            memory_items.append(
+                {
+                    "content": record.content,
+                    "memory_type": record.memory_type.value,
+                    "evidence_refs": record.evidence_refs,
+                }
+            )
+        except IntegrationUnavailable as exc:
+            memory_degradation.append(str(exc))
+
+    initialized_profile = LearnerInsightService(db).build_profile(
+        user.id,
+        module.id,
+        memory_items=memory_items,
+    )
+    actual_profile_type = (
+        initialized_profile["views"]["path_and_resources"]["learner_profile"].get("type")
+    )
+    if actual_profile_type != request.profile_id:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"评测画像初始化后分类不一致：expected={request.profile_id}, "
+                f"actual={actual_profile_type}"
+            ),
+        )
+    return {
+        "profile_id": request.profile_id,
+        "source_sha256": source_sha256,
+        "module_id": module.id,
+        "attempt_ids": attempt_ids,
+        "memory_results": memory_results,
+        "degradation": memory_degradation,
+        "profile": initialized_profile,
+    }
+
+
+@app.post("/v1/evaluation/quiz-context")
+def initialize_evaluation_quiz_context(
+    request: EvaluationQuizContextRequest,
+    x_evaluation_key: Annotated[str | None, Header(alias="X-Evaluation-Key")] = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """Create an isolated session with the frozen case's registered fixed quiz active."""
+
+    configured_key = os.getenv("EVALUATION_PROFILE_SEED_KEY", "").strip()
+    if not configured_key:
+        raise HTTPException(status_code=404, detail="评测题目上下文初始化未启用")
+    if not x_evaluation_key or not hmac.compare_digest(x_evaluation_key, configured_key):
+        raise HTTPException(status_code=403, detail="评测题目上下文初始化密钥无效")
+    if request.user_id != user.id or user.role != UserRole.LEARNER.value:
+        raise HTTPException(status_code=403, detail="只能初始化当前评测学习者")
+
+    module = accessible_module(db, user, request.module_id)
+    point = (
+        db.query(KnowledgePoint)
+        .filter_by(id=request.knowledge_point_id, module_id=module.id)
+        .first()
+    )
+    if point is None:
+        raise HTTPException(status_code=404, detail="评测知识点不存在")
+    normalized_source_url = request.source_url.strip().rstrip("/")
+    quiz = next(
+        (
+            item
+            for item in db.query(Quiz)
+            .filter_by(module_id=module.id, knowledge_point_id=point.id)
+            .order_by(Quiz.id)
+            .all()
+            if str(item.source_url or "").strip().rstrip("/") == normalized_source_url
+        ),
+        None,
+    )
+    if quiz is None:
+        raise HTTPException(
+            status_code=409,
+            detail="当前知识点没有与冻结案例官方来源一致的固定题",
+        )
+
+    session = ChatSession(
+        user_id=user.id,
+        program_id=module.program_id,
+        module_id=module.id,
+        knowledge_base_id=module.knowledge_base_id,
+        title=f"评测固定题：{point.name}"[:100],
+        active_quiz_id=quiz.id,
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return {
+        "session_id": session.id,
+        "module_id": module.id,
+        "knowledge_point_id": point.id,
+        "quiz": public_quiz_payload(quiz),
+        "source": fixed_quiz_source(db, session, quiz),
+    }
 
 
 def submit_micro_job(job_id: str) -> None:
@@ -2603,12 +3432,59 @@ def session_turns(
                 "intent": row.intent,
                 "primary_action": row.primary_action,
                 "status": row.status,
+                "request_id": row.request_id,
+                "plan": row.plan,
+                "result": row.result,
                 "started_at": row.started_at.isoformat(),
+                "finished_at": row.finished_at.isoformat() if row.finished_at else None,
                 "error_message": row.error_message,
             }
             for row in rows
         ]
     }
+
+
+@app.post("/v1/learning-feedback")
+def record_learning_feedback(
+    request: LearningFeedbackRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """Record confirmed preferences or intervention outcomes in SimpleMem."""
+
+    if request.user_id != user.id:
+        raise HTTPException(status_code=403, detail="无权记录其他学习者反馈")
+    module = accessible_module(db, user, request.module_id)
+    if request.session_id is not None:
+        get_owned_session(db, request.session_id, user.id)
+    candidate = MemoryCandidate(
+        organization_id=user.organization_id,
+        user_id=user.id,
+        program_id=module.program_id,
+        module_id=module.id,
+        session_id=request.session_id,
+        knowledge_point_id=request.knowledge_point_id,
+        content=request.content,
+        memory_type=MemoryType(request.memory_type),
+        evidence=request.evidence,
+        metadata={"request_id": request.request_id, "source": "explicit_learning_feedback"},
+    )
+    lifecycle = LearnerMemoryService().create(candidate)
+    payload = lifecycle.to_dict()
+    db.add(
+        MemoryAudit(
+            id=uuid4().hex,
+            request_id=request.request_id,
+            organization_id=user.organization_id,
+            user_id=user.id,
+            operation=payload["operation"],
+            status=payload["status"],
+            memory_record=payload.get("memory_record"),
+            reason=payload.get("reason"),
+        )
+    )
+    db.commit()
+    return payload
 
 
 @app.post("/v1/knowledge-bases/{knowledge_base_id}/documents")
@@ -3275,8 +4151,16 @@ def list_resources(
     if module_id is not None:
         query = query.filter(GeneratedResource.module_id == module_id)
     rows = query.order_by(GeneratedResource.created_at.desc()).limit(50).all()
-    return {
-        "items": [
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        verification_rows = (
+            db.query(VerificationResult)
+            .filter_by(resource_id=row.id)
+            .order_by(VerificationResult.retry_count, VerificationResult.created_at)
+            .all()
+        )
+        latest_verification = verification_rows[-1] if verification_rows else None
+        items.append(
             {
                 "resource_id": row.id,
                 "module_id": row.module_id,
@@ -3288,11 +4172,35 @@ def list_resources(
                 "personalization_reason": row.personalization_reason,
                 "evidence_sources": row.evidence_sources,
                 "status": row.status,
+                "verification_passed": (
+                    bool(latest_verification.passed) if latest_verification else None
+                ),
+                "verification_issues": (
+                    latest_verification.issues if latest_verification else []
+                ),
+                "verification_details": (
+                    latest_verification.details if latest_verification else {}
+                ),
+                "retry_count": (
+                    int(latest_verification.retry_count) if latest_verification else 0
+                ),
+                "verification_history": [
+                    {
+                        "passed": bool(item.passed),
+                        "factual_score": item.factual_score,
+                        "coverage_score": item.coverage_score,
+                        "difficulty_score": item.difficulty_score,
+                        "issues": item.issues,
+                        "details": item.details,
+                        "retry_count": item.retry_count,
+                        "created_at": item.created_at.isoformat(),
+                    }
+                    for item in verification_rows
+                ],
                 "created_at": row.created_at.isoformat(),
             }
-            for row in rows
-        ]
-    }
+        )
+    return {"items": items}
 
 
 @app.post("/v1/resources/generate")
@@ -3379,11 +4287,40 @@ def generate_resources(
     if point is None:
         raise HTTPException(status_code=404, detail="当前模块没有可生成资源的知识点")
 
+    session = ChatSession(
+        user_id=user.id,
+        program_id=module.program_id,
+        module_id=module.id,
+        knowledge_base_id=module.knowledge_base_id,
+        title=f"生成资源：{point.name}"[:100],
+    )
+    db.add(session)
+    db.flush()
+    trace_id = uuid4().hex
+    execution = TurnExecution(
+        id=uuid4().hex,
+        request_id=request.request_id,
+        trace_id=trace_id,
+        user_id=user.id,
+        session_id=session.id,
+        intent="RESOURCE_REQUEST",
+        primary_action="GENERATE_RESOURCE",
+        plan={
+            "module_id": module.id,
+            "knowledge_point_id": point.id,
+            "single_primary_action": True,
+        },
+    )
+    db.add(execution)
+    analysis_started_at = datetime.now(UTC)
+
     plan = build_personalization_plan(
         profile,
         knowledge_point_id=point.id,
         knowledge_point_name=point.name,
     )
+    analysis_finished_at = datetime.now(UTC)
+    generation_started_at = datetime.now(UTC)
     evidence, rag_error = search_official_evidence(
         db,
         query=f"{point.name} {plan.weakest_dimension_label}",
@@ -3395,11 +4332,22 @@ def generate_resources(
         degradation.append(f"PunditRAG：{rag_error}")
 
     sources = [item.get("metadata", {}) for item in evidence]
-    generated, generation_error = ResourceGenerationAgent().generate(plan, evidence)
+    selected_resource_type = request.resource_type or profile["views"]["path_and_resources"].get(
+        "recommended_content_format", "custom_note"
+    )
+    if selected_resource_type not in RESOURCE_TYPES:
+        selected_resource_type = "custom_note"
+    generated, generation_error = ResourceGenerationAgent().generate(
+        plan,
+        evidence,
+        resource_type=selected_resource_type,
+    )
     if generation_error:
         degradation.append(generation_error)
+    generation_finished_at = datetime.now(UTC)
 
     resources = []
+    verification_details = []
     verifier = ContentVerificationAgent()
     for item in generated:
         resource = GeneratedResource(
@@ -3416,32 +4364,241 @@ def generate_resources(
         )
         db.add(resource)
         db.flush()
-        result = verifier.verify(item, plan, evidence)
-        verification_record = VerificationResult(
+        initial_result = verifier.verify(item, plan, evidence)
+        initial_record = VerificationResult(
             id=uuid4().hex,
             resource_id=resource.id,
-            passed=result.passed,
-            factual_score=result.factual_score,
-            coverage_score=result.coverage_score,
-            difficulty_score=result.difficulty_score,
-            issues=result.issues,
+            passed=initial_result.passed,
+            factual_score=initial_result.factual_score,
+            coverage_score=initial_result.coverage_score,
+            difficulty_score=initial_result.difficulty_score,
+                    issues=initial_result.issues,
+                    details=initial_result.details,
+                    retry_count=0,
+                )
+        db.add(initial_record)
+        final_result = initial_result
+        retry_count = 0
+        if not initial_result.passed and evidence:
+            repaired = ResourceGenerationAgent.repair_failed_resource(
+                item,
+                plan,
+                evidence,
+                initial_result.issues,
+            )
+            resource.title = repaired["title"]
+            resource.content = repaired["content"]
+            final_result = verifier.verify(repaired, plan, evidence)
+            retry_count = 1
+            db.add(
+                VerificationResult(
+                    id=uuid4().hex,
+                    resource_id=resource.id,
+                    passed=final_result.passed,
+                    factual_score=final_result.factual_score,
+                    coverage_score=final_result.coverage_score,
+                    difficulty_score=final_result.difficulty_score,
+                    issues=final_result.issues,
+                    details=final_result.details,
+                    retry_count=retry_count,
+                )
+            )
+        if final_result.passed:
+            # Automated verification is not the publication gate. A mentor or
+            # administrator must explicitly publish the resource.
+            resource.status = "pending_review"
+        verification_details.append(
+            {
+                "resource_id": resource.id,
+                "resource_type": resource.resource_type,
+                "initial": {
+                    "passed": initial_result.passed,
+                    "issues": initial_result.issues,
+                },
+                "final": {
+                    "passed": final_result.passed,
+                    "issues": final_result.issues,
+                },
+                "retry_count": retry_count,
+            }
         )
-        db.add(verification_record)
-        if result.passed:
-            resource.status = "verified"
         resources.append(
             {
                 "resource_id": resource.id,
                 "resource_type": resource.resource_type,
                 "title": resource.title,
                 "status": resource.status,
-                "verification_passed": result.passed,
-                "issues": result.issues,
+                "verification_passed": final_result.passed,
+                "issues": final_result.issues,
+                "retry_count": retry_count,
             }
         )
+    validation_finished_at = datetime.now(UTC)
+    next_action_started_at = datetime.now(UTC)
+    next_action_reason = (
+        "资源已通过自动内容检查，等待讲师或管理员人工发布。"
+        if all(item["verification_passed"] for item in resources)
+        else "存在未通过检查的资源，保持草稿并等待补充证据或再次修复。"
+    )
+    execution.result = {
+        "session_id": session.id,
+        "trace_id": trace_id,
+        "primary_action": "GENERATE_RESOURCE",
+        "resource_ids": [item["resource_id"] for item in resources],
+        "degradation": degradation,
+        "agent_records": {
+            "analysis": {
+                "status": "completed",
+                "input_summary": {
+                    "user_id": user.id,
+                    "module_id": module.id,
+                    "knowledge_point_id": point.id,
+                    "memory_count": len(memories),
+                },
+                "output": {"profile": profile, "personalization_plan": plan.to_dict()},
+                "failure_reason": None,
+                "started_at": analysis_started_at.isoformat(),
+                "finished_at": analysis_finished_at.isoformat(),
+                "persisted_in_system": True,
+            },
+            "generation": {
+                "status": "completed_with_degradation" if generation_error else "completed",
+                "input_summary": {
+                    "resource_type": selected_resource_type,
+                    "official_evidence_count": len(evidence),
+                },
+                "output": {
+                    "resources": resources,
+                    "evidence_sources": sources,
+                    "generation_error": generation_error,
+                },
+                "failure_reason": generation_error,
+                "started_at": generation_started_at.isoformat(),
+                "finished_at": generation_finished_at.isoformat(),
+                "persisted_in_system": True,
+            },
+            "validation": {
+                "status": (
+                    "completed"
+                    if all(item["verification_passed"] for item in resources)
+                    else "failed"
+                ),
+                "input_summary": {"resource_count": len(resources)},
+                "output": {"items": verification_details},
+                "failure_reason": (
+                    None
+                    if all(item["verification_passed"] for item in resources)
+                    else next_action_reason
+                ),
+                "started_at": generation_finished_at.isoformat(),
+                "finished_at": validation_finished_at.isoformat(),
+                "persisted_in_system": True,
+            },
+            "next_action": {
+                "status": "completed",
+                "input_summary": {"trace_id": trace_id},
+                "output": {
+                    "primary_action": "GENERATE_RESOURCE",
+                    "reason": next_action_reason,
+                    "published_resource_count": 0,
+                    "pending_review_count": sum(
+                        1 for item in resources if item["status"] == "pending_review"
+                    ),
+                },
+                "failure_reason": None,
+                "started_at": next_action_started_at.isoformat(),
+                "finished_at": datetime.now(UTC).isoformat(),
+                "persisted_in_system": True,
+            },
+        },
+    }
+    execution.status = (
+        TurnStatus.COMPLETED_WITH_DEGRADATION.value
+        if degradation or not all(item["verification_passed"] for item in resources)
+        else TurnStatus.COMPLETED.value
+    )
+    execution.finished_at = datetime.now(UTC)
+    db.add(
+        LearningDecision(
+            id=uuid4().hex,
+            trace_id=trace_id,
+            user_id=user.id,
+            session_id=session.id,
+            module_id=module.id,
+            knowledge_point_id=point.id,
+            action="GENERATE_RESOURCE",
+            reason=next_action_reason,
+            evidence_refs=[
+                source.get("chunk_id") or source.get("external_document_id")
+                for source in sources
+                if source.get("chunk_id") or source.get("external_document_id")
+            ],
+        )
+    )
     db.commit()
     return {
         "items": resources,
         "plan": plan.to_dict(),
         "degradation": degradation,
+        "session_id": session.id,
+        "trace_id": trace_id,
+        "primary_action": "GENERATE_RESOURCE",
+        "resource_type": selected_resource_type,
     }
+
+
+@app.post("/v1/resources/{resource_id}/publish")
+def publish_resource(
+    resource_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """Publish an automatically verified resource after an explicit human gate."""
+
+    if user.role not in {UserRole.MENTOR.value, UserRole.SYSTEM_ADMIN.value}:
+        raise HTTPException(status_code=403, detail="仅讲师、导师或系统管理员可发布资源")
+    resource = (
+        db.query(GeneratedResource)
+        .join(TrainingModule, TrainingModule.id == GeneratedResource.module_id)
+        .join(TrainingProgram, TrainingProgram.id == TrainingModule.program_id)
+        .filter(
+            GeneratedResource.id == resource_id,
+            TrainingProgram.organization_id == user.organization_id,
+        )
+        .first()
+    )
+    if resource is None:
+        raise HTTPException(status_code=404, detail="资源不存在")
+    latest = (
+        db.query(VerificationResult)
+        .filter_by(resource_id=resource.id)
+        .order_by(VerificationResult.created_at.desc())
+        .first()
+    )
+    if latest is None or not latest.passed:
+        raise HTTPException(status_code=409, detail="资源未通过自动校验，不能发布")
+    if resource.status == "verified":
+        return {"status": "already_published", "resource_id": resource.id}
+    resource.status = "verified"
+    publish_session = (
+        db.query(ChatSession)
+        .filter_by(user_id=resource.user_id, module_id=resource.module_id)
+        .order_by(ChatSession.updated_at.desc())
+        .first()
+    )
+    if publish_session is not None:
+        db.add(
+            LearningDecision(
+                id=uuid4().hex,
+                trace_id=uuid4().hex,
+                user_id=resource.user_id,
+                session_id=publish_session.id,
+                module_id=resource.module_id,
+                knowledge_point_id=resource.knowledge_point_id,
+                action="PUBLISH_RESOURCE",
+                reason=f"{user.username} 完成人工发布门禁",
+                evidence_refs=[resource.id],
+            )
+        )
+    db.commit()
+    return {"status": "published", "resource_id": resource.id}

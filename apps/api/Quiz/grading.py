@@ -8,7 +8,15 @@ from dataclasses import dataclass
 
 from database import Quiz
 
-OBJECTIVE_TYPES = {"mcq", "truefalse", "singlechoice", "multiplechoice", "判断题", "选择题"}
+OBJECTIVE_TYPES = {
+    "choice",
+    "mcq",
+    "truefalse",
+    "singlechoice",
+    "multiplechoice",
+    "判断题",
+    "选择题",
+}
 
 
 @dataclass(frozen=True)

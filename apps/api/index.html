@@ -60,6 +60,7 @@
                     <img src="/web/assets/images/user-profile.jpg" alt="">
                     <div><strong id="user-name">学习者</strong><span id="user-role">learner</span></div>
                 </div>
+                <button id="delete-data-button" class="icon-button" type="button" title="删除我的学习数据"><i data-lucide="trash-2"></i></button>
                 <button id="logout-button" class="icon-button" title="退出登录"><i data-lucide="log-out"></i></button>
             </div>
         </aside>
@@ -436,6 +437,14 @@
                     <i data-lucide="arrow-right"></i>
                     <article><i data-lucide="git-branch"></i><strong>安排下一步</strong><span>下一步安排 Agent</span></article>
                 </div>
+                <section class="demo-trace-panel" aria-labelledby="demo-trace-title">
+                    <div class="panel-heading">
+                        <div><h2 id="demo-trace-title">真实协作记录</h2><span>来自当前学习会话的服务端审计</span></div>
+                        <button id="refresh-demo-trace" class="icon-button" type="button" title="刷新协作记录"><i data-lucide="refresh-cw"></i></button>
+                    </div>
+                    <div id="demo-trace-status" class="job-status">进入一个学习会话后，这里会显示 Agent 输入、输出和校验过程。</div>
+                    <div id="demo-trace-list" class="demo-trace-list"></div>
+                </section>
                 <div class="demo-metrics">
                     <article><span>幻觉率目标</span><strong>&lt; 5%</strong></article>
                     <article><span>难度适配率</span><strong>≥ 85%</strong></article>
@@ -444,6 +453,15 @@
                 </div>
             </section>
         </main>
+    </div>
+    <div id="data-deletion-panel" class="data-deletion-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="data-deletion-title">
+        <section class="data-deletion-dialog">
+            <div class="panel-heading"><div><p class="eyebrow">隐私与数据</p><h2 id="data-deletion-title">删除我的学习数据</h2></div><button id="close-deletion" class="icon-button" type="button" title="关闭"><i data-lucide="x"></i></button></div>
+            <p>此操作会删除你的会话、作答、能力画像、资源、上传材料、语音证据和长期记忆。课程正式材料不会被删除，操作不可撤销。</p>
+            <label class="consent"><input id="confirm-data-deletion" type="checkbox">我已了解并确认删除以上数据</label>
+            <div id="data-deletion-status" class="job-status">等待确认。</div>
+            <div class="data-deletion-actions"><button id="cancel-deletion" class="button secondary" type="button">取消</button><button id="submit-deletion" class="button danger" type="button" disabled><i data-lucide="trash-2"></i>确认删除</button></div>
+        </section>
     </div>
     <div id="toast" class="toast" role="status"></div>
     <script src="/web/echo-app.js?v=0.5.0"></script>

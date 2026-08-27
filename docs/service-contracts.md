@@ -270,6 +270,35 @@ ECHO 主系统对外入口：
 `resource_type`、`resource_count=1` 和 `selection_policy=single_most_needed`。三种资源是系统能力
 范围，不表示每次同时生成三份。成员 A 的生成编排必须按该唯一决定生成和校验当前资源。
 
+### 个性化资源与发布门禁
+
+`POST /v1/resources/generate` 每次只生成一个 `resource_type`（`custom_note`、`practice_guide`
+或 `staged_test`），并保存 `TurnExecution` 中四个后台 Agent 的输入摘要、输出、失败原因和
+`persisted_in_system`。资源状态枚举为 `draft`、`pending_review`、`verified`；自动检查通过后
+只能进入 `pending_review`，不得直接发布。
+
+`GET /v1/resources` 返回最近一次 `verification_passed`、`verification_issues`、
+`verification_details` 和完整 `verification_history`。检查明细至少覆盖事实声明与证据对齐、引用
+编号和官方域名、代码语法、实操步骤的 action/expected 字段，以及阶段测试的理解/应用/推理维度。
+检查失败时可以局部重做并增加 `retry_count`，每次结果独立保存。
+
+讲师或系统管理员调用 `POST /v1/resources/{resource_id}/publish` 执行人工发布门禁；只有最近一次
+自动检查通过的资源允许变为 `verified`。学习者无权发布。没有官方证据的资源保持 `draft`，不得伪造
+引用或发布。
+
+### 学习反馈与用户级删除
+
+学习者确认学习偏好或干预效果时调用 `POST /v1/learning-feedback`。业务事实先写入数据库，再由
+SimpleMem 生命周期服务尝试写入；响应和 `MemoryAudit` 必须记录 `completed`、`rejected` 或
+`degraded` 及失败原因。可评分题目连续两次对同一知识点答错后，主系统自动形成
+`misconception` 候选；第一次错误不得写入稳定误区。
+
+`POST /v1/users/me/data-deletion` 使用 `request_id` 幂等，需显式 `confirm=true`。系统删除该用户
+拥有的会话、消息、作答、U/A/R、资源、语音事件、上传文件和视频，并分别调用 SimpleMem
+`DELETE /v1/memories/scope` 与 PunditRAG `DELETE /documents/{document_id}` 清理外部数据。共享的
+正式课程材料不删除。响应状态为 `completed` 或 `completed_with_degradation`，后者必须返回外部
+失败原因；`GET /v1/users/me/data-deletion/{request_id}` 可查询审计结果。
+
 MIRT 更新接口只接受有效题目和唯一 `attempt_id`。重复编号必须返回原状态，不重复更新。
 只有作答证据支持的知识点才能标为盲区。微表征和长期记忆不能直接修改 U/A/R。
 大模型只负责把上述结果写成易懂文字；无证据时返回“暂不能判断”，模型不可用时使用固定模板。

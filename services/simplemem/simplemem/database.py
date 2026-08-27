@@ -260,6 +260,30 @@ class SimpleMemStore:
             self._audit(connection, "deleted", memory_id, scope, {})
         return {"status": "deleted", "memory_id": memory_id, **self._scope(scope)}
 
+    def purge_scope(self, scope: MemoryScope) -> dict[str, Any]:
+        """Tombstone every active memory in an exact user scope."""
+
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            rows = connection.execute(
+                """SELECT memory_id FROM memories
+                   WHERE organization_id = ? AND user_id = ? AND program_id = ?
+                     AND module_id = ? AND state = 'active'""",
+                tuple(self._scope(scope).values()),
+            ).fetchall()
+            now = _now()
+            for row in rows:
+                connection.execute(
+                    "UPDATE memories SET state = 'deleted', updated_at = ? WHERE memory_id = ?",
+                    (now, row["memory_id"]),
+                )
+                self._audit(connection, "deleted", row["memory_id"], scope, {"reason": "user_data_deletion"})
+        return {
+            "status": "deleted",
+            "deleted_count": len(rows),
+            **self._scope(scope),
+        }
+
     def search(
         self,
         scope: MemoryScope,

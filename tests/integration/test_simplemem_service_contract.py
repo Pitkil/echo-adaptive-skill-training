@@ -64,8 +64,28 @@ def test_echo_client_round_trips_against_real_simplemem_service(tmp_path) -> Non
             program_id=3,
             module_id=4,
         )
+        purged = echo_client.purge_scope(
+            organization_id=1,
+            user_id=2,
+            program_id=3,
+            module_id=4,
+        )
+        remaining = echo_client.search(
+            MemorySearchRequest(
+                organization_id=1,
+                user_id=2,
+                program_id=3,
+                module_id=4,
+                intent=MemoryIntent.LEARNER_DIAGNOSIS,
+                query="plugins agents",
+                knowledge_point_id=5,
+            )
+        )
 
     assert created["status"] == "created"
     assert items[0]["memory_id"] == created["memory_id"]
     assert items[0]["content"] == record.content
     assert authorization["allowed"] is True
+    assert purged["status"] == "deleted"
+    assert purged["deleted_count"] == 1
+    assert remaining == []

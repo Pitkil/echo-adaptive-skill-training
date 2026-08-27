@@ -653,6 +653,7 @@
             loadQuizKnowledgePoints();
         }
         if (viewName === "members") loadMembers();
+        if (viewName === "demo") loadDemoTrace();
         iconRefresh();
     }
 
@@ -752,6 +753,86 @@
     function renderTrace(meta) {
         const degraded = (meta.degradation || []).filter(Boolean);
         if (degraded.length) toast("部分辅助能力暂不可用，本轮学习记录已保留");
+        if (state.sessionId) loadDemoTrace();
+    }
+
+    function prettyJson(value, maxLength = 1400) {
+        if (value == null) return "暂无";
+        let text;
+        try {
+            text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+        } catch (_) {
+            text = String(value);
+        }
+        return text.length > maxLength ? `${text.slice(0, maxLength)}\n…` : text;
+    }
+
+    function traceAgentLabel(key) {
+        return {
+            analysis: "学习情况分析 Agent",
+            retrieval: "官方资料检索",
+            generation: "内容生成 Agent",
+            validation: "内容检查 Agent",
+            next_action: "下一步安排 Agent",
+        }[key] || key;
+    }
+
+    function traceStatusLabel(status) {
+        return {
+            completed: "已完成",
+            completed_with_degradation: "完成（有降级）",
+            failed: "失败",
+            pending: "等待",
+        }[status] || status || "未知";
+    }
+
+    async function loadDemoTrace() {
+        const status = $("#demo-trace-status");
+        const list = $("#demo-trace-list");
+        if (!status || !list) return;
+        if (!state.sessionId) {
+            status.textContent = "进入一个学习会话后，这里会显示 Agent 输入、输出和校验过程。";
+            list.innerHTML = "";
+            return;
+        }
+        status.textContent = "正在读取服务端协作记录…";
+        try {
+            const response = await api(`/v1/sessions/${state.sessionId}/turns`);
+            const payload = await response.json();
+            const turns = payload.items || [];
+            if (!turns.length) {
+                status.textContent = "当前会话还没有可展示的协作记录。";
+                list.innerHTML = "";
+                return;
+            }
+            status.textContent = `当前会话 ${turns.length} 轮，按最近发生时间排列。`;
+            list.innerHTML = turns.map((turn) => {
+                const result = turn.result || {};
+                const records = result.agent_records || {};
+                const agents = Object.entries(records).map(([key, record]) => {
+                    const output = record.output ?? record.output_summary ?? record.result;
+                    const input = record.input_summary ?? record.input;
+                    const failure = record.failure_reason;
+                    return `<article class="trace-agent">
+                        <header><strong>${escapeHtml(traceAgentLabel(key))}</strong><span class="trace-status ${record.status || ""}">${escapeHtml(traceStatusLabel(record.status))}</span></header>
+                        <dl><div><dt>输入</dt><dd><pre>${escapeHtml(prettyJson(input))}</pre></dd></div><div><dt>输出</dt><dd><pre>${escapeHtml(prettyJson(output))}</pre></dd></div></dl>
+                        ${failure ? `<p class="trace-failure">失败原因：${escapeHtml(failure)}</p>` : ""}
+                        <small>${record.persisted_in_system ? "已写入系统记录" : "未确认持久化"}</small>
+                    </article>`;
+                }).join("");
+                return `<article class="trace-turn"><header><div><span class="eyebrow">${escapeHtml(turn.primary_action || turn.intent)}</span><strong>${escapeHtml(turn.trace_id || "本轮")}</strong></div><time>${escapeHtml(formatDateTime(turn.started_at))}</time></header><div class="trace-turn-meta"><span>状态：${escapeHtml(traceStatusLabel(turn.status))}</span><span>请求：${escapeHtml(turn.request_id || "-")}</span></div>${turn.error_message ? `<p class="trace-failure">${escapeHtml(turn.error_message)}</p>` : ""}<div class="trace-agents">${agents || `<small class="muted">本轮未返回 Agent 明细。</small>`}</div></article>`;
+            }).join("");
+            iconRefresh();
+        } catch (error) {
+            status.textContent = `协作记录暂不可用：${error.message}`;
+            list.innerHTML = "";
+        }
+    }
+
+    function formatDateTime(value) {
+        if (!value) return "";
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("zh-CN", {hour12: false});
     }
 
     async function loadInsight() {
@@ -869,11 +950,7 @@
             const payload = await response.json();
             renderResourcePlan(payload.plan);
             const verified = (payload.items || []).filter((item) => item.verification_passed).length;
-            toast(
-                payload.degradation?.length || verified < 3
-                    ? `已生成 ${payload.items?.length || 0} 项资源，其中 ${verified} 项通过校验`
-                    : "个性化资源已生成并完成校验"
-            );
+            toast(payload.degradation?.length ? `已生成 ${payload.items?.length || 0} 项资源，其中 ${verified} 项通过校验` : "个性化资源已生成并进入人工发布门禁");
             await loadResources();
         } catch (error) {
             toast(error.message);
@@ -916,14 +993,74 @@
 
     function resourceCard(item) {
         const typeLabel = {custom_note: "定制学习资料", practice_guide: "实操指南", staged_test: "阶段练习"}[item.resource_type] || item.resource_type;
-        const statusLabel = {verified: "已校验", draft: "草稿"}[item.status] || item.status;
+        const statusLabel = {verified: "已发布", pending_review: "待人工发布", draft: "草稿"}[item.status] || item.status;
+        const sources = (item.evidence_sources || []).map((source) => {
+            const title = source.source_title || source.title || source.document_title || "官方资料";
+            const section = source.source_section || source.section || source.chapter || "未标注章节";
+            const url = source.source_url || source.url || source.link;
+            const link = url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">打开出处</a>` : "无可打开链接";
+            return `<li><strong>${escapeHtml(title)}</strong><span>${escapeHtml(section)} · ${link}</span></li>`;
+        }).join("") || `<li class="muted">没有官方证据，资源只能保留为草稿。</li>`;
+        const details = item.verification_details && Object.keys(item.verification_details).length
+            ? `<pre>${escapeHtml(prettyJson(item.verification_details, 2200))}</pre>`
+            : "暂无校验明细";
+        const history = (item.verification_history || []).map((entry) => `<li>第 ${Number(entry.retry_count || 0) + 1} 次：${entry.passed ? "通过" : "未通过"}${entry.issues?.length ? ` · ${escapeHtml(entry.issues.join("；"))}` : ""}</li>`).join("") || "暂无重做记录";
+        const publish = state.role === "mentor" || state.role === "system_admin"
+            ? (item.status === "pending_review" && item.verification_passed ? `<button class="button secondary compact-button" type="button" data-publish-resource="${escapeHtml(item.resource_id)}"><i data-lucide="send"></i>人工发布</button>` : "")
+            : "";
         return `<article class="resource-card">
             <header><span class="eyebrow">${escapeHtml(typeLabel)}</span><span class="resource-status ${item.status}">${escapeHtml(statusLabel)}</span></header>
             <h2>${escapeHtml(item.title)}</h2>
             <p class="resource-content">${escapeHtml(item.content)}</p>
             <p><strong>个性化理由：</strong>${escapeHtml(item.personalization_reason)}</p>
-            <footer>难度：${escapeHtml(difficultyLabel(item.difficulty))} · 证据来源：${item.evidence_sources?.length || 0}</footer>
+            <details class="resource-proof"><summary>查看官方引用与校验明细</summary><section><h3>官方引用（${item.evidence_sources?.length || 0}）</h3><ul>${sources}</ul><h3>校验结果</h3><div class="verification-detail">${details}</div><h3>重做历史（${item.retry_count || 0} 次）</h3><ul>${history}</ul></section></details>
+            <footer><span>难度：${escapeHtml(difficultyLabel(item.difficulty))} · 证据来源：${item.evidence_sources?.length || 0}</span>${publish}</footer>
         </article>`;
+    }
+
+    async function publishResource(resourceId, button) {
+        button.disabled = true;
+        try {
+            await api(`/v1/resources/${encodeURIComponent(resourceId)}/publish`, {method: "POST"});
+            toast("资源已完成人工发布");
+            await loadResources();
+        } catch (error) {
+            toast(`发布失败：${error.message}`);
+            button.disabled = false;
+        }
+    }
+
+    function openDeletionPanel() {
+        $("#data-deletion-panel").classList.remove("hidden");
+        $("#confirm-data-deletion").checked = false;
+        $("#submit-deletion").disabled = true;
+        $("#data-deletion-status").textContent = "等待确认。";
+        $("#confirm-data-deletion").focus();
+    }
+
+    function closeDeletionPanel() {
+        $("#data-deletion-panel").classList.add("hidden");
+    }
+
+    async function submitDataDeletion() {
+        const button = $("#submit-deletion");
+        button.disabled = true;
+        const status = $("#data-deletion-status");
+        status.textContent = "正在删除本地记录并同步外部服务…";
+        try {
+            const response = await api("/v1/users/me/data-deletion", {
+                method: "POST",
+                body: JSON.stringify({request_id: crypto.randomUUID().replaceAll("-", ""), confirm: true}),
+            });
+            const payload = await response.json();
+            const result = payload.result || {};
+            status.textContent = `${payload.status === "completed" ? "删除完成" : "删除完成，但部分外部服务需要重试"}。本地会话 ${result.local?.sessions || 0} 个，文件 ${result.files?.deleted || 0} 个。`;
+            toast(payload.status === "completed" ? "学习数据已删除" : "数据已删除，部分外部同步失败");
+            window.setTimeout(logout, 1400);
+        } catch (error) {
+            status.textContent = `删除失败：${error.message}`;
+            button.disabled = false;
+        }
     }
 
     function roleOptions(current) {
@@ -1539,6 +1676,13 @@
         $("#auth-form").addEventListener("submit", submitAuth);
         $("#auth-mode-toggle").addEventListener("click", () => setAuthMode(state.authMode === "login" ? "register" : "login"));
         $("#logout-button").addEventListener("click", logout);
+        $("#delete-data-button").addEventListener("click", openDeletionPanel);
+        $("#close-deletion").addEventListener("click", closeDeletionPanel);
+        $("#cancel-deletion").addEventListener("click", closeDeletionPanel);
+        $("#confirm-data-deletion").addEventListener("change", (event) => {
+            $("#submit-deletion").disabled = !event.target.checked;
+        });
+        $("#submit-deletion").addEventListener("click", submitDataDeletion);
         $("#course-continue").addEventListener("click", openCourseWorkspace);
         $("#course-video").addEventListener("click", openVideoLearning);
         $("#video-back-to-course").addEventListener("click", () => showView("courses"));
@@ -1572,7 +1716,12 @@
             $$(".insight-pane").forEach((pane) => pane.classList.toggle("active", pane.id === `insight-${button.dataset.insightTab}`));
         }));
         $("#refresh-insight").addEventListener("click", loadInsight);
+        $("#refresh-demo-trace").addEventListener("click", loadDemoTrace);
         $("#generate-resources").addEventListener("click", generateResources);
+        $("#resource-list").addEventListener("click", (event) => {
+            const button = event.target.closest("[data-publish-resource]");
+            if (button) publishResource(button.dataset.publishResource, button);
+        });
         $("#refresh-members").addEventListener("click", loadMembers);
         $("#record-button").addEventListener("click", startOrStopRecording);
         $("#learner-audio-file").addEventListener("change", (event) => {

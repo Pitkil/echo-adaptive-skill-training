@@ -155,6 +155,8 @@ def _segment_audio(input_path: Path, output_dir: Path) -> list[tuple[Path, int]]
     """Convert audio to 16 kHz WAV segments and retain original time offsets."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    if shutil.which("ffmpeg") is None:
+        return _segment_pcm_wav(input_path, output_dir)
     output_pattern = output_dir / "segment_%04d.wav"
     command = [
         "ffmpeg",
@@ -188,6 +190,40 @@ def _segment_audio(input_path: Path, output_dir: Path) -> list[tuple[Path, int]]
         (segment, index * SEGMENT_DURATION_SECONDS * 1000)
         for index, segment in enumerate(segments)
     ]
+
+
+def _segment_pcm_wav(input_path: Path, output_dir: Path) -> list[tuple[Path, int]]:
+    """Segment an already-normalized PCM WAV when ffmpeg is unavailable."""
+
+    if input_path.suffix.casefold() != ".wav":
+        raise RuntimeError("ffmpeg is unavailable; real detector accepts 16 kHz PCM WAV only")
+    try:
+        with wave.open(str(input_path), "rb") as source:
+            if (
+                source.getframerate() != 16_000
+                or source.getnchannels() != 1
+                or source.getsampwidth() != 2
+                or source.getcomptype() != "NONE"
+            ):
+                raise RuntimeError(
+                    "ffmpeg is unavailable; WAV must be mono 16 kHz signed 16-bit PCM"
+                )
+            frames_per_segment = SEGMENT_DURATION_SECONDS * source.getframerate()
+            parameters = source.getparams()
+            segments: list[tuple[Path, int]] = []
+            index = 0
+            while frames := source.readframes(frames_per_segment):
+                destination = output_dir / f"segment_{index:04d}.wav"
+                with wave.open(str(destination), "wb") as target:
+                    target.setparams(parameters)
+                    target.writeframes(frames)
+                segments.append((destination, index * SEGMENT_DURATION_SECONDS * 1000))
+                index += 1
+    except (EOFError, wave.Error) as exc:
+        raise RuntimeError(f"invalid PCM WAV: {exc}") from exc
+    if not segments:
+        raise RuntimeError("audio conversion produced no segments")
+    return segments
 
 
 def _restore_original_timeline(
@@ -328,9 +364,13 @@ def health() -> dict[str, str]:
             status_code=503,
             detail=f"offline detector artifacts unavailable: {names}",
         )
-    if shutil.which("ffmpeg") is None:
-        raise HTTPException(status_code=503, detail="ffmpeg executable is unavailable")
-    return {"status": "ok", "mode": "real", "detector_version": SERVICE_VERSION}
+    audio_mode = "all_supported_formats" if shutil.which("ffmpeg") else "pcm_wav_only"
+    return {
+        "status": "ok",
+        "mode": "real",
+        "detector_version": SERVICE_VERSION,
+        "audio_mode": audio_mode,
+    }
 
 
 @app.post("/v1/detection/jobs", response_model=DetectionJob)

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import ast
 import json
+import re
 from dataclasses import asdict, dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 from config import AIConfig
 from openai import OpenAI
@@ -47,6 +50,7 @@ class Verification:
     coverage_score: float
     difficulty_score: float
     issues: list[str]
+    details: dict[str, Any]
 
 
 def build_personalization_plan(
@@ -122,36 +126,43 @@ class ResourceGenerationAgent:
         self,
         plan: PersonalizationPlan,
         evidence: list[dict[str, Any]],
-    ) -> tuple[list[dict[str, str]], str | None]:
+        *,
+        resource_type: str = "custom_note",
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        if resource_type not in RESOURCE_TYPES:
+            raise ValueError(f"不支持的资源类型：{resource_type}")
         if evidence and AIConfig.API_KEY and AIConfig.MODEL_NAME and AIConfig.API_KEY != "test-key":
             try:
-                return self._generate_with_model(plan, evidence), None
+                return self._generate_with_model(plan, evidence, resource_type), None
             except Exception as exc:
-                return self._fallback(plan, evidence), f"资源模型降级：{exc}"
-        return self._fallback(plan, evidence), None
+                return self._fallback(plan, evidence, resource_type), f"资源模型降级：{exc}"
+        return self._fallback(plan, evidence, resource_type), None
 
     def _generate_with_model(
         self,
         plan: PersonalizationPlan,
         evidence: list[dict[str, Any]],
-    ) -> list[dict[str, str]]:
+        resource_type: str,
+    ) -> list[dict[str, Any]]:
         evidence_text = "\n".join(
             f"[{index}] {item.get('text', '')[:1200]}"
             for index, item in enumerate(evidence[:6], start=1)
         )
-        prompt = f"""根据学习画像和官方证据生成三种个性化学习资源。
+        prompt = f"""根据学习画像和官方证据只生成一种个性化学习资源。
 只返回 JSON 对象，格式为：
-{{"resources":[{{"resource_type":"custom_note","title":"...","content":"..."}},
-{{"resource_type":"practice_guide","title":"...","content":"..."}},
-{{"resource_type":"staged_test","title":"...","content":"..."}}]}}
+{{"resource":{{"resource_type":"{resource_type}","title":"...","content":"...",
+"claims":[{{"text":"...","evidence_refs":[1]}}],
+"steps":[{{"step":1,"action":"...","expected":"..."}}],
+"assessment_dimensions":["understanding","application","reasoning"]}}}}
 
 必须满足：
-1. 三种 resource_type 各出现一次。
+1. resource_type 必须严格为 {resource_type}，不得返回其它资源。
 2. 内容围绕知识点“{plan.knowledge_point_name}”。
 3. 难度为{DIFFICULTY_LABELS[plan.difficulty]}，重点补强{plan.weakest_dimension_label}。
 4. 提示方式：{plan.support_strategy}。
-5. 只能依据下列证据，事实后用 [1]、[2] 标明出处，不得编造。
-6. 阶段测试用于动态练习，不提供参考答案，不自动更新 MIRT。
+5. 每条事实声明都必须在 claims.evidence_refs 中绑定下列证据编号。
+6. 实操指南的每一步必须填写 action 和 expected；阶段测试必须覆盖 understanding、application、reasoning，不能提供答案。
+7. 只能依据下列证据，不得编造 API、类名、章节或行为。
 
 个性化原因：{plan.reason}
 长期记忆提示：{"；".join(plan.memory_hints) or "无"}
@@ -167,28 +178,81 @@ class ResourceGenerationAgent:
             response_format={"type": "json_object"},
         )
         payload = json.loads(response.choices[0].message.content or "{}")
-        resources = payload.get("resources", [])
-        by_type = {
-            item.get("resource_type"): item
-            for item in resources
-            if isinstance(item, dict) and item.get("resource_type") in RESOURCE_TYPES
+        resource = payload.get("resource")
+        if not isinstance(resource, dict) or resource.get("resource_type") != resource_type:
+            raise ValueError(f"模型没有返回唯一的 {resource_type} 资源")
+        return [self._normalize_resource(resource, resource_type)]
+
+    @staticmethod
+    def _normalize_resource(resource: dict[str, Any], resource_type: str) -> dict[str, Any]:
+        return {
+            "resource_type": resource_type,
+            "title": str(resource.get("title") or "").strip(),
+            "content": str(resource.get("content") or "").strip(),
+            "claims": resource.get("claims") if isinstance(resource.get("claims"), list) else [],
+            "steps": resource.get("steps") if isinstance(resource.get("steps"), list) else [],
+            "assessment_dimensions": (
+                resource.get("assessment_dimensions")
+                if isinstance(resource.get("assessment_dimensions"), list)
+                else []
+            ),
+            "code_blocks": resource.get("code_blocks") if isinstance(resource.get("code_blocks"), list) else [],
         }
-        if set(by_type) != set(RESOURCE_TYPES):
-            raise ValueError("模型没有返回完整的三类资源")
-        return [
-            {
-                "resource_type": resource_type,
-                "title": str(by_type[resource_type].get("title") or "").strip(),
-                "content": str(by_type[resource_type].get("content") or "").strip(),
-            }
-            for resource_type in RESOURCE_TYPES
-        ]
+
+    @staticmethod
+    def repair_failed_resource(
+        resource: dict[str, Any],
+        plan: PersonalizationPlan,
+        evidence: list[dict[str, Any]],
+        issues: list[str],
+    ) -> dict[str, str]:
+        """Apply one deterministic, auditable repair to a failed resource only.
+
+        The repair never invents new facts.  It makes the target knowledge point
+        and the already-retrieved evidence marker explicit, then adds a safe
+        learner-facing self-check when the first draft is too short.
+        """
+
+        repaired = dict(resource)
+        content = str(repaired.get("content") or "").strip()
+        additions: list[str] = []
+        if plan.knowledge_point_name not in content:
+            additions.append(f"目标知识点：{plan.knowledge_point_name}")
+        if evidence and "[1]" not in content:
+            additions.append("证据说明：以上知识内容依据本资源所列 Microsoft 官方材料。[1]")
+        if len(content) < 120:
+            additions.append(
+                "学习检查：请先复述核心作用，再完成一个最小示例，最后对照官方材料检查输入、输出和适用边界。"
+            )
+        if additions:
+            content = "\n\n".join([content, *additions]).strip()
+        if len(content) < 120:
+            content = "\n\n".join(
+                [
+                    content,
+                    (
+                        "实施建议：第一步确认概念解决的问题和适用边界；第二步完成可运行的最小示例并记录关键输入与输出；"
+                        "第三步制造一个常见错误，依据日志定位原因；第四步重新对照官方材料核验实现，并用自己的话说明选择依据。"
+                    ),
+                ]
+            ).strip()
+        repaired["content"] = content
+        if not repaired.get("claims") and evidence:
+            repaired["claims"] = [
+                {"text": str(evidence[0].get("text") or "")[:500], "evidence_refs": [1]}
+            ]
+        repaired.setdefault("steps", [])
+        repaired.setdefault("assessment_dimensions", [])
+        repaired.setdefault("code_blocks", [])
+        repaired["repair_issues"] = list(issues)
+        return repaired
 
     @staticmethod
     def _fallback(
         plan: PersonalizationPlan,
         evidence: list[dict[str, Any]],
-    ) -> list[dict[str, str]]:
+        resource_type: str,
+    ) -> list[dict[str, Any]]:
         source_excerpt = (
             str(evidence[0].get("text") or "")[:500].strip()
             if evidence
@@ -213,8 +277,8 @@ class ResourceGenerationAgent:
             if evidence
             else f"练习范围：{point}；推荐难度：{difficulty}；当前缺少官方材料，仅保存为草稿。\n\n"
         )
-        return [
-            {
+        resources = {
+            "custom_note": {
                 "resource_type": "custom_note",
                 "title": f"{point}个性化学习资料",
                 "content": (
@@ -225,8 +289,12 @@ class ResourceGenerationAgent:
                     f"学习提醒：{memory_note}\n"
                     "自检：请用自己的话说明该知识点的作用、边界和一个适用场景。"
                 ),
+                "claims": ([{"text": source_excerpt, "evidence_refs": [1]}] if evidence else []),
+                "steps": [],
+                "assessment_dimensions": [],
+                "code_blocks": [],
             },
-            {
+            "practice_guide": {
                 "resource_type": "practice_guide",
                 "title": f"{point}实操指南",
                 "content": (
@@ -238,8 +306,17 @@ class ResourceGenerationAgent:
                     f"{fourth_practice_step}"
                     "完成标准：能够解释实现选择，并独立修复一次错误。"
                 ),
+                "claims": ([{"text": source_excerpt, "evidence_refs": [1]}] if evidence else []),
+                "steps": [
+                    {"step": 1, "action": "确认目标、输入和输出", "expected": "能够说明最小实现边界"},
+                    {"step": 2, "action": "完成最小可运行实现", "expected": "得到可观察的输出"},
+                    {"step": 3, "action": "制造错误并检查日志", "expected": "定位一个失败原因"},
+                    {"step": 4, "action": "对照官方材料复核边界", "expected": "记录修正后的结论"},
+                ],
+                "assessment_dimensions": [],
+                "code_blocks": [],
             },
-            {
+            "staged_test": {
                 "resource_type": "staged_test",
                 "title": f"{point}针对性阶段练习",
                 "content": (
@@ -249,31 +326,128 @@ class ResourceGenerationAgent:
                     "3. 推理题：比较两种实现方式，说明选择依据和可能风险。\n\n"
                     "本练习根据当前画像动态生成，不作为固定前后测，默认不更新 MIRT。"
                 ),
+                "claims": ([{"text": source_excerpt, "evidence_refs": [1]}] if evidence else []),
+                "steps": [],
+                "assessment_dimensions": ["understanding", "application", "reasoning"],
+                "code_blocks": [],
             },
-        ]
+        }
+        return [resources[resource_type]]
 
 
 class ContentVerificationAgent:
     def verify(
         self,
-        resource: dict[str, str],
+        resource: dict[str, Any],
         plan: PersonalizationPlan,
         evidence: list[dict[str, Any]],
     ) -> Verification:
-        content = resource.get("content", "")
+        content = str(resource.get("content", ""))
         issues: list[str] = []
+        claim_checks: list[dict[str, Any]] = []
+        code_checks: list[dict[str, Any]] = []
+        api_checks: list[dict[str, Any]] = []
+        step_checks: list[dict[str, Any]] = []
+        citation_numbers = {
+            int(value) for value in re.findall(r"\[(\d+)\]", content)
+        }
         if not evidence:
             issues.append("PunditRAG 未返回可追溯证据")
+        invalid_citations = sorted(
+            number for number in citation_numbers if number < 1 or number > len(evidence)
+        )
+        if invalid_citations:
+            issues.append("内容包含超出证据范围的引用编号")
         if plan.knowledge_point_name not in content:
             issues.append("内容未覆盖目标知识点")
         if len(content) < 120:
             issues.append("内容过短，无法形成完整学习资源")
-        if evidence and "[1]" not in content:
+        if evidence and not citation_numbers:
             issues.append("内容没有标记证据引用")
         if plan.difficulty not in DIFFICULTY_LABELS:
             issues.append("推荐难度无效")
 
-        factual_score = 1.0 if evidence and "[1]" in content else 0.0
+        claims = resource.get("claims") or []
+        if not isinstance(claims, list) or not claims:
+            issues.append("缺少结构化事实声明")
+            claims = []
+        for claim in claims:
+            text = str(claim.get("text") or "").strip() if isinstance(claim, dict) else ""
+            refs = claim.get("evidence_refs") if isinstance(claim, dict) else []
+            refs = refs if isinstance(refs, list) else []
+            valid_refs = [int(ref) for ref in refs if str(ref).isdigit() and 1 <= int(ref) <= len(evidence)]
+            overlap = any(
+                token.casefold() in str(evidence[index - 1].get("text") or "").casefold()
+                for index in valid_refs
+                for token in re.findall(r"[A-Za-z][A-Za-z0-9_-]{3,}|[\u4e00-\u9fff]{2,}", text)
+            )
+            passed = bool(text and valid_refs and overlap)
+            claim_checks.append({"text": text, "evidence_refs": valid_refs, "passed": passed})
+            if not passed:
+                issues.append("事实声明未与证据切片对齐")
+
+        for block in resource.get("code_blocks") or []:
+            language = str(block.get("language") or "").lower() if isinstance(block, dict) else ""
+            code = str(block.get("code") or "") if isinstance(block, dict) else ""
+            passed = True
+            error = None
+            if language in {"python", "py"}:
+                try:
+                    ast.parse(code)
+                except SyntaxError as exc:
+                    passed = False
+                    error = str(exc)
+            elif language:
+                passed = bool(code.strip())
+                error = None if passed else "代码块为空"
+            if not passed:
+                issues.append("代码示例无法通过基础语法检查")
+            code_checks.append({"language": language, "passed": passed, "error": error})
+            identifiers = sorted(
+                set(re.findall(r"\b[A-Z][A-Za-z0-9_]{2,}\b", code))
+                - {"True", "False", "None", "HTTP", "JSON"}
+            )
+            evidence_text = " ".join(str(item.get("text") or "") for item in evidence).casefold()
+            unsupported = [name for name in identifiers if name.casefold() not in evidence_text]
+            api_passed = not unsupported
+            api_checks.append({"identifiers": identifiers, "unsupported": unsupported, "passed": api_passed})
+            if not api_passed:
+                issues.append("代码示例中的 API 或类名未在官方证据中找到")
+
+        steps = resource.get("steps") or []
+        if resource.get("resource_type") == "practice_guide":
+            if not isinstance(steps, list) or len(steps) < 3:
+                issues.append("实操指南步骤不足")
+                steps = []
+            for item in steps:
+                passed = isinstance(item, dict) and bool(
+                    str(item.get("action") or "").strip()
+                    and str(item.get("expected") or "").strip()
+                )
+                step_checks.append({"step": item.get("step") if isinstance(item, dict) else None, "passed": passed})
+                if not passed:
+                    issues.append("实操步骤缺少动作或预期结果")
+
+        dimensions = set(resource.get("assessment_dimensions") or [])
+        if resource.get("resource_type") == "staged_test" and dimensions != {
+            "understanding", "application", "reasoning"
+        }:
+            issues.append("阶段测试未覆盖理解、应用、推理三个维度")
+
+        for item in evidence:
+            metadata = item.get("metadata") or {}
+            source_url = str(metadata.get("source_url") or metadata.get("url") or "")
+            host = (urlsplit(source_url).hostname or "").lower()
+            if not metadata.get("document_id") and not metadata.get("external_document_id"):
+                issues.append("证据缺少文档编号")
+            if source_url and host not in {"learn.microsoft.com", "github.com"}:
+                issues.append("证据来源不属于允许的官方域名")
+
+        factual_score = (
+            sum(1 for item in claim_checks if item["passed"]) / len(claim_checks)
+            if claim_checks
+            else 0.0
+        )
         coverage_score = 1.0 if plan.knowledge_point_name in content and len(content) >= 120 else 0.5
         difficulty_score = 1.0 if plan.difficulty in DIFFICULTY_LABELS else 0.0
         return Verification(
@@ -282,4 +456,13 @@ class ContentVerificationAgent:
             coverage_score=coverage_score,
             difficulty_score=difficulty_score,
             issues=issues,
+            details={
+                "citation_numbers": sorted(citation_numbers),
+                "invalid_citations": invalid_citations,
+                "claim_checks": claim_checks,
+                "code_checks": code_checks,
+                "api_checks": api_checks,
+                "step_checks": step_checks,
+                "assessment_dimensions": sorted(dimensions),
+            },
         )

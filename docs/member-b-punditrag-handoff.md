@@ -5,7 +5,12 @@
 本交接包提供可导入的 Microsoft Semantic Kernel 官方材料切片。负责人提供并启动 PunditRAG
 导入/查询双服务后，团队共同完成真实入库和固定检索验收。
 
-当前切片状态为 `prepared`，不是 `indexed`。不得提前填写外部编号或成功结果。
+仓库中的构建产物状态为 `prepared`；本地运行库已经完成 v1.2 的 15 条导入，但仍需以最新检索
+复测报告为准，不能把导入完成直接等同于所有知识点检索通过。
+
+本地运行库当前外部知识库为 `b91a91086ffc4399aa6152d37b6e1d60`。旧 Components 文档已标记
+`removed`，M1-KP4 使用 `MS-SK-CHAT-HISTORY`，Native Plugins 使用官方
+`adding-native-plugins` 页面。旧版交付包中的这些条目不得继续复用。
 
 ## 交接输入
 
@@ -15,7 +20,7 @@
 | `chunks.jsonl` | 291个可追溯切片 |
 | `files/*.md` | 清洗后的材料文件，供ECHO材料入口上传 |
 | `SHA256SUMS.txt` | 交付目录中文件完整性校验 |
-| `retrieval-cases.json` | 15条固定检索案例及预期来源 |
+| `retrieval-cases.json` | 15条固定检索案例及 v1.2 预期来源 |
 | `README.md` | 来源、许可、构建和状态说明 |
 
 完整HTML是否随包交付取决于Microsoft条款和比赛提交范围；未确认时只交清洗材料、切片、元数据、

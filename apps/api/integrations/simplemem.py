@@ -147,6 +147,37 @@ class SimpleMemClient:
             allowed_statuses={MemoryMutationStatus.DELETED},
         )
 
+    def purge_scope(
+        self,
+        *,
+        organization_id: int,
+        user_id: int,
+        program_id: int,
+        module_id: int,
+    ) -> dict[str, Any]:
+        payload = self.http.request(
+            "DELETE",
+            "/v1/memories/scope",
+            {
+                "organization_id": organization_id,
+                "user_id": user_id,
+                "program_id": program_id,
+                "module_id": module_id,
+            },
+        )
+        expected = {
+            "status": "deleted",
+            "organization_id": organization_id,
+            "user_id": user_id,
+            "program_id": program_id,
+            "module_id": module_id,
+        }
+        if not isinstance(payload, dict) or any(payload.get(key) != value for key, value in expected.items()):
+            raise IntegrationUnavailable("SimpleMem purge response does not match the requested scope.")
+        if not isinstance(payload.get("deleted_count"), int) or payload["deleted_count"] < 0:
+            raise IntegrationUnavailable("SimpleMem purge response has an invalid deleted_count.")
+        return payload
+
     def consolidate(
         self,
         *,
