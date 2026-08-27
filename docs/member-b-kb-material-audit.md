@@ -32,23 +32,23 @@ ZIP 中的 Components 条目和已失效的 Training URL 不得继续作为正�
 - 旧 `MS-SK-CONCEPTS-COMPONENTS` upload `20` 已标记 `removed`，不得再进入正式检索范围。
 - 外部知识库标识为 `b91a91086ffc4399aa6152d37b6e1d60`。
 
-导入完成不等于所有固定检索都通过。检索服务仍可能返回历史向量，必须按 ECHO 活动 upload 和
-manifest 双重映射后才能作为正式证据。
+导入完成不等于所有固定检索都通过。检索复测使用 ECHO 活动 upload、manifest 和外部
+document_id 三重映射，未登记或已移除向量不会进入正式证据。
 
 ## 检索复核结果
 
-最新本地复测记录：`data/formal-materials/retrieval-20260827T0845Z`。
+最新本地复测记录：`retrieval-audit-v12-20260827T`（真实 Docker ECHO 数据库和 PunditRAG）。
 
 | 项目 | 结果 | 处理 |
 |---|---:|---|
 | 知识点总数 | 12 | 固定案例 |
-| 通过 | 10 | 保留原始响应和映射 |
-| 失败 | 2 | 不得估算为通过 |
-| M1-KP1 | 未命中可映射正式材料 | 清理 PunditRAG 残留 Components 向量并重新运行 |
-| M3-KP4 | 查询超时 | 检查查询服务负载/超时后重新运行 |
+| 通过 | 12 | 保留原始响应和映射 |
+| 失败 | 0 | 12/12 通过 |
+| M1-KP1 | 已通过 | 活动 Kernel/Quick Start 来源可映射 |
+| M3-KP4 | 已通过 | Observability/Process Overview 来源可映射 |
 
 M1-KP4 已由 Chat History 材料覆盖；M3-KP1 已由 Process First 和 Process Overview 覆盖。
-只有重新运行后 12/12 通过，才能更新正式检索报告和比赛指标。
+检索覆盖已达到 12/12，但这不替代资源事实声明、50 组案例和比赛指标的人工发布门禁。
 
 ## 交付门禁
 

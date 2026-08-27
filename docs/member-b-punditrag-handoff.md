@@ -5,8 +5,8 @@
 本交接包提供可导入的 Microsoft Semantic Kernel 官方材料切片。负责人提供并启动 PunditRAG
 导入/查询双服务后，团队共同完成真实入库和固定检索验收。
 
-仓库中的构建产物状态为 `prepared`；本地运行库已经完成 v1.2 的 15 条导入，但仍需以最新检索
-复测报告为准，不能把导入完成直接等同于所有知识点检索通过。
+仓库中的构建产物状态为 `prepared`；本地运行库已经完成 v1.2 的 15 条导入，真实固定检索已
+12/12 通过。`prepared` 仍表示交付包可导入，不应与外部索引状态混淆。
 
 本地运行库当前外部知识库为 `b91a91086ffc4399aa6152d37b6e1d60`。旧 Components 文档已标记
 `removed`，M1-KP4 使用 `MS-SK-CHAT-HISTORY`，Native Plugins 使用官方
@@ -17,7 +17,7 @@
 | 文件 | 用途 |
 |---|---|
 | `manifest.json` | 15份材料的标题、URL、版本、模块、知识点、文件和哈希 |
-| `chunks.jsonl` | 291个可追溯切片 |
+| `chunks.jsonl` | 340个可追溯切片 |
 | `files/*.md` | 清洗后的材料文件，供ECHO材料入口上传 |
 | `SHA256SUMS.txt` | 交付目录中文件完整性校验 |
 | `retrieval-cases.json` | 15条固定检索案例及 v1.2 预期来源 |
@@ -84,13 +84,13 @@ ECHO同步成功后才算已索引。失败时保留 `index_error`、时间和�
 
 ## 固定检索
 
-使用 `retrieval-cases.json`。每次查询固定：
+使用 `retrieval-cases.json`。本次真实复测固定：
 
 ```json
 {
   "scope_mode": "knowledge_base",
   "kb_ids": ["真实 PunditRAG kb_id"],
-  "document_ids": [],
+  "document_ids": ["活动材料的外部 document_id"],
   "is_stream": false,
   "enable_web_search": false
 }
@@ -103,7 +103,7 @@ chunk/document标识、人工相关性判断和失败原因。未登记来源、
 ## 完成条件
 
 - 15份材料均有真实最终状态；失败材料有明确原因。
-- M1/M2/M3和12个知识点均完成查询。
+- M1/M2/M3和12个知识点均完成查询并通过活动来源映射。
 - 正式结果只来自允许的Microsoft官方来源。
 - 引用可以打开并定位到相应章节和版本。
 - `import-records.json`、`retrieval-report.md`和ECHO数据库记录一致。

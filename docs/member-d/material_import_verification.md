@@ -23,21 +23,21 @@ URL 替换为官方 Semantic Kernel 页面，并用 Chat History 替换重复的
 - `MS-SK-CONCEPTS-COMPONENTS`：旧 upload `20` 已标记 `removed`，不得作为正式证据。
 
 每条材料均保存外部 `document_id`、`task_id`、版本、章节和状态；`completed` 只表示导入任务完成，
-不代表每个固定检索案例都通过。
+固定检索仍以独立复测报告为准。
 
 ## 检索复核
 
-最新复测记录为 `data/formal-materials/retrieval-20260827T0845Z`：12 个知识点通过 10 个，失败 2 个。
+最新复测记录为 `retrieval-audit-v12-20260827T`：12 个知识点通过 12 个，失败 0 个。
 
 | 知识点 | 状态 | 原因 |
 |---|---|---|
-| M1-KP1 | 待处理 | 查询仍可能返回已移除 Components 的历史向量，未形成可映射的正式证据 |
+| M1-KP1 | 已通过 | 活动 Kernel/Quick Start 来源可映射；未登记向量被过滤 |
 | M1-KP4 | 已覆盖 | Chat History 已导入并可用于固定检索 |
-| M3-KP4 | 待处理 | 固定查询发生超时，需要检查查询服务负载和超时配置 |
+| M3-KP4 | 已通过 | Observability/Process Overview 来源可映射 |
 | 其他 10 个知识点 | 已通过 | 来源可映射到活动 upload 和 manifest |
 
-在 M1-KP1 的历史向量清理、M3-KP4 超时复测完成前，不得把检索覆盖率写成 100%，也不得据此发布
-正式幻觉率或引用可追溯率。
+检索覆盖率为 100%；这只证明官方来源可检索，不得据此直接发布幻觉率、难度适配率或引用可追溯率，
+相关比赛指标仍需案例人工复核和发布审批。
 
 ## 复核要求
 
