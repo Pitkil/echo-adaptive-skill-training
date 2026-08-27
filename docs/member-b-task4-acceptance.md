@@ -4,7 +4,7 @@
 
 - 任务：ECHO 部署说明与 Microsoft Semantic Kernel 专业知识库切片
 - 项目分支：`member/b-micro-signal`
-- 已推送提交：`d02a187`
+- 已推送提交：以 PR 当前 HEAD 为准（验收记录不得写死过期提交）
 - 作品标识：`MS-SK-ENGINEERING`
 - 知识库标识：`MS-SK-OFFICIAL`
 - 切片版本：`1.0`，来源版本统一记录为 `accessed-2026-08-26`
@@ -43,8 +43,8 @@
 
 ## 干净环境待执行记录
 
-以下项目必须写入`deployment/environment-matrix.json`和
-`deployment/smoke-test-report.md`，没有真实结果时不得勾选：
+以下项目必须写入`docs/deployment/environment-matrix.json`和
+`docs/deployment/smoke-test-report.md`，没有真实结果时不得勾选：
 
 1. OS、Python、Docker、Compose和commit SHA。
 2. 从`.env.example`开始，不使用作者机器遗留配置。

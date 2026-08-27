@@ -112,8 +112,9 @@ def validate_source_url(url: str) -> None:
     parsed = urlparse(url)
     if parsed.scheme != "https" or parsed.hostname not in ALLOWED_HOSTS:
         raise ValueError(f"source URL is not allowed: {url}")
-    if parsed.hostname == "github.com" and not parsed.path.startswith(
-        "/microsoft/semantic-kernel"
+    github_repo = "/microsoft/semantic-kernel"
+    if parsed.hostname == "github.com" and parsed.path.rstrip("/") != github_repo and not parsed.path.startswith(
+        f"{github_repo}/"
     ):
         raise ValueError(f"GitHub source is outside microsoft/semantic-kernel: {url}")
 
@@ -349,11 +350,22 @@ def write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def clear_generated_files(output_dir: Path) -> None:
+    """Remove only the generated source-file directory before rebuilding."""
+
+    files_dir = output_dir / "files"
+    if files_dir.exists() and not files_dir.is_dir():
+        raise ValueError(f"generated files path is not a directory: {files_dir}")
+    if files_dir.is_dir():
+        shutil.rmtree(files_dir)
+
+
 def build(registry_path: Path, output_dir: Path, max_chars: int) -> None:
     if max_chars < 400:
         raise ValueError("max_chars must be at least 400")
     registry = load_registry(registry_path)
     output_dir.mkdir(parents=True, exist_ok=True)
+    clear_generated_files(output_dir)
     prepared: list[dict] = []
     failures: list[dict] = []
     for item in registry["materials"]:
@@ -425,6 +437,8 @@ def rebuild(
     }
     prepared: list[dict] = []
     failures: list[dict] = []
+    output_dir.mkdir(parents=True, exist_ok=True)
+    clear_generated_files(output_dir)
     for item in registry["materials"]:
         try:
             prepared.append(
@@ -437,7 +451,6 @@ def rebuild(
             )
         except (OSError, ValueError) as exc:
             failures.append({"material_id": item["material_id"], "error": str(exc)})
-    output_dir.mkdir(parents=True, exist_ok=True)
     chunks = [
         chunk
         for item in prepared
@@ -475,7 +488,13 @@ def rebuild(
 
 def validate(output_dir: Path) -> None:
     manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
+    required_manifest = {"version", "source_registry", "prepared_materials", "failed_materials", "duplicate_sources", "materials"}
+    if not required_manifest.issubset(manifest):
+        missing = sorted(required_manifest - set(manifest))
+        raise ValueError(f"manifest has missing required fields: {', '.join(missing)}")
     materials = manifest["materials"]
+    if not isinstance(materials, list):
+        raise ValueError("manifest materials must be a list")
     if manifest.get("failed_materials"):
         raise ValueError("delivery manifest contains failed materials")
     if manifest.get("duplicate_sources"):
@@ -486,6 +505,28 @@ def validate(output_dir: Path) -> None:
     chunks = [json.loads(line) for line in (output_dir / "chunks.jsonl").read_text(encoding="utf-8").splitlines() if line]
     chunk_ids: set[str] = set()
     for item in materials:
+        required_material = {
+            "material_id",
+            "title",
+            "url",
+            "resolved_url",
+            "version",
+            "section",
+            "module_id",
+            "knowledge_point_ids",
+            "local_file",
+            "sha256",
+            "source_file_sha256",
+            "license_note",
+            "license_url",
+            "retrieved_at",
+            "import_status",
+            "http_status",
+        }
+        if not required_material.issubset(item) or any(
+            not str(item.get(key) or "").strip() for key in required_material - {"http_status"}
+        ):
+            raise ValueError(f"material has missing required metadata: {item.get('material_id')}")
         validate_source_url(item.get("resolved_url") or item["url"])
         if item.get("http_status") != 200:
             raise ValueError(f"material HTTP status is not 200: {item['material_id']}")

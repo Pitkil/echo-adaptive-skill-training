@@ -47,6 +47,12 @@ def test_unapproved_sources_are_rejected(url: str) -> None:
         MODULE.validate_source_url(url)
 
 
+def test_github_repository_boundary_is_enforced() -> None:
+    with pytest.raises(ValueError):
+        MODULE.validate_source_url("https://github.com/microsoft/semantic-kernel-evil/blob/main/README.md")
+    MODULE.validate_source_url("https://github.com/microsoft/semantic-kernel/blob/main/README.md")
+
+
 def test_generated_slice_validation_detects_tampering(tmp_path: Path) -> None:
     files = tmp_path / "files"
     files.mkdir()
@@ -55,20 +61,28 @@ def test_generated_slice_validation_detects_tampering(tmp_path: Path) -> None:
     digest = MODULE.sha256_bytes(material.read_bytes())
     manifest = {
         "prepared_materials": 1,
+        "version": "1.0",
+        "source_registry": "docs/member-d/official_materials_manifest.json",
         "failed_materials": [],
         "duplicate_sources": [],
         "materials": [
             {
                 "material_id": "MAT",
+                "title": "Kernel",
                 "url": "https://learn.microsoft.com/en-us/semantic-kernel/concepts/kernel",
                 "resolved_url": "https://learn.microsoft.com/en-us/semantic-kernel/concepts/kernel",
                 "http_status": 200,
+                "version": "accessed-test",
+                "section": "Kernel",
                 "import_status": "prepared",
                 "retrieved_at": "2026-08-26T00:00:00+00:00",
                 "local_file": "files/MAT.md",
                 "sha256": digest,
                 "module_id": "M1",
                 "knowledge_point_ids": ["M1-KP1"],
+                "source_file_sha256": digest,
+                "license_note": "Microsoft official source",
+                "license_url": "https://learn.microsoft.com/en-us/legal/termsofuse",
             }
         ]
     }
@@ -137,6 +151,18 @@ def test_captured_markdown_boilerplate_is_removed() -> None:
     assert cleaned == "# Kernel\n\nOfficial text\n"
 
 
+def test_rebuild_clears_stale_generated_files(tmp_path: Path) -> None:
+    files = tmp_path / "files"
+    files.mkdir()
+    stale = files / "OLD.md"
+    stale.write_text("old material", encoding="utf-8")
+
+    MODULE.clear_generated_files(tmp_path)
+
+    assert not stale.exists()
+    assert not files.exists()
+
+
 def test_validation_detects_checksum_tampering(tmp_path: Path) -> None:
     files = tmp_path / "files"
     files.mkdir()
@@ -146,21 +172,29 @@ def test_validation_detects_checksum_tampering(tmp_path: Path) -> None:
     MODULE.write_json(
         tmp_path / "manifest.json",
         {
+            "version": "1.0",
+            "source_registry": "docs/member-d/official_materials_manifest.json",
             "prepared_materials": 1,
             "failed_materials": [],
             "duplicate_sources": [],
             "materials": [
                 {
                     "material_id": "MAT",
+                    "title": "Kernel",
                     "url": "https://learn.microsoft.com/en-us/semantic-kernel/concepts/kernel",
                     "resolved_url": "https://learn.microsoft.com/en-us/semantic-kernel/concepts/kernel",
                     "http_status": 200,
+                    "version": "accessed-test",
+                    "section": "Kernel",
                     "import_status": "prepared",
                     "retrieved_at": "2026-08-26T00:00:00+00:00",
                     "local_file": "files/MAT.md",
                     "sha256": digest,
                     "module_id": "M1",
                     "knowledge_point_ids": ["M1-KP1"],
+                    "source_file_sha256": digest,
+                    "license_note": "Microsoft official source",
+                    "license_url": "https://learn.microsoft.com/en-us/legal/termsofuse",
                 }
             ],
         },
