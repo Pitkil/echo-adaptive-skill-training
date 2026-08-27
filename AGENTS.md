@@ -258,3 +258,15 @@ docker compose config
 ```
 
 提交前检查 `git status`，确认没有 `.env`、数据库、上传材料、音频、缓存和临时导出文件。
+
+## 十、运行环境维护记录
+
+- 2026-08-26：负责人 Windows 主机的 Docker Desktop 已升级并验证为 4.88.1。程序安装目录为
+  `D:\Docker\Docker`，WSL 默认数据根和 `CustomWslDistroDir` 均为
+  `D:\DockerDesktopData`。镜像、容器和卷位于
+  `D:\DockerDesktopData\disk\docker_data.vhdx`；C 盘只允许 Docker Desktop 必需的小型配置、日志、
+  临时安装缓存和 Socket，不得存放 Docker 虚拟磁盘。重装或升级时必须同时传入
+  `--installation-dir=D:\Docker\Docker` 和
+  `--wsl-default-data-root=D:\DockerDesktopData`，不得使用“Reset to factory defaults”。
+- 主机存储复核：`C:\Users\<user>\AppData\Local\Docker` 下不应出现 `.vhdx`/`.vhd`；
+  `docker version` 必须同时返回 Client 和 Server；`docker desktop status` 必须为 `running`。

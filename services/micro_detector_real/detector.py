@@ -110,7 +110,7 @@ def extract_embeddings_batch(
 ) -> dict[str, Path]:
     """Extract frame-level embeddings from 16 kHz audio without network access."""
 
-    import soundfile
+    import numpy as np
     import torch
 
     model, processor, device = _load_model()
@@ -121,11 +121,31 @@ def extract_embeddings_batch(
         batch_paths = audio_paths[batch_start : batch_start + batch_size]
         waveforms = []
         for audio_path in batch_paths:
-            samples, sample_rate = soundfile.read(str(audio_path))
+            try:
+                import soundfile
+
+                samples, sample_rate = soundfile.read(str(audio_path))
+                if samples.ndim > 1:
+                    samples = samples.mean(axis=1)
+            except ImportError:
+                import wave
+
+                try:
+                    with wave.open(str(audio_path), "rb") as audio:
+                        sample_rate = audio.getframerate()
+                        if audio.getnchannels() != 1 or audio.getsampwidth() != 2:
+                            raise RuntimeError(
+                                f"{audio_path.name}: expected mono signed 16-bit PCM WAV"
+                            )
+                        samples = (
+                            np.frombuffer(audio.readframes(audio.getnframes()), dtype="<i2")
+                            .astype(np.float32)
+                            / 32768.0
+                        )
+                except (EOFError, wave.Error) as exc:
+                    raise RuntimeError(f"{audio_path.name}: invalid PCM WAV") from exc
             if sample_rate != 16_000:
                 raise RuntimeError(f"{audio_path.name}: expected 16000 Hz, got {sample_rate}")
-            if samples.ndim > 1:
-                samples = samples.mean(axis=1)
             waveforms.append(samples)
 
         inputs = processor(
@@ -192,7 +212,6 @@ def run_detection(
 ) -> list[dict[str, Any]]:
     """Yield progress-compatible prototype matching results."""
 
-    import faiss
     import numpy as np
     import torch
 
@@ -200,8 +219,7 @@ def run_detection(
     labels = sorted(REQUIRED_LABELS)
     prototype_matrix = torch.stack([prototypes[label] for label in labels])
     prototype_matrix = torch.nn.functional.normalize(prototype_matrix, p=2, dim=1)
-    index = faiss.IndexFlatIP(prototype_matrix.shape[1])
-    index.add(prototype_matrix.numpy().astype(np.float32))
+    prototype_array = prototype_matrix.numpy().astype(np.float32)
 
     raw_events = []
     for embedding_path in sorted(embedding_dir.glob("*.pt")):
@@ -210,7 +228,9 @@ def run_detection(
         if window_embeddings is None:
             continue
         normalized = torch.nn.functional.normalize(window_embeddings, p=2, dim=1)
-        scores, indices = index.search(normalized.numpy().astype(np.float32), len(labels))
+        score_matrix = normalized.numpy().astype(np.float32) @ prototype_array.T
+        indices = np.argsort(-score_matrix, axis=1)
+        scores = np.take_along_axis(score_matrix, indices, axis=1)
         for window_index in range(scores.shape[0]):
             for result_index in range(scores.shape[1]):
                 score = float(scores[window_index, result_index])

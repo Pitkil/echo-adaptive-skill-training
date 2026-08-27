@@ -1,0 +1,16 @@
+FROM punditrag-app:latest
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    MICRO_DETECTOR_OFFLINE_MODE=true \
+    MICRO_MODEL_ROOT=/models
+
+WORKDIR /workspace
+
+COPY services/micro_detector_real /workspace/services/micro_detector_real
+
+EXPOSE 8030
+
+CMD ["python", "-m", "uvicorn", "services.micro_detector_real.app:app", "--host", "0.0.0.0", "--port", "8030"]

@@ -153,6 +153,13 @@ def create_app(
         return _store(request).update(memory_id, record)
 
     @application.delete(
+        "/v1/memories/scope",
+        dependencies=protected,
+    )
+    def purge_memories(scope: MemoryScope, request: Request) -> dict:
+        return _store(request).purge_scope(scope)
+
+    @application.delete(
         "/v1/memories/{memory_id}",
         response_model=MemoryMutationResponse,
         dependencies=protected,

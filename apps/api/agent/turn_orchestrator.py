@@ -69,13 +69,22 @@ class TurnOrchestrator:
         "阶段测试",
         "阶段测验",
     }
-    _answer_prefixes = ("答案是", "我选", "我的答案", "提交答案")
+    _answer_prefixes = (
+        "答案是",
+        "我选",
+        "我选择",
+        "我的答案",
+        "我提交的答案",
+        "提交答案",
+        "答对后我的答案",
+        "重复提交我的答案",
+    )
     _chat_phrases = {"谢谢", "好的", "知道了", "明白了"}
 
     @staticmethod
     def normalize(text: str) -> str:
         normalized = (text or "").strip().lower()
-        normalized = re.sub(r"[\s，。！？、,.!?]+", "", normalized)
+        normalized = re.sub(r"[\s，。！？、,.!?:：]+", "", normalized)
         return normalized
 
     def plan(

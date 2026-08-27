@@ -82,6 +82,28 @@ def test_punditrag_client_uploads_to_native_import_contract(monkeypatch) -> None
     assert result["status"] == "pending"
 
 
+def test_punditrag_client_can_restrict_query_to_registered_documents(monkeypatch) -> None:
+    client = PunditRAGClient(base_url="http://punditrag.local")
+    captured = {}
+
+    def fake_request(method, path, payload):
+        captured.update(payload)
+        return {"answer": "answer [1]", "sources": []}
+
+    monkeypatch.setattr(client.query_http, "request", fake_request)
+    client.search(
+        query="module-scoped question",
+        knowledge_base_id=7,
+        module_id=2,
+        external_knowledge_base_id="external-kb",
+        external_document_ids=["doc-2", "doc-2", "doc-3"],
+    )
+
+    assert captured["scope_mode"] == "documents"
+    assert captured["kb_ids"] == ["external-kb"]
+    assert captured["document_ids"] == ["doc-2", "doc-3"]
+
+
 def test_punditrag_client_reuses_matching_knowledge_base(monkeypatch) -> None:
     client = PunditRAGClient(base_url="http://punditrag.local")
 

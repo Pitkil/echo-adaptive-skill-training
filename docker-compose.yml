@@ -15,9 +15,11 @@ services:
       UPLOAD_DIR: /workspace/data/uploads
       PUNDITRAG_IMPORT_BASE_URL: ${PUNDITRAG_DOCKER_IMPORT_BASE_URL:-http://host.docker.internal:8000}
       PUNDITRAG_QUERY_BASE_URL: ${PUNDITRAG_DOCKER_QUERY_BASE_URL:-http://host.docker.internal:8001}
+      PUNDITRAG_TIMEOUT_SECONDS: ${PUNDITRAG_TIMEOUT_SECONDS:-180}
       SIMPLEMEM_BASE_URL: ${SIMPLEMEM_DOCKER_BASE_URL:-http://simplemem:8020}
       SIMPLEMEM_API_KEY: ${SIMPLEMEM_API_KEY:-}
       MICRO_REPRESENTATION_BASE_URL: ${MICRO_REPRESENTATION_DOCKER_BASE_URL:-http://host.docker.internal:8030}
+      EVALUATION_PROFILE_SEED_KEY: ${EVALUATION_PROFILE_SEED_KEY:-}
     depends_on:
       simplemem:
         condition: service_healthy

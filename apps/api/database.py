@@ -511,6 +511,7 @@ class VerificationResult(Base):
     coverage_score = Column(Float, nullable=False)
     difficulty_score = Column(Float, nullable=False)
     issues = Column(JSON, nullable=False, default=list)
+    details = Column(JSON, nullable=False, default=dict)
     retry_count = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, nullable=False, default=datetime.now)
 
@@ -530,6 +531,38 @@ class LearningDecision(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.now)
 
 
+class MemoryAudit(Base):
+    """Business-side audit for every SimpleMem lifecycle attempt."""
+
+    __tablename__ = "memory_audits"
+
+    id = Column(String(64), primary_key=True)
+    request_id = Column(String(64), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    operation = Column(String(30), nullable=False)
+    status = Column(String(20), nullable=False)
+    memory_record = Column(JSON, nullable=True)
+    reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+
+
+class UserDataDeletionJob(Base):
+    """Idempotent record of a user-scoped privacy deletion request."""
+
+    __tablename__ = "user_data_deletion_jobs"
+
+    id = Column(String(64), primary_key=True)
+    request_id = Column(String(64), nullable=False, unique=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    status = Column(String(30), nullable=False, default="queued")
+    result = Column(JSON, nullable=False, default=dict)
+    error_message = Column(Text, nullable=True)
+    requested_at = Column(DateTime, nullable=False, default=datetime.now)
+    completed_at = Column(DateTime, nullable=True)
+
+
 def init_db() -> None:
     """Create a clean competition schema.
 
@@ -543,6 +576,7 @@ def init_db() -> None:
     _ensure_micro_job_columns()
     _ensure_micro_event_columns()
     _ensure_upload_rag_columns()
+    _ensure_verification_result_columns()
 
 
 def _ensure_quiz_metadata_columns() -> None:
@@ -698,3 +732,17 @@ def _ensure_upload_rag_columns() -> None:
                 connection.execute(
                     text(f"ALTER TABLE uploads ADD COLUMN {column_name} {definition}")
                 )
+
+
+def _ensure_verification_result_columns() -> None:
+    """Add structured verification details without requiring a destructive migration."""
+
+    inspector = inspect(engine)
+    if "verification_results" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("verification_results")}
+    if "details" not in existing:
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE verification_results ADD COLUMN details JSON")
+            )

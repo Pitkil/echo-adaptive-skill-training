@@ -14,9 +14,23 @@ from database import (
     UserRole,
 )
 from fastapi.testclient import TestClient
+from Quiz.grading import grade_quiz_answer
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+
+
+def test_formal_choice_question_accepts_answer_with_explanation() -> None:
+    quiz = Quiz(
+        answer="B",
+        type="Choice",
+    )
+
+    grade = grade_quiz_answer(quiz, "B：Temperature 控制随机性。")
+
+    assert grade.is_correct is True
+    assert grade.score == 1.0
+    assert grade.grading_mode == "exact"
 
 
 def test_fixed_quiz_is_selected_by_purpose_and_scored_on_server() -> None:

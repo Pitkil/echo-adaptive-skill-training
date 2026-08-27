@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from agent.turn_orchestrator import PrimaryAction, TurnContext, TurnOrchestrator
 
 
@@ -45,6 +46,21 @@ def test_active_quiz_accepts_only_answer_shaped_turns() -> None:
 
     assert answer.primary_action is PrimaryAction.GRADE_ANSWER
     assert question.primary_action is PrimaryAction.LEARNING_DIALOGUE
+
+
+@pytest.mark.parametrize(
+    "answer_text",
+    (
+        "答对后：我的答案是 Kernel 是中央编排器。",
+        "我提交的答案：Process、Step、Event。",
+        "我选择 B：Temperature 控制随机性。",
+        "重复提交：我的答案是 observe → evaluate → improve。",
+    ),
+)
+def test_active_quiz_accepts_frozen_evaluation_answer_phrases(answer_text: str) -> None:
+    plan = TurnOrchestrator().plan(answer_text, context(active_quiz_id=12))
+
+    assert plan.primary_action is PrimaryAction.GRADE_ANSWER
 
 
 def test_pretest_and_posttest_requests_are_quiz_actions() -> None:

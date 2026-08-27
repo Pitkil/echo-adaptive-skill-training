@@ -80,15 +80,16 @@ def test_health_rejects_lfs_pointer_instead_of_claiming_real_mode(tmp_path, monk
     assert "model.safetensors" in response.json()["detail"]
 
 
-def test_health_rejects_missing_ffmpeg(tmp_path, monkeypatch) -> None:
+def test_health_reports_pcm_wav_only_when_ffmpeg_is_missing(tmp_path, monkeypatch) -> None:
     _create_fake_model_root(tmp_path)
     monkeypatch.setenv("MICRO_MODEL_ROOT", str(tmp_path))
     monkeypatch.setattr(service.shutil, "which", lambda _: None)
 
     response = TestClient(service.app).get("/health")
 
-    assert response.status_code == 503
-    assert "ffmpeg" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json()["mode"] == "real"
+    assert response.json()["audio_mode"] == "pcm_wav_only"
 
 
 def test_detection_job_preserves_scope_and_returns_events(monkeypatch) -> None:

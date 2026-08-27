@@ -1,8 +1,8 @@
 {
-  "version": "1.0",
+  "version": "1.2",
   "description": "ECHO 项目 12 个知识点的 15 份 Microsoft 官方材料来源清单",
   "created_at": "2026-08-19",
-  "last_updated": "2026-08-22",
+  "last_updated": "2026-08-26",
   "total_materials": 15,
   "materials": [
     {
@@ -20,39 +20,55 @@
     },
     {
       "material_id": "MS-SK-TRAINING-BUILD-KERNEL",
-      "title": "Build your kernel - Training",
-      "type": "Microsoft Learn 培训模块",
-      "url": "https://learn.microsoft.com/en-us/training/modules/build-your-kernel",
-      "version": "2025-05-27",
+      "title": "How to quickly start with Semantic Kernel",
+      "type": "Microsoft Learn 快速入门",
+      "url": "https://learn.microsoft.com/en-us/semantic-kernel/get-started/quick-start-guide",
+      "version": "2023-07-11",
       "module_id": "M1",
       "knowledge_point_ids": ["M1-KP1"],
-      "section": "全文",
+      "section": "Build the kernel",
+      "replaces": {
+        "url": "https://learn.microsoft.com/en-us/training/modules/build-your-kernel",
+        "reason": "旧 Training URL 于 2026-08-26 重定向到无关的通用 Azure AI Agent 培训路径",
+        "verified_at": "2026-08-26"
+      },
       "local_file": "",
       "sha256": "",
       "import_status": "pending"
     },
     {
-      "material_id": "MS-SK-CONCEPTS-COMPONENTS",
-      "title": "Semantic Kernel Components",
+      "material_id": "MS-SK-CHAT-HISTORY",
+      "title": "Creating and managing a chat history object",
       "type": "Microsoft Learn 文档",
-      "url": "https://learn.microsoft.com/en-us/semantic-kernel/concepts/semantic-kernel-components",
-      "version": "2024-11-15",
+      "url": "https://learn.microsoft.com/en-us/semantic-kernel/concepts/ai-services/chat-completion/chat-history",
+      "version": "2025-01-20",
       "module_id": "M1",
-      "knowledge_point_ids": ["M1-KP1", "M1-KP2"],
-      "section": "全文",
+      "knowledge_point_ids": ["M1-KP4"],
+      "section": "Chat history object and multi-turn messages",
+      "replaces": {
+        "material_id": "MS-SK-CONCEPTS-COMPONENTS",
+        "url": "https://learn.microsoft.com/en-us/semantic-kernel/concepts/semantic-kernel-components",
+        "reason": "原条目与 KP1/KP2 资料重复，且清单未给 M1-KP4 配置任何正式材料；以当前官方 Chat History 文档补齐真实覆盖",
+        "verified_at": "2026-08-26"
+      },
       "local_file": "",
       "sha256": "",
       "import_status": "pending"
     },
     {
       "material_id": "MS-SK-TRAINING-NATIVE-PLUGINS",
-      "title": "Understand native plugins - Training",
-      "type": "Microsoft Learn 培训模块",
-      "url": "https://learn.microsoft.com/en-us/training/modules/give-your-ai-agent-skills/2-understand-native-plugins",
-      "version": "2025-01-24",
+      "title": "Provide native code to your agents",
+      "type": "Microsoft Learn 文档",
+      "url": "https://learn.microsoft.com/en-us/semantic-kernel/concepts/plugins/adding-native-plugins",
+      "version": "2023-07-12",
       "module_id": "M1",
       "knowledge_point_ids": ["M1-KP3"],
-      "section": "全文",
+      "section": "Native code plugin guidance",
+      "replaces": {
+        "url": "https://learn.microsoft.com/en-us/training/modules/give-your-ai-agent-skills/2-understand-native-plugins",
+        "reason": "旧 Training URL 于 2026-08-26 重定向到无关的通用 Azure AI Agent 培训路径",
+        "verified_at": "2026-08-26"
+      },
       "local_file": "",
       "sha256": "",
       "import_status": "pending"
@@ -72,13 +88,18 @@
     },
     {
       "material_id": "MS-SK-TRAINING-PROMPT-TEMPLATES",
-      "title": "Prompt templates - Training",
-      "type": "Microsoft Learn 培训模块",
-      "url": "https://learn.microsoft.com/en-us/training/modules/create-plugins-semantic-kernel/3-use-semantic-kernel-prompt-templates?pivots=csharp",
-      "version": "2025-01-24",
+      "title": "Using the out-of-the-box prompt template language",
+      "type": "Microsoft Learn 文档",
+      "url": "https://learn.microsoft.com/en-us/semantic-kernel/concepts/prompts/prompt-template-syntax",
+      "version": "2024-10-23",
       "module_id": "M1",
       "knowledge_point_ids": ["M1-KP2"],
-      "section": "全文",
+      "section": "Prompt template syntax",
+      "replaces": {
+        "url": "https://learn.microsoft.com/en-us/training/modules/create-plugins-semantic-kernel/3-use-semantic-kernel-prompt-templates?pivots=csharp",
+        "reason": "旧 Training URL 于 2026-08-26 重定向到无关的通用 Azure AI Agent 培训路径",
+        "verified_at": "2026-08-26"
+      },
       "local_file": "",
       "sha256": "",
       "import_status": "pending"
@@ -225,6 +246,8 @@
     "import_status 当前为 pending，导入成功后更新为 imported",
     "M2 的 '记忆与相关内容检索' 知识点由 Vector Stores 文档覆盖",
     "M3 的 '部署与质量评测' 知识点由 Process Framework 和 Observability 文档联合覆盖",
-    "所有材料当前仅完成来源登记，尚未据此声明已导入、可检索或引用验证通过"
+    "版本 1.1 保留 3 条旧 Training URL 的替换记录；旧地址不得继续作为正式证据",
+    "版本 1.2 用官方 Chat History 文档替换重复的 Components 条目，补齐 M1-KP4 的真实材料覆盖",
+    "所有材料必须以正式导入报告和逐知识点检索验证结果为准，不能仅凭本清单声明可检索或引用验证通过"
   ]
 }
