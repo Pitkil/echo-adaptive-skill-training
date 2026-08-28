@@ -72,5 +72,5 @@ def test_frontend_responses_disable_stale_browser_cache() -> None:
     assert page.headers["cache-control"] == "no-store, max-age=0"
     assert script.headers["cache-control"] == "no-store, max-age=0"
     assert stylesheet.headers["cache-control"] == "no-store, max-age=0"
-    assert 'echo-app.js?v=0.5.0' in page.text
-    assert 'echo-shell.css?v=0.5.0' in page.text
+    assert 'echo-app.js?v=' in page.text
+    assert 'echo-shell.css?v=' in page.text

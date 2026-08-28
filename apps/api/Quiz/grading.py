@@ -32,8 +32,25 @@ def _normalize(value: str) -> str:
 
 
 def _choice_token(value: str) -> str | None:
-    match = re.match(r"^\s*([a-h])(?:\s*[\.\、:：)]|\s*$)", value or "", re.IGNORECASE)
+    match = re.match(
+        r"^\s*([a-h])(?:\s*[\.\、:：)）(（]|\s*$)",
+        value or "",
+        re.IGNORECASE,
+    )
     return match.group(1).casefold() if match else None
+
+
+def _rubric_criteria(scoring_method: str) -> list[list[str]]:
+    """Extract quoted, independently scored concepts from the fixed rubric."""
+
+    criteria = re.findall(
+        r"答出\s*[\"“](.*?)[\"”]\s*得\s*\d+(?:\.\d+)?\s*分",
+        scoring_method or "",
+    )
+    return [
+        [part.strip() for part in re.split(r"\s*(?:/|或)\s*", criterion) if part.strip()]
+        for criterion in criteria
+    ]
 
 
 def grade_quiz_answer(quiz: Quiz, submitted_answer: str) -> QuizGrade:
@@ -58,7 +75,7 @@ def grade_quiz_answer(quiz: Quiz, submitted_answer: str) -> QuizGrade:
         return QuizGrade(is_correct=correct, score=float(correct), grading_mode="exact")
 
     normalized_submission = _normalize(submitted)
-    correct = any(
+    reference_match = any(
         normalized_submission == normalized_reference
         or (
             len(normalized_reference) >= 4
@@ -67,4 +84,22 @@ def grade_quiz_answer(quiz: Quiz, submitted_answer: str) -> QuizGrade:
         for reference in references
         if (normalized_reference := _normalize(reference))
     )
-    return QuizGrade(is_correct=correct, score=float(correct), grading_mode="reference_match")
+    if reference_match:
+        return QuizGrade(is_correct=True, score=1.0, grading_mode="reference_match")
+
+    criteria = _rubric_criteria(quiz.scoring_method or "")
+    if criteria:
+        matched = sum(
+            any(
+                (normalized := _normalize(alternative))
+                and normalized in normalized_submission
+                for alternative in alternatives
+            )
+            for alternatives in criteria
+        )
+        return QuizGrade(
+            is_correct=matched == len(criteria),
+            score=matched / len(criteria),
+            grading_mode="rubric_keywords",
+        )
+    return QuizGrade(is_correct=False, score=0.0, grading_mode="reference_match")

@@ -33,6 +33,52 @@ def test_formal_choice_question_accepts_answer_with_explanation() -> None:
     assert grade.grading_mode == "exact"
 
 
+def test_formal_choice_question_accepts_full_width_parenthesized_explanation() -> None:
+    quiz = Quiz(answer="A", type="Choice")
+
+    grade = grade_quiz_answer(quiz, "A（Process、Step、Event）。")
+
+    assert grade.is_correct is True
+    assert grade.grading_mode == "exact"
+
+
+def test_formal_open_question_uses_registered_keyword_rubric() -> None:
+    quiz = Quiz(
+        answer=(
+            "Kernel 是 Semantic Kernel 的中央编排器（调度中心），是一个依赖注入（DI）容器，"
+            "管理运行 AI 应用所需的所有服务和插件。"
+        ),
+        type="Open",
+        scoring_method=(
+            '答出"中央编排器/调度中心"得 1 分；'
+            '答出"管理服务和插件"得 1 分；共 2 分。'
+        ),
+    )
+
+    grade = grade_quiz_answer(quiz, "Kernel 是中央编排器，负责管理服务和插件。")
+
+    assert grade.is_correct is True
+    assert grade.score == 1.0
+    assert grade.grading_mode == "rubric_keywords"
+
+
+def test_formal_open_question_rejects_incomplete_registered_rubric() -> None:
+    quiz = Quiz(
+        answer="Kernel 是中央编排器，并管理服务和插件。",
+        type="Open",
+        scoring_method=(
+            '答出"中央编排器/调度中心"得 1 分；'
+            '答出"管理服务和插件"得 1 分；共 2 分。'
+        ),
+    )
+
+    grade = grade_quiz_answer(quiz, "Kernel 是中央编排器。")
+
+    assert grade.is_correct is False
+    assert grade.score == 0.5
+    assert grade.grading_mode == "rubric_keywords"
+
+
 def test_fixed_quiz_is_selected_by_purpose_and_scored_on_server() -> None:
     engine = create_engine(
         "sqlite://",

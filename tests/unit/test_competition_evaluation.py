@@ -129,6 +129,11 @@ def test_text_only_hesitation_case_does_not_require_audio_evidence() -> None:
     ) is True
 
 
+def test_profile_queries_use_target_module_after_switch() -> None:
+    assert RUNNER.active_module_id_after_switch(2, 3) == 3
+    assert RUNNER.active_module_id_after_switch(2, None) == 2
+
+
 def test_manifest_is_not_formal_when_git_metadata_is_unavailable() -> None:
     assert (
         RUNNER.manifest_run_kind(
@@ -239,6 +244,8 @@ def test_extract_citations_includes_fixed_quiz_source() -> None:
         [],
     )
 
+    assert len(citations) == 1
+    assert citations[0]["source_title"] == "Observability in Semantic Kernel"
     assert citations == [
         {
             "source_title": "Observability in Semantic Kernel",
@@ -249,3 +256,29 @@ def test_extract_citations_includes_fixed_quiz_source() -> None:
             "chunk_id": None,
         }
     ]
+
+
+def test_extract_citations_prefers_fixed_quiz_source_over_rag_hits() -> None:
+    citations = RUNNER.extract_citations(
+        {
+            "meta": {
+                "evidence": [
+                    {
+                        "metadata": {
+                            "source_title": "Unrelated RAG hit",
+                            "source_url": "https://learn.microsoft.com/unrelated",
+                        }
+                    }
+                ],
+                "assessment": {
+                    "source": {
+                        "source_title": "Fixed question source",
+                        "source_url": "https://learn.microsoft.com/fixed",
+                    }
+                },
+            }
+        },
+        [],
+    )
+
+    assert [item["source_title"] for item in citations] == ["Fixed question source"]

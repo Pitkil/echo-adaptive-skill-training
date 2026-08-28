@@ -20,7 +20,7 @@ D. FrequencyPenalty
 用途：posttest
 难度：standard
 评分方法：选 B 得 2 分，其他不得分。
-资料名称：Conversation history and state management
+资料名称：OpenAIPromptExecutionSettings.Temperature Property
 官方链接：https://learn.microsoft.com/zh-cn/dotnet/api/microsoft.semantickernel.connectors.openai.openaipromptexecutionsettings.temperature
-出处章节：全文
+出处章节：Temperature
 是否更新MIRT：是

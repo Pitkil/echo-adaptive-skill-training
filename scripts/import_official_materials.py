@@ -38,9 +38,8 @@ from database import (  # noqa: E402
     UserRole,
     init_db,
 )
-from integrations.punditrag import PunditRAGClient  # noqa: E402
 from integrations.http_client import IntegrationUnavailable  # noqa: E402
-
+from integrations.punditrag import PunditRAGClient  # noqa: E402
 
 USER_AGENT = "ECHO-Competition-Material-Importer/1.0 (+official-source-archive)"
 TERMINAL_IMPORT_STATES = {"completed", "failed"}
