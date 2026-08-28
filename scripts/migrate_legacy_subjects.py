@@ -18,8 +18,8 @@ API_DIR = REPOSITORY_ROOT / "apps" / "api"
 sys.path.insert(0, str(API_DIR))
 
 from database import (  # noqa: E402
-    LearnerAbility,
     KnowledgePoint,
+    LearnerAbility,
     Quiz,
     SessionLocal,
     TrainingModule,

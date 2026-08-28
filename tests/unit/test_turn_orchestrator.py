@@ -4,7 +4,7 @@ import pytest
 from agent.turn_orchestrator import PrimaryAction, TurnContext, TurnOrchestrator
 
 
-def context(*, active_quiz_id: int | None = None) -> TurnContext:
+def context(*, active_quiz_id: int | None = None, active_quiz_type: str | None = None) -> TurnContext:
     return TurnContext(
         user_id=1,
         session_id=2,
@@ -12,6 +12,7 @@ def context(*, active_quiz_id: int | None = None) -> TurnContext:
         module_id=4,
         knowledge_base_id=5,
         active_quiz_id=active_quiz_id,
+        active_quiz_type=active_quiz_type,
     )
 
 
@@ -46,6 +47,15 @@ def test_active_quiz_accepts_only_answer_shaped_turns() -> None:
 
     assert answer.primary_action is PrimaryAction.GRADE_ANSWER
     assert question.primary_action is PrimaryAction.LEARNING_DIALOGUE
+
+
+def test_open_quiz_accepts_natural_language_answer() -> None:
+    plan = TurnOrchestrator().plan(
+        "Kernel 是管理服务和插件的依赖注入容器。",
+        context(active_quiz_id=12, active_quiz_type="Open"),
+    )
+
+    assert plan.primary_action is PrimaryAction.GRADE_ANSWER
 
 
 @pytest.mark.parametrize(

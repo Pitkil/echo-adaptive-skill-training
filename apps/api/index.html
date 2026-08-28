@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@500;600&family=Source+Serif+4:ital,wght@0,500;0,600;1,500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/web/echo-shell.css?v=0.5.0">
+    <link rel="stylesheet" href="/web/echo-shell.css?v=0.6.5">
     <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 </head>
@@ -105,6 +105,50 @@
                     </div>
                 </section>
 
+                <section class="course-path-preview" aria-labelledby="course-path-preview-title">
+                    <div class="course-section-heading">
+                        <div><h2 id="course-path-preview-title">学生决策路线</h2><p>直接看到系统如何依据学习证据安排下一步。</p></div>
+                        <button id="course-path-report" class="icon-button" type="button" title="查看完整学习报告"><i data-lucide="chart-no-axes-combined"></i></button>
+                    </div>
+                    <div class="course-path-card">
+                        <div class="course-path-main">
+                            <div id="course-path-status" class="job-status">正在读取你的学习路径…</div>
+                            <div class="decision-flow" aria-label="学习决策流程">
+                                <div class="decision-flow-step is-evidence">
+                                    <span class="decision-flow-index">01</span>
+                                    <i data-lucide="clipboard-check" aria-hidden="true"></i>
+                                    <div><strong>学习证据</strong><small id="course-path-evidence">等待有效作答</small></div>
+                                </div>
+                                <span class="decision-flow-connector" aria-hidden="true"></span>
+                                <div class="decision-flow-step is-diagnosis">
+                                    <span class="decision-flow-index">02</span>
+                                    <i data-lucide="scan-search" aria-hidden="true"></i>
+                                    <div><strong>掌握判断</strong><small id="course-path-diagnosis">建立你的能力画像</small></div>
+                                </div>
+                                <span class="decision-flow-connector" aria-hidden="true"></span>
+                                <div class="decision-flow-step is-route">
+                                    <span class="decision-flow-index">03</span>
+                                    <i data-lucide="route" aria-hidden="true"></i>
+                                    <div><strong>路径排序</strong><small id="course-path-focus">按当前证据排列</small></div>
+                                </div>
+                                <span class="decision-flow-connector" aria-hidden="true"></span>
+                                <div class="decision-flow-step is-next">
+                                    <span class="decision-flow-index">04</span>
+                                    <i data-lucide="arrow-up-right" aria-hidden="true"></i>
+                                    <div><strong>下一步</strong><small>准备开始</small></div>
+                                </div>
+                            </div>
+                            <ol id="course-learning-path" class="learning-path course-learning-path"></ol>
+                        </div>
+                        <div class="course-path-next">
+                            <span>系统安排的下一步</span>
+                            <strong id="course-path-next-title">等待学习证据</strong>
+                            <small id="course-path-next-reason">完成一次有效作答后，路径会根据你的结果更新。</small>
+                            <div class="course-path-signal"><span>推荐难度</span><strong id="course-path-difficulty">建立基线</strong></div>
+                        </div>
+                    </div>
+                </section>
+
                 <section class="sample-courses" aria-labelledby="sample-course-title">
                     <div class="course-section-heading">
                         <div><h2 id="sample-course-title">更多课程方向</h2><p>以下仅用于展示平台可扩展的课程形态，尚未开放学习，也不会产生虚假进度。</p></div>
@@ -180,6 +224,7 @@
                                 </div>
                             </div>
                         </div>
+                        <button id="chat-jump-bottom" class="chat-jump" type="button" title="回到底部" aria-label="回到底部"><i data-lucide="arrow-down"></i></button>
                         <form id="chat-form" class="composer">
                             <section id="assessment-next" class="assessment-next" aria-live="polite">
                                 <div class="assessment-next-copy">
@@ -198,6 +243,25 @@
                             </div>
                         </form>
                     </section>
+                    <aside class="learning-path-side" aria-labelledby="workspace-path-title">
+                        <div class="panel-heading">
+                            <div><p class="eyebrow">决策路线</p><h2 id="workspace-path-title">当前决策路线</h2></div>
+                            <button id="workspace-path-report" class="icon-button" type="button" title="查看完整学习报告"><i data-lucide="chart-no-axes-combined"></i></button>
+                        </div>
+                        <div class="workspace-decision-rail" aria-label="学习决策流程">
+                            <div class="workspace-decision-step is-evidence"><i data-lucide="clipboard-check" aria-hidden="true"></i><span>证据</span><small id="workspace-path-evidence">待取证</small></div>
+                            <div class="workspace-decision-step is-diagnosis"><i data-lucide="scan-search" aria-hidden="true"></i><span>判断</span><small id="workspace-path-diagnosis">待前测</small></div>
+                            <div class="workspace-decision-step is-route"><i data-lucide="route" aria-hidden="true"></i><span>排序</span><small id="workspace-path-focus">按优先级</small></div>
+                            <div class="workspace-decision-step is-next"><i data-lucide="arrow-up-right" aria-hidden="true"></i><span>下一步</span><small>已安排</small></div>
+                        </div>
+                        <div id="workspace-path-status" class="job-status">正在读取你的学习路径…</div>
+                        <ol id="workspace-learning-path" class="learning-path workspace-learning-path"></ol>
+                        <div class="workspace-path-next">
+                            <span>系统安排的下一步</span>
+                            <strong id="workspace-path-next-title">等待学习证据</strong>
+                            <small id="workspace-path-next-reason">完成一次有效作答后，路径会根据你的结果更新。</small>
+                        </div>
+                    </aside>
                 </div>
             </section>
 
@@ -222,13 +286,13 @@
                 </div>
                 <div id="insight-evidence" class="insight-pane">
                     <div class="evidence-grid">
-                        <section><div class="panel-heading"><h2>知识点状态</h2><span id="diagnosis-confidence">置信度 0%</span></div><h3>已掌握知识点</h3><div id="mastered-list" class="tag-list"></div><h3>知识盲区</h3><div id="blind-list" class="tag-list danger"></div></section>
+                        <section><div class="panel-heading"><h2>知识点状态</h2><span id="diagnosis-confidence">置信度 0%</span></div><h3>已掌握知识点</h3><div id="mastered-list" class="tag-list"></div><h3>知识盲区</h3><div id="blind-list" class="tag-list danger"></div><div class="blindspot-visual"><div class="panel-heading"><h3>盲区定位</h3><span>按知识点正确率</span></div><canvas id="blindspot-chart" aria-label="知识点掌握度和盲区定位图"></canvas></div></section>
                         <section><div class="panel-heading"><h2>诊断证据</h2><span>仅显示已确认事件</span></div><div id="micro-evidence-list" class="record-list"></div><h3>长期记忆摘要</h3><div id="memory-list" class="record-list"></div></section>
                     </div>
                 </div>
                 <div id="insight-path" class="insight-pane">
                     <div class="path-grid">
-                        <section><div class="panel-heading"><h2>资源难度匹配</h2><span>预测概率 / 实际结果</span></div><canvas id="difficulty-chart"></canvas></section>
+                        <section><div class="panel-heading"><h2>资源难度匹配曲线</h2><span>预测概率 / 实际结果</span></div><canvas id="difficulty-chart" aria-label="资源难度匹配曲线"></canvas></section>
                         <section><div class="panel-heading"><h2>个性化学习路径</h2><i data-lucide="milestone"></i></div><ol id="learning-path" class="learning-path"></ol><div id="recommendation-reason" class="reason-box"></div></section>
                     </div>
                 </div>
@@ -464,6 +528,6 @@
         </section>
     </div>
     <div id="toast" class="toast" role="status"></div>
-    <script src="/web/echo-app.js?v=0.5.0"></script>
+    <script src="/web/echo-app.js?v=0.6.5"></script>
 </body>
 </html>

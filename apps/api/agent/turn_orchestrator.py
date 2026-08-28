@@ -39,6 +39,7 @@ class TurnContext(BaseModel):
     knowledge_base_id: int
     echo_state: str = "E"
     active_quiz_id: int | None = None
+    active_quiz_type: str | None = None
 
 
 class TurnPlan(BaseModel):
@@ -80,6 +81,8 @@ class TurnOrchestrator:
         "重复提交我的答案",
     )
     _chat_phrases = {"谢谢", "好的", "知道了", "明白了"}
+
+    _open_quiz_types = {"open", "short", "essay", "简答题", "开放题"}
 
     @staticmethod
     def normalize(text: str) -> str:
@@ -129,8 +132,13 @@ class TurnOrchestrator:
             plan.target_module_id = requested_module_id
             return plan
 
+        is_open_quiz = (context.active_quiz_type or "").replace("_", "").replace("-", "").casefold() in {
+            item.replace("_", "").replace("-", "").casefold()
+            for item in self._open_quiz_types
+        }
         if context.active_quiz_id is not None and (
-            normalized.startswith(self._answer_prefixes)
+            is_open_quiz
+            or normalized.startswith(self._answer_prefixes)
             or re.fullmatch(r"[abcd]", normalized, flags=re.IGNORECASE)
         ):
             return self._build(

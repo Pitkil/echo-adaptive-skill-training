@@ -29,7 +29,6 @@ from app import ensure_catalog, is_official_microsoft_source_url  # noqa: E402
 from catalog import KNOWLEDGE_BASE_CODE  # noqa: E402
 from database import KnowledgeBase, SessionLocal, Upload, init_db  # noqa: E402
 
-
 QUERY_CASES = (
     ("M1-KP1", "M1", "How do I create a Semantic Kernel and add an AI chat completion service?"),
     ("M1-KP2", "M1", "How does Semantic Kernel prompt template syntax reference variables and functions?"),

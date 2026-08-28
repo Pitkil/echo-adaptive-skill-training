@@ -11,6 +11,7 @@
         moduleId: null,
         knowledgePoints: [],
         microLearners: [],
+        latestPathView: null,
         quizPreviewId: null,
         sessionId: null,
         assessmentProgress: null,
@@ -29,6 +30,7 @@
         videoCheckpoints: new Set(),
         videoEvidenceContext: null,
         lastVideoProgressSave: 0,
+        isSending: false,
         charts: {},
     };
 
@@ -303,6 +305,7 @@
         $$("[data-course-module-id]").forEach((button) => {
             button.addEventListener("click", () => selectCourseModule(Number(button.dataset.courseModuleId)));
         });
+        renderCoursePathPreview(state.latestPathView || {});
         updateVideoHeading();
         iconRefresh();
     }
@@ -657,15 +660,32 @@
         iconRefresh();
     }
 
-    function appendMessage(role, content) {
+    function appendMessage(role, content, extraClass = "") {
         const container = $("#chat-messages");
         const empty = container.querySelector(".empty-state");
         if (empty) empty.remove();
         const message = document.createElement("div");
-        message.className = `message ${role}`;
+        message.className = `message ${role} ${extraClass}`.trim();
         message.textContent = content;
         container.appendChild(message);
         container.scrollTop = container.scrollHeight;
+        syncChatScrollControl();
+        return message;
+    }
+
+    function syncChatScrollControl() {
+        const container = $("#chat-messages");
+        const button = $("#chat-jump-bottom");
+        if (!container || !button) return;
+        const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+        button.classList.toggle("visible", distanceFromBottom > 160);
+    }
+
+    function scrollChatToBottom() {
+        const container = $("#chat-messages");
+        if (!container) return;
+        container.scrollTo({top: container.scrollHeight, behavior: "smooth"});
+        window.setTimeout(syncChatScrollControl, 260);
     }
 
     async function parseNdjson(response) {
@@ -695,8 +715,10 @@
     }
 
     async function sendMessage(text, requestedModuleId = null) {
-        if (!text.trim()) return;
+        if (!text.trim() || state.isSending) return;
+        setChatSending(true);
         appendMessage("user", text.trim());
+        const pending = appendMessage("assistant", "正在根据你的学习证据整理下一步…", "pending");
         $("#chat-input").value = "";
         const body = {
             user_input: text.trim(),
@@ -711,6 +733,7 @@
             const response = await api("/chat", {method: "POST", body: JSON.stringify(body)});
             const result = await parseNdjson(response);
             state.sessionId = result.meta?.session_id || state.sessionId;
+            pending.remove();
             appendMessage("assistant", result.content || "本轮已完成。");
             renderTrace(result.meta || {});
             renderQuiz(result.meta?.quiz);
@@ -721,7 +744,21 @@
             }
             setEchoStage(result.meta?.echo_state || "E");
         } catch (error) {
+            pending.remove();
             appendMessage("assistant", `本轮执行失败：${error.message}`);
+        } finally {
+            setChatSending(false);
+        }
+    }
+
+    function setChatSending(isSending) {
+        state.isSending = isSending;
+        const form = $("#chat-form");
+        const submit = form?.querySelector("button[type='submit']");
+        if (form) form.classList.toggle("is-sending", isSending);
+        if (submit) {
+            submit.disabled = isSending;
+            submit.setAttribute("aria-busy", String(isSending));
         }
     }
 
@@ -741,8 +778,14 @@
             standard: "标准",
             advanced: "进阶",
         }[quiz.difficulty] || quiz.difficulty;
-        note.textContent = `${purpose} · ${difficulty}难度。请使用“答案是：……”提交，本轮将只执行判题动作。`;
+        const normalizedType = String(quiz.type || "").replaceAll("_", "").replaceAll("-", "").toLowerCase();
+        const isOpen = ["open", "short", "essay", "简答题", "开放题"].includes(normalizedType);
+        note.textContent = isOpen
+            ? `${purpose} · ${difficulty}难度。请直接输入文字答案；如果不会，可输入“我不会”，本轮将执行判题。`
+            : `${purpose} · ${difficulty}难度。请使用“答案是：……”或选项提交，本轮将执行判题。`;
         container.appendChild(note);
+        container.scrollTop = container.scrollHeight;
+        syncChatScrollControl();
     }
 
     function setEchoStage(stage) {
@@ -861,9 +904,17 @@
         $("#metric-attempts").textContent = `${ability.attempt_count || 0} 次有效作答`;
         $("#diagnosis-confidence").textContent = `诊断置信度 ${Math.round((evidenceView.diagnosis_confidence || 0) * 100)}%`;
         renderLearningPath(pathView.learning_path || []);
+        renderWorkspacePath(pathView);
+        state.latestPathView = pathView;
+        renderCoursePathPreview(pathView);
         $("#recommendation-reason").textContent = pathView.recommendation_reason || "先完成模块前测以建立推荐基线。";
         renderTrendChart(abilityView.daily_series || []);
         renderDifficultyChart(pathView.difficulty_match_curve || []);
+        renderBlindspotChart(
+            pathView.learning_path || [],
+            evidenceView.knowledge_blind_spots || [],
+            evidenceView.mastered_knowledge_points || [],
+        );
     }
 
     function renderTags(selector, items, emptyText) {
@@ -884,9 +935,71 @@
     }
 
     function renderLearningPath(items) {
-        $("#learning-path").innerHTML = items.length
-            ? items.map((item, index) => `<li><span>${index + 1}</span><strong>${escapeHtml(item.name)}</strong><em>${item.status === "priority_review" ? "优先复习" : "计划学习"}</em></li>`).join("")
+        renderLearningPathInto("#learning-path", items);
+    }
+
+    function renderLearningPathInto(selector, items) {
+        const node = $(selector);
+        if (!node) return;
+        node.innerHTML = items.length
+            ? items.map((item, index) => `<li class="${escapeHtml(item.status || "planned")}"><span>${index + 1}</span><strong>${escapeHtml(item.name)}</strong><em>${item.status === "priority_review" ? "优先复习" : item.status === "mastered" ? "已掌握" : "计划学习"}</em></li>`).join("")
             : "<li><span>1</span><strong>等待模块知识点配置</strong><em>未开始</em></li>";
+    }
+
+    function renderWorkspacePath(pathView) {
+        const items = pathView.learning_path || [];
+        renderLearningPathInto("#workspace-learning-path", items);
+        const status = $("#workspace-path-status");
+        const nextTitle = $("#workspace-path-next-title");
+        const nextReason = $("#workspace-path-next-reason");
+        if (!status || !nextTitle || !nextReason) return;
+        const next = pathView.next_knowledge_point
+            || items.find((item) => item.status === "priority_review")
+            || items.find((item) => item.status === "planned");
+        status.textContent = items.length ? `${items.length} 个知识点，按当前证据排序` : "当前模块还没有可展示的路径";
+        nextTitle.textContent = next?.name || "等待学习证据";
+        nextReason.textContent = compactPathReason(pathView.recommendation_reason) || "完成一次有效作答后更新";
+        const sourceCount = Array.isArray(pathView.evidence_sources) ? pathView.evidence_sources.length : 0;
+        const profileType = pathView.learner_profile?.label || pathView.learner_profile?.type;
+        const reviewCount = items.filter((item) => item.status === "priority_review").length;
+        const workspaceEvidence = $("#workspace-path-evidence");
+        const workspaceDiagnosis = $("#workspace-path-diagnosis");
+        const workspaceFocus = $("#workspace-path-focus");
+        if (workspaceEvidence) workspaceEvidence.textContent = sourceCount ? `${sourceCount} 条` : "待取证";
+        if (workspaceDiagnosis) workspaceDiagnosis.textContent = profileType ? "已形成画像" : "待前测";
+        if (workspaceFocus) workspaceFocus.textContent = reviewCount ? `${reviewCount} 项重点` : "按优先级";
+    }
+
+    function renderCoursePathPreview(pathView) {
+        const items = pathView.learning_path || [];
+        renderLearningPathInto("#course-learning-path", items);
+        const status = $("#course-path-status");
+        const nextTitle = $("#course-path-next-title");
+        const nextReason = $("#course-path-next-reason");
+        const evidence = $("#course-path-evidence");
+        const diagnosis = $("#course-path-diagnosis");
+        const focus = $("#course-path-focus");
+        const difficulty = $("#course-path-difficulty");
+        if (!status || !nextTitle || !nextReason) return;
+        const next = pathView.next_knowledge_point
+            || items.find((item) => item.status === "priority_review")
+            || items.find((item) => item.status === "planned");
+        status.textContent = items.length ? `${items.length} 个知识点，按当前证据排序` : "当前模块还没有可展示的路径";
+        nextTitle.textContent = next?.name || "等待学习证据";
+        nextReason.textContent = compactPathReason(pathView.recommendation_reason) || "完成一次有效作答后更新";
+        const sourceCount = Array.isArray(pathView.evidence_sources) ? pathView.evidence_sources.length : 0;
+        const masteredCount = items.filter((item) => item.status === "mastered").length;
+        const reviewCount = items.filter((item) => item.status === "priority_review").length;
+        const profileType = pathView.learner_profile?.type || pathView.learner_profile?.label;
+        if (evidence) evidence.textContent = sourceCount ? `${sourceCount} 条` : "待取证";
+        if (diagnosis) diagnosis.textContent = profileType ? "已形成画像" : "待前测";
+        if (focus) focus.textContent = reviewCount ? `${reviewCount} 项重点` : masteredCount ? `${masteredCount} 项已掌握` : "按优先级";
+        if (difficulty) difficulty.textContent = ({ foundation: "基础巩固", standard: "标准进阶", advanced: "挑战提升" }[pathView.recommended_difficulty] || "建立基线");
+    }
+
+    function compactPathReason(reason) {
+        const text = String(reason || "").split("；")[0].trim();
+        return text.length > 28 ? `${text.slice(0, 28)}…` : text;
     }
 
     function replaceChart(name, canvas, config) {
@@ -916,15 +1029,44 @@
 
     function renderDifficultyChart(items) {
         replaceChart("difficulty", $("#difficulty-chart"), {
-            type: "bar",
+            type: "line",
             data: {
                 labels: items.map((_, index) => `作答 ${index + 1}`),
                 datasets: [
-                    {label: "预计答对概率", data: items.map((item) => item.predicted_probability), backgroundColor: "#466270"},
-                    {label: "实际结果", data: items.map((item) => item.actual_result ? 1 : 0), backgroundColor: "#78909c"},
+                    {label: "预计答对概率", data: items.map((item) => item.predicted_probability), borderColor: "#466270", backgroundColor: "rgba(70,98,112,.12)", fill: true, tension: .25, pointRadius: 3},
+                    {label: "实际结果", data: items.map((item) => item.actual_result ? 1 : 0), borderColor: "#c4775b", backgroundColor: "#c4775b", borderDash: [5, 4], tension: 0, pointRadius: 3},
                 ],
             },
-            options: {responsive: true, maintainAspectRatio: false, scales: {y: {min: 0, max: 1}}},
+            options: {responsive: true, maintainAspectRatio: false, scales: {y: {min: 0, max: 1, ticks: {callback: (value) => `${Math.round(value * 100)}%`}}}},
+        });
+    }
+
+    function renderBlindspotChart(pathItems, blindSpots, masteredItems) {
+        const accuracyByPoint = new Map(
+            [...blindSpots, ...masteredItems]
+                .filter((item) => item?.knowledge_point_id != null && item.accuracy != null)
+                .map((item) => [item.knowledge_point_id, Number(item.accuracy)]),
+        );
+        const visible = pathItems.slice(0, 12);
+        replaceChart("blindspot", $("#blindspot-chart"), {
+            type: "bar",
+            data: {
+                labels: visible.map((item) => item.name),
+                datasets: [{
+                    label: "正确率",
+                    data: visible.map((item) => accuracyByPoint.has(item.knowledge_point_id) ? accuracyByPoint.get(item.knowledge_point_id) : null),
+                    backgroundColor: visible.map((item) => item.status === "priority_review" ? "#9d403b" : item.status === "mastered" ? "#426f62" : "rgba(70,98,112,.22)"),
+                    borderRadius: 4,
+                    maxBarThickness: 24,
+                }],
+            },
+            options: {
+                indexAxis: "y",
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {x: {min: 0, max: 1, ticks: {callback: (value) => `${Math.round(value * 100)}%`}}, y: {ticks: {autoSkip: false}}},
+                plugins: {tooltip: {callbacks: {label: (context) => context.raw == null ? "暂无作答证据" : `正确率：${Math.round(context.raw * 100)}%`}}},
+            },
         });
     }
 
@@ -1735,6 +1877,8 @@
             event.preventDefault();
             sendMessage($("#chat-input").value);
         });
+        $("#chat-messages").addEventListener("scroll", syncChatScrollControl, {passive: true});
+        $("#chat-jump-bottom").addEventListener("click", scrollChatToBottom);
         $$('[data-chat-prompt]').forEach((button) => {
             button.addEventListener("click", () => sendMessage(button.dataset.chatPrompt || ""));
         });
@@ -1744,6 +1888,8 @@
             $$(".insight-pane").forEach((pane) => pane.classList.toggle("active", pane.id === `insight-${button.dataset.insightTab}`));
         }));
         $("#refresh-insight").addEventListener("click", loadInsight);
+        $("#workspace-path-report").addEventListener("click", () => showView("insight"));
+        $("#course-path-report").addEventListener("click", () => showView("insight"));
         $("#refresh-demo-trace").addEventListener("click", loadDemoTrace);
         $("#generate-resources").addEventListener("click", generateResources);
         $("#resource-list").addEventListener("click", (event) => {

@@ -129,6 +129,7 @@ def import_formal_items(data_root: Path, *, apply: bool, replace_demo_seeds: boo
 
         removed = remove_unused_demo_seeds(db) if replace_demo_seeds else 0
         imported = 0
+        updated = 0
         skipped = 0
         for item in items:
             module = modules[item["module_code"]]
@@ -143,7 +144,27 @@ def import_formal_items(data_root: Path, *, apply: bool, replace_demo_seeds: boo
                 .first()
             )
             if duplicate is not None:
-                skipped += 1
+                desired = {
+                    "answer": item["answer"],
+                    "type": item["type"],
+                    "intercept_d": DIFFICULTY_INTERCEPTS[item["difficulty"]],
+                    "purpose": item["purpose"],
+                    "difficulty": item["difficulty"],
+                    "scoring_method": item["scoring_method"],
+                    "source_title": item["source_title"],
+                    "source_url": item["source_url"],
+                    "source_section": item["source_section"],
+                    "counts_for_mirt": item["counts_for_mirt"],
+                }
+                changed = False
+                for field, value in desired.items():
+                    if getattr(duplicate, field) != value:
+                        setattr(duplicate, field, value)
+                        changed = True
+                if changed:
+                    updated += 1
+                else:
+                    skipped += 1
                 continue
             db.add(
                 Quiz(
@@ -177,6 +198,7 @@ def import_formal_items(data_root: Path, *, apply: bool, replace_demo_seeds: boo
             "validated": len(items),
             "removed_demo_seeds": removed,
             "imported": imported,
+            "updated": updated,
             "skipped_duplicates": skipped,
             "expected_distribution": dict(EXPECTED_DISTRIBUTION),
         }

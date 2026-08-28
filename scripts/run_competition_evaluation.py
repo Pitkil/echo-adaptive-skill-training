@@ -88,6 +88,12 @@ def requires_real_micro_signal(case: dict[str, Any]) -> bool:
     )
 
 
+def active_module_id_after_switch(initial_module_id: int, target_module_id: int | None) -> int:
+    """Return the module whose state must be queried after a turn."""
+
+    return target_module_id if target_module_id is not None else initial_module_id
+
+
 def parse_ndjson(text: str) -> dict[str, Any]:
     """Combine the ECHO streaming response without losing individual events."""
 
@@ -104,6 +110,35 @@ def parse_ndjson(text: str) -> dict[str, Any]:
         elif event.get("type") == "content":
             content_parts.append(str(event.get("content") or ""))
     return {"events": events, "meta": meta, "content": "".join(content_parts)}
+
+
+def normalize_idempotency_response(payload: Any) -> Any:
+    """Ignore only the expected replay status marker when comparing responses."""
+
+    if isinstance(payload, dict):
+        normalized = {
+            key: normalize_idempotency_response(value) for key, value in payload.items()
+        }
+        assessment = normalized.get("assessment")
+        if isinstance(assessment, dict) and "updated" in assessment:
+            assessment["updated"] = "[IDEMPOTENCY_STATUS]"
+        return normalized
+    if isinstance(payload, list):
+        return [normalize_idempotency_response(item) for item in payload]
+    if isinstance(payload, str):
+        return re.sub(
+            r"^(该请求已处理过，已返回原判定结果，本次重放不重复更新能力画像。|"
+            r"回答正确，能力画像已更新。)",
+            "[IDEMPOTENCY_STATUS]",
+            payload,
+        )
+    return payload
+
+
+def idempotency_responses_are_equivalent(first: Any, replay: Any) -> bool:
+    """Compare replay business output while permitting its explicit status marker."""
+
+    return normalize_idempotency_response(first) == normalize_idempotency_response(replay)
 
 
 def safe_slug(value: str, *, limit: int = 24) -> str:
@@ -240,14 +275,15 @@ def official_citation_from_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
 
 def extract_citations(chat_payload: dict[str, Any], resources: list[dict[str, Any]]) -> list[dict]:
     citations: list[dict[str, Any]] = []
-    for item in chat_payload.get("meta", {}).get("evidence", []) or []:
-        if isinstance(item, dict):
-            citations.append(official_citation_from_metadata(item.get("metadata") or {}))
     assessment_source = (
         chat_payload.get("meta", {}).get("assessment", {}).get("source")
     )
     if isinstance(assessment_source, dict):
         citations.append(official_citation_from_metadata(assessment_source))
+    else:
+        for item in chat_payload.get("meta", {}).get("evidence", []) or []:
+            if isinstance(item, dict):
+                citations.append(official_citation_from_metadata(item.get("metadata") or {}))
     for resource in resources:
         for metadata in resource.get("evidence_sources", []) or []:
             if isinstance(metadata, dict):
@@ -372,6 +408,7 @@ class CompetitionEvaluationRunner:
         headers = {"Authorization": f"Bearer {token}"}
         catalog = self.catalog(token)
         module, point = self.select_module_and_point(case, catalog)
+        active_module_id = module["id"]
         user_id = int(registration["user_id"])
 
         if not self.evaluation_seed_key:
@@ -422,6 +459,7 @@ class CompetitionEvaluationRunner:
         chat_payload: dict[str, Any] = {}
         resource_response: TimedResponse | None = None
         chat_response: TimedResponse | None = None
+        idempotency_proof: dict[str, Any] | None = None
         request_payload: dict[str, Any]
         expected_resource = case["expected"].get("resource_type")
         if case["scenario_type"] in RESOURCE_SCENARIOS:
@@ -429,6 +467,8 @@ class CompetitionEvaluationRunner:
                 "user_id": user_id,
                 "module_id": module["id"],
                 "knowledge_point_id": point["id"],
+                "resource_type": expected_resource,
+                "user_input": case.get("input", ""),
                 "request_id": f"eval-{self.run_id}-{case['case_id']}-resource",
             }
             resource_response = self.client.timed_request(
@@ -446,6 +486,8 @@ class CompetitionEvaluationRunner:
                     "module_id": module["id"],
                     "knowledge_point_id": point["id"],
                     "source_url": case["expected"].get("source_url"),
+                    "source_section": case["expected"].get("source_section"),
+                    "difficulty": case["expected"].get("difficulty"),
                 }
                 preparation_response = self.client.timed_request(
                     "POST",
@@ -475,6 +517,10 @@ class CompetitionEvaluationRunner:
             if case["case_id"] == "047":
                 target = next((row for row in catalog["modules"] if row.get("code") == "M3"), None)
                 request_payload["requested_module_id"] = target["id"] if target else None
+                active_module_id = active_module_id_after_switch(
+                    active_module_id,
+                    request_payload["requested_module_id"],
+                )
             chat_response = self.client.timed_request(
                 "POST", "/chat", json=request_payload, headers=headers
             )
@@ -485,17 +531,64 @@ class CompetitionEvaluationRunner:
                 chat_payload = chat_response.payload
 
             if case["case_id"] == "048" and chat_response.status_code < 400:
+                after_first = self.client.timed_request(
+                    "GET",
+                    f"/users/{user_id}/learning-insight",
+                    params={"module_id": module["id"]},
+                    headers=headers,
+                )
+                raw["idempotency_profile_after_first"] = after_first.__dict__
                 repeated = self.client.timed_request(
                     "POST", "/chat", json=request_payload, headers=headers
                 )
                 raw["idempotency_replay"] = repeated.__dict__
-                if repeated.payload != chat_response.payload:
+                exact_response_match = repeated.payload == chat_response.payload
+                equivalent_response = idempotency_responses_are_equivalent(
+                    chat_response.payload, repeated.payload
+                )
+                if not equivalent_response:
                     failures.append("IDEMPOTENCY_REPLAY_CHANGED_RESPONSE")
+                after_replay = self.client.timed_request(
+                    "GET",
+                    f"/users/{user_id}/learning-insight",
+                    params={"module_id": module["id"]},
+                    headers=headers,
+                )
+                raw["idempotency_profile_after_replay"] = after_replay.__dict__
+                first_ability = (
+                    after_first.payload.get("views", {})
+                    .get("ability_and_trend", {})
+                    .get("ability", {})
+                )
+                replay_ability = (
+                    after_replay.payload.get("views", {})
+                    .get("ability_and_trend", {})
+                    .get("ability", {})
+                )
+                stable_fields = ("U", "A", "R", "attempt_count")
+                is_stable = all(
+                    first_ability.get(field) == replay_ability.get(field)
+                    for field in stable_fields
+                )
+                if not is_stable:
+                    failures.append("IDEMPOTENCY_REPLAY_CHANGED_ABILITY")
+                idempotency_proof = {
+                    "same_request_id": True,
+                    "same_response": equivalent_response,
+                    "exact_response_match": exact_response_match,
+                    "ability_unchanged_on_replay": is_stable,
+                    "after_first": {
+                        field: first_ability.get(field) for field in stable_fields
+                    },
+                    "after_replay": {
+                        field: replay_ability.get(field) for field in stable_fields
+                    },
+                }
 
         resources_response = self.client.timed_request(
             "GET",
             "/v1/resources",
-            params={"module_id": module["id"]},
+            params={"module_id": active_module_id},
             headers=headers,
         )
         resources_payload = (
@@ -517,7 +610,7 @@ class CompetitionEvaluationRunner:
         profile_after = self.client.timed_request(
             "GET",
             f"/users/{user_id}/learning-insight",
-            params={"module_id": module["id"]},
+            params={"module_id": active_module_id},
             headers=headers,
         )
         raw["profile_before"] = profile_before.__dict__
@@ -530,6 +623,18 @@ class CompetitionEvaluationRunner:
             failures.append(
                 f"PRIMARY_ACTION_MISMATCH(expected={expected_action},actual={actual_action or 'missing'})"
             )
+        assessment = chat_payload.get("meta", {}).get("assessment", {})
+        expected_is_correct = case["expected"].get("is_correct")
+        if expected_is_correct is not None and assessment.get("is_correct") is not expected_is_correct:
+            failures.append(
+                "GRADING_RESULT_MISMATCH"
+                f"(expected={expected_is_correct},actual={assessment.get('is_correct')})"
+            )
+        if (
+            case["expected"].get("update_mirt") is True
+            and assessment.get("updated") is not True
+        ):
+            failures.append("EXPECTED_MIRT_UPDATE_MISSING")
 
         selected_resource = next(
             (row for row in resources if row.get("resource_type") == expected_resource),
@@ -619,6 +724,7 @@ class CompetitionEvaluationRunner:
                 "micro_signal_evidence_present": confirmed_micro_count > 0,
                 "confirmed_micro_event_count": confirmed_micro_count,
             },
+            "idempotency_proof": idempotency_proof,
         }
         closed_loop_complete = not any(
             "FOUR_AGENT_PERSISTED_RECORDS_INCOMPLETE" in item for item in failures
@@ -639,7 +745,7 @@ class CompetitionEvaluationRunner:
             "business_state": {
                 "user_id": user_id,
                 "session_id": session_id,
-                "module_id": module["id"],
+                "module_id": active_module_id,
                 "knowledge_point_id": point["id"],
             },
             "request": request_payload,

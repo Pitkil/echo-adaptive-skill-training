@@ -38,12 +38,55 @@ def test_workspace_has_accessible_and_actionable_start_state() -> None:
 
 def test_visual_system_has_desktop_and_mobile_layout_contracts() -> None:
     assert '--canvas: #f4fafd' in STYLES
-    assert 'grid-template-columns: 272px minmax(0, 1fr)' in STYLES
+    assert 'grid-template-columns: 224px minmax(0, 1fr)' in STYLES
     assert '@media (max-width: 620px)' in STYLES
     assert '.resource-card, .resource-card:first-child' in STYLES
     assert '.resource-list > .empty-state' in STYLES
     assert 'grid-column: 1 / -1' in STYLES
     assert 'overflow-x: hidden' in STYLES
+
+
+def test_learner_insight_exposes_required_visual_report_views() -> None:
+    assert 'id="blindspot-chart"' in INDEX
+    assert '资源难度匹配曲线' in INDEX
+    assert 'renderBlindspotChart' in SCRIPT
+    assert 'type: "line"' in SCRIPT
+    assert '.learning-path::before' in STYLES
+
+
+def test_learner_workspace_exposes_current_learning_path() -> None:
+    assert 'id="workspace-learning-path"' in INDEX
+    assert 'id="workspace-path-next-title"' in INDEX
+    assert 'renderWorkspacePath' in SCRIPT
+    assert 'grid-template-columns: minmax(0, 1fr) minmax(214px, 230px)' in STYLES
+    assert '#view-workspace { width: 100%; padding: 0 0 22px; }' in STYLES
+    assert 'align-items: stretch;' in STYLES
+
+
+def test_learner_exposes_decision_visualization_for_path_choices() -> None:
+    assert 'aria-label="学习决策流程"' in INDEX
+    assert 'class="decision-flow"' in INDEX
+    assert 'class="workspace-decision-rail"' in INDEX
+    assert 'id="course-path-difficulty"' in INDEX
+    assert 'workspace-path-evidence' in SCRIPT
+    assert '.decision-flow {' in STYLES
+    assert '.workspace-decision-rail {' in STYLES
+
+
+def test_chat_history_has_internal_scroll_boundary_and_jump_control() -> None:
+    assert 'id="chat-jump-bottom"' in INDEX
+    assert 'syncChatScrollControl' in SCRIPT
+    assert 'scrollChatToBottom' in SCRIPT
+    assert 'height: clamp(640px, calc(100dvh - 114px), 900px)' in STYLES
+    assert '.chat-messages { min-height: 0;' in STYLES
+    assert '.chat-jump.visible' in STYLES
+
+
+def test_chat_submission_exposes_pending_feedback() -> None:
+    assert '正在根据你的学习证据整理下一步' in SCRIPT
+    assert 'setChatSending(true)' in SCRIPT
+    assert 'aria-busy' in SCRIPT
+    assert '.message.pending' in STYLES
 
 
 def test_auth_layout_scales_with_short_desktop_viewports() -> None:

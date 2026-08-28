@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 import re
+from copy import deepcopy
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -297,6 +298,7 @@ class ResourceRequest(BaseModel):
     module_id: int
     knowledge_point_id: int | None = None
     resource_type: Literal["custom_note", "practice_guide", "staged_test"] | None = None
+    user_input: str | None = Field(default=None, max_length=4000)
     request_id: str = Field(default_factory=lambda: uuid4().hex, max_length=64)
 
 
@@ -327,6 +329,8 @@ class EvaluationQuizContextRequest(BaseModel):
     module_id: int
     knowledge_point_id: int
     source_url: str = Field(min_length=1, max_length=500)
+    source_section: str | None = Field(default=None, max_length=255)
+    difficulty: Literal["foundation", "standard", "advanced"] | None = None
 
 
 def load_evaluation_profile_definitions() -> tuple[dict[str, dict[str, Any]], str]:
@@ -1967,7 +1971,9 @@ def execute_turn(
         payload["evidence"] = evidence
         if rag_error:
             degradation.append(rag_error)
-        if grade.is_correct:
+        if not updated:
+            content = "该请求已处理过，已返回原判定结果，本次重放不重复更新能力画像。"
+        elif grade.is_correct:
             content = (
                 "回答正确，能力画像已更新。"
                 if quiz.counts_for_mirt
@@ -1975,16 +1981,16 @@ def execute_turn(
             )
         else:
             content = f"本题需要巩固。参考要点：{quiz.answer}"
-        if evidence:
-            metadata = evidence[0].get("metadata") or {}
-            source_label = metadata.get("source_title") or metadata.get("title")
-            source_section = metadata.get("source_section") or metadata.get("chapter")
-            content += f"\n\n依据：[1] {source_label} - {source_section}"
-        elif assessment_source is not None:
+        if assessment_source is not None:
             content += (
                 f"\n\n依据：[1] {assessment_source['source_title']} - "
                 f"{assessment_source['source_section']}"
             )
+        elif evidence:
+            metadata = evidence[0].get("metadata") or {}
+            source_label = metadata.get("source_title") or metadata.get("title")
+            source_section = metadata.get("source_section") or metadata.get("chapter")
+            content += f"\n\n依据：[1] {source_label} - {source_section}"
     elif action is PrimaryAction.LEARNING_DIALOGUE:
         retrieval_query = request.user_input
         knowledge_point_ids = None
@@ -2200,6 +2206,24 @@ def stream_result(result: dict):
     yield json.dumps({"type": "content", "content": result["content"]}, ensure_ascii=False) + "\n"
 
 
+def replay_turn_result(result: dict) -> dict:
+    """Return a replay-safe view without changing the original audit result."""
+
+    replay = deepcopy(result)
+    payload = replay.get("payload") or {}
+    assessment = payload.get("assessment")
+    if isinstance(assessment, dict):
+        assessment["updated"] = False
+        prefix = "该请求已处理过，已返回原判定结果，本次重放不重复更新能力画像。"
+        content = str(replay.get("content") or "")
+        source_suffix = ""
+        marker = "\n\n依据："
+        if marker in content:
+            source_suffix = content[content.index(marker):]
+        replay["content"] = prefix + source_suffix
+    return replay
+
+
 @app.post("/chat")
 def chat(
     request: ChatRequest,
@@ -2215,14 +2239,17 @@ def chat(
     )
     existing = (
         db.query(TurnExecution)
-        .filter_by(session_id=session.id, request_id=request.request_id)
+        .filter_by(user_id=user.id, request_id=request.request_id)
         .first()
     )
     if existing and existing.status in {
         TurnStatus.COMPLETED.value,
         TurnStatus.COMPLETED_WITH_DEGRADATION.value,
     }:
-        return StreamingResponse(stream_result(existing.result), media_type="application/x-ndjson")
+        return StreamingResponse(
+            stream_result(replay_turn_result(existing.result)),
+            media_type="application/x-ndjson",
+        )
 
     context = TurnContext(
         user_id=user.id,
@@ -2232,6 +2259,11 @@ def chat(
         knowledge_base_id=session.knowledge_base_id,
         echo_state=session.echo_state,
         active_quiz_id=session.active_quiz_id,
+        active_quiz_type=(
+            db.query(Quiz.type).filter_by(id=session.active_quiz_id).scalar()
+            if session.active_quiz_id is not None
+            else None
+        ),
     )
     plan = TurnOrchestrator().plan(
         request.user_input,
@@ -2694,6 +2726,7 @@ def initialize_evaluation_quiz_context(
     if point is None:
         raise HTTPException(status_code=404, detail="评测知识点不存在")
     normalized_source_url = request.source_url.strip().rstrip("/")
+    normalized_source_section = str(request.source_section or "").strip()
     quiz = next(
         (
             item
@@ -2702,6 +2735,11 @@ def initialize_evaluation_quiz_context(
             .order_by(Quiz.id)
             .all()
             if str(item.source_url or "").strip().rstrip("/") == normalized_source_url
+            and (
+                not normalized_source_section
+                or str(item.source_section or "").strip() == normalized_source_section
+            )
+            and (request.difficulty is None or item.difficulty == request.difficulty)
         ),
         None,
     )
@@ -4424,6 +4462,7 @@ def generate_resources(
         plan,
         evidence,
         resource_type=selected_resource_type,
+        user_input=request.user_input or "",
     )
     if generation_error:
         degradation.append(generation_error)
