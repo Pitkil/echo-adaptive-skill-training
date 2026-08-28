@@ -244,6 +244,23 @@ ECHO 主系统对外入口：
 事件只能进入课次统计。已经确认但学习者与任务不一致时整批拒绝，不能静默降级为匿名事件。
 置信度低于阈值时保持待确认状态。
 
+## 语音转写（ASR）
+
+ECHO 可选接入仓库内的轻量 `faster-whisper` 服务，默认模型为多语种
+`Systran/faster-whisper-tiny`，CPU `int8` 推理。ASR 只负责把录音转换为文本，
+不负责判断答案正确性，也不产生微表征事件。
+
+- 服务地址：`ASR_BASE_URL`，Docker 内默认 `http://asr:8040`。
+- `GET /health`：返回服务状态、模型标识和是否已加载；模型采用首次转写时懒加载。
+- `POST /v1/asr/transcribe`：以 multipart 字段 `audio` 上传录音，可选 `language`，返回
+  `text`、`language`、`duration_ms` 和 `model`。
+
+ECHO 创建微表征录音任务后，会并行排队 ASR 和微表征检测。转写结果保存在
+`micro_detection_jobs` 的 `transcript` 字段，并带有 `transcription_status`、
+`transcription_error` 和 `transcribed_at`。ASR 不可用时保留录音任务和明确降级原因，
+不得把摘要或错误信息伪装成学习者原话。模型权重只写入 Docker 的
+`asr-model-cache` 卷，不进入 Git。
+
 ## 学习画像
 
 `GET /users/{user_id}/learning-insight?module_id={module_id}`

@@ -11,7 +11,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-API-426f62?logo=fastapi&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-ready-466270?logo=docker&logoColor=white)
 
-[产品全景](#产品全景) · [学习闭环](#学习闭环) · [界面预览](#界面预览) · [快速开始](#快速开始) · [部署与服务](#部署与服务) · [开发文档](#开发文档)
+[产品全景](#产品全景) · [学习闭环](#学习闭环) · [语音链路](#语音链路) · [快速开始](#快速开始) · [部署与服务](#部署与服务) · [开发文档](#开发文档)
 
 </div>
 
@@ -77,6 +77,7 @@ flowchart LR
 | 三类个性化资源 | 每轮只生成一种资源；逐条事实、引用、代码、步骤和测试维度校验，自动通过后进入人工发布门禁 |
 | 长期记忆 | 内置 SimpleMem 服务，支持组织与用户作用域、增删改查、合并、反馈闭环和异常降级 |
 | 语音微表征 | 支持学习者授权录音与讲师批量录音；未确认说话人不进入个人画像，信号不直接修改 U/A/R |
+| 语音转写 | 录音任务可由仓库内 faster-whisper tiny 服务转写；原始音频、转写文本和降级状态分别留痕 |
 | 视频伴学 | 上传课程视频、保存观看进度、生成并人工确认口述检查点；播放行为不会自动开启麦克风 |
 | 多角色治理 | 学习者、讲师/导师、系统管理员三类权限；内容导入、成员管理与 Demo Trace 按角色显示 |
 | 隐私删除 | 用户可发起幂等的数据删除请求，同步清理业务库、上传文件、SimpleMem 和用户自有 PunditRAG 文档 |
@@ -113,6 +114,25 @@ flowchart LR
 3. 查看授权范围内的学习情况、语音任务、服务状态和后台决策记录。
 4. 使用 Demo 模式展示“分析、检索、生成、检查、下一步安排”的完整闭环。
 
+## 语音链路
+
+语音在系统中分成两个互不混淆的结果：ASR 负责“说了什么”，微表征服务负责“怎么说的”。
+微表征不会判断答案对错，也不会直接修改 U/A/R。
+
+```text
+授权录音
+  ├─> faster-whisper tiny：保存 transcript、语言、状态和错误原因
+  └─> 微表征检测器：保存停顿、犹豫、自我修正等带时间位置的事件
+```
+
+学习者或讲师上传录音后，ECHO 保存原始音频并创建 `micro_detection_job`。后台会分别执行
+ASR 和微表征提交；通过 `GET /v1/micro/detection-jobs/{job_id}` 查询转写状态。转写完成后，
+响应包含 `transcript`、`transcription_language` 和 `transcribed_at`；服务不可用或模型下载失败时，
+`transcription_status` 会变为 `unavailable`/`failed` 并保留原因，不会把错误信息当成学习者原话。
+
+固定题的正确性仍由服务端 `POST /quiz/submit` 使用文本答案判定。当前版本已经完成录音转写保存，
+但尚未把 ASR 结果自动绑定到固定题提交接口；正式演示前应补齐“转写确认/纠错后提交判分”这一步。
+
 ## 实现边界
 
 README 只描述代码已经提供的能力，不把样例数据或适配器写成正式比赛结果。
@@ -124,6 +144,7 @@ README 只描述代码已经提供的能力，不把样例数据或适配器写�
 | 官方知识库 | PunditRAG 原生双服务适配、异步状态与引用过滤已实现 | 导入许可确认的 Microsoft 原文并完成真实检索验证 |
 | 个性化资源 | 规划、生成、校验、草稿降级和持久化入口已实现 | 用正式证据运行三类资源并保存检查与重做记录 |
 | 微表征 | Mock 联调服务与真实 WavLM 推理服务均有独立实现 | 使用授权标注音频完成正式准确率、召回率与 F1 评测 |
+| 语音转写 | 内置 faster-whisper tiny ASR 服务，录音任务异步保存转写和降级状态 | 用授权语音核对中文转写质量，并将确认后的转写绑定到固定题判分入口 |
 | 竞赛评测 | 50 组冻结案例与计分导出脚本已具备 | 填入真实运行输出并完成人工事实复核后才能发布指标 |
 
 ## 快速开始
@@ -167,6 +188,7 @@ powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
 ```powershell
 Copy-Item .env.example .env
 # 填写模型配置，并为 SIMPLEMEM_API_KEY 设置至少 32 字节的随机密钥
+# ASR 默认使用 CPU int8 的 faster-whisper tiny；首次转写会下载模型到 Docker 卷
 docker compose up --build -d
 docker compose exec echo-api python /workspace/scripts/bootstrap_admin.py --username admin
 ```
@@ -193,8 +215,13 @@ Docker Desktop 的 WSL 数据根目录应保持在专用磁盘（当前维护记
 | PunditRAG Query | `http://127.0.0.1:8001` | 外部服务 | 多路召回、重排、证据与引用 |
 | SimpleMem | `http://127.0.0.1:8020` | 本仓库独立服务 | 跨会话语义记忆与变更审计 |
 | Micro Detector | `http://127.0.0.1:8030` | Mock 与真实服务均在本仓库 | 授权语音的停顿、犹豫和自我修正信号 |
+| ASR | `http://127.0.0.1:8040` | 本仓库独立服务 | faster-whisper tiny 语音转文字；权重缓存于 `asr-model-cache` Docker volume |
 
 外部依赖不可用时，`GET /health` 与前端状态栏会报告具体降级项；业务数据库中的会话、答题和能力记录仍可使用。进入管理端“决策演示”可以查看当前会话的 Agent 输入、输出、证据、校验明细和重做记录。完整生产配置、比赛覆盖、模型校验和导出流程见 [部署与安全说明](docs/deployment-and-security.md)。
+
+ASR 容器的 `/health` 只检查服务进程，不会主动下载模型；模型在首次调用 `/v1/asr/transcribe` 时懒加载。
+如果首次转写返回 503，先查看 `docker compose logs asr`，确认容器可以访问模型仓库；重启容器不会丢失
+已下载权重，删除 `asr-model-cache` 卷则会触发重新下载。
 
 ## 正式数据与评测
 
@@ -237,6 +264,7 @@ apps/api/                     FastAPI 主系统、业务模型与 Web 前端
   Quiz/                       选题、判分、阶段流程与题库导入
   integrations/               PunditRAG、SimpleMem、微表征适配器
 services/simplemem/           可独立运行的长期记忆服务
+services/asr/                 faster-whisper tiny 语音转写服务
 services/micro_detector/      接口联调用 Mock 服务
 services/micro_detector_real/ WavLM 真实推理服务
 docs/member-d/                正式题库、材料清单与 50 组冻结案例
