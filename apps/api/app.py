@@ -2002,12 +2002,25 @@ def execute_turn(
             degradation.append(rag_error)
         if memory_error:
             degradation.append(memory_error)
+        recent_messages = (
+            db.query(Message)
+            .filter_by(session_id=session.id)
+            .order_by(Message.id.desc())
+            .limit(6)
+            .all()
+        )
+        history = [
+            {"role": item.role, "content": item.content}
+            for item in reversed(recent_messages)
+        ]
         content = StudentHelper().respond(
             user_input=request.user_input,
             module_name=session.module.name,
             echo_state=session.echo_state,
             evidence=evidence,
             memories=memories,
+            history=history,
+            has_active_quiz=session.active_quiz_id is not None,
         )
         fsm = EchoFSM(session.echo_stage_counts)
         proposed = "C" if session.echo_state == "E" else session.echo_state

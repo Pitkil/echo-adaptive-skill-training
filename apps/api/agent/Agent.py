@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
+import re
+
 from config import AIConfig
 from openai import OpenAI
 
-from .FSM import EchoFSM
 from .prompt_manager import PromptManager
 
 
 class StudentHelper:
-    def __init__(self) -> None:
-        self.fsm = EchoFSM()
-
     def respond(
         self,
         *,
@@ -21,27 +19,42 @@ class StudentHelper:
         echo_state: str,
         evidence: list[dict],
         memories: list[dict],
+        history: list[dict] | None = None,
+        has_active_quiz: bool = False,
     ) -> str:
+        if has_active_quiz:
+            return (
+                "当前有一道待答题。我可以帮助你澄清题意，但不会透露正确答案或评分规则。"
+                "请先说出你的判断依据，或指出题目中不理解的一个术语。"
+            )
+        if not evidence:
+            return self._rule_fallback(module_name, echo_state, evidence)
+
         evidence_text = self._format_evidence(evidence)
         memory_text = self._format_memories(memories)
-        prompt = PromptManager.build(
+        history_text = self._format_history(history or [])
+        messages = PromptManager.build_messages(
             module_name=module_name,
             echo_state=echo_state,
             evidence_text=evidence_text,
             memory_text=memory_text,
+            history_text=history_text,
             user_input=user_input,
         )
         if not AIConfig.API_KEY or not AIConfig.MODEL_NAME or AIConfig.API_KEY == "test-key":
-            return self._rule_fallback(user_input, module_name, echo_state, evidence)
+            return self._rule_fallback(module_name, echo_state, evidence)
 
         client = OpenAI(api_key=AIConfig.API_KEY, base_url=AIConfig.BASE_URL)
         response = client.chat.completions.create(
             model=AIConfig.MODEL_NAME,
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
             temperature=AIConfig.AGENT_TEMPERATURE,
             max_tokens=AIConfig.AGENT_MAX_TOKENS,
         )
-        return (response.choices[0].message.content or "").strip()
+        content = (response.choices[0].message.content or "").strip()
+        if not self._has_valid_citations(content, len(evidence)):
+            return self._rule_fallback(module_name, echo_state, evidence)
+        return content
 
     @staticmethod
     def _format_evidence(items: list[dict]) -> str:
@@ -70,13 +83,36 @@ class StudentHelper:
 
     @staticmethod
     def _format_memories(items: list[dict]) -> str:
-        return "\n".join(
-            f"- {item.get('content') or item.get('summary') or ''}" for item in items
-        )
+        lines = []
+        for item in items[:6]:
+            content = str(item.get("content") or item.get("summary") or "").strip()
+            if content:
+                lines.append(f"- {content[:500]}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_history(items: list[dict]) -> str:
+        lines = []
+        for item in items[-6:]:
+            role = str(item.get("role") or "").strip().lower()
+            content = str(item.get("content") or "").strip()
+            if role not in {"user", "assistant"} or not content:
+                continue
+            label = "学习者" if role == "user" else "ECHO"
+            lines.append(f"{label}：{content[:600]}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _has_valid_citations(content: str, evidence_count: int) -> bool:
+        if not content:
+            return False
+        citations = [int(value) for value in re.findall(r"\[(\d+)\]", content)]
+        if evidence_count > 0 and not citations:
+            return False
+        return all(1 <= value <= evidence_count for value in citations)
 
     @staticmethod
     def _rule_fallback(
-        user_input: str,
         module_name: str,
         echo_state: str,
         evidence: list[dict],
@@ -87,14 +123,19 @@ class StudentHelper:
             source = metadata.get("source_title") or metadata.get("filename", "领域知识库")
             source_url = metadata.get("source_url")
             reference = f"\n\n[1] {source}：{source_url}" if source_url else ""
+            excerpt = str(first.get("text") or "").strip()[:600]
+            follow_up = {
+                "E": "你想先解决概念理解，还是落到一个最小实现？",
+                "C": "其中哪一步仍不清楚？",
+                "H": "请用一句话概括这里最关键的判断边界。",
+                "O": "你会用什么测试验证它在新场景中仍然成立？",
+            }.get(echo_state, "你现在最需要确认哪一点？")
             return (
-                f"当前在“{module_name}”模块。根据 {source} 的证据 [1]，"
-                f"{first.get('text', '')}\n\n"
-                f"请结合你的问题“{user_input}”说明其中最关键的判断依据，"
-                "我再根据你的解释决定是补充基础示例还是进入实践任务。"
+                f"根据 {source} 的官方证据：{excerpt} [1]\n\n"
+                f"{follow_up}"
                 f"{reference}"
             )
         return (
-            f"当前在“{module_name}”模块，现有知识库没有返回足够证据。"
-            "为了避免凭空给出专业结论，请补充具体知识点、代码片段或期望完成的实践任务。"
+            "当前证据不足，暂不能确认专业结论。"
+            f"请说明你在“{module_name}”中要解决的具体知识点、代码片段或预期结果。"
         )
