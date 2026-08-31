@@ -17,7 +17,7 @@ SPEC.loader.exec_module(MODULE)
 
 def test_registry_is_accepted() -> None:
     registry = MODULE.load_registry(MODULE.DEFAULT_REGISTRY)
-    assert registry["total_materials"] == 15
+    assert registry["total_materials"] == 20
 
 
 def test_retrieval_cases_cover_every_knowledge_point() -> None:

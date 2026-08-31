@@ -1106,7 +1106,7 @@
       "module": "M3",
       "knowledge_point": "Process Framework 步骤与事件",
       "scenario_type": "dynamic",
-      "input": "我答错了上一题。请重新解释一下 Process Framework 的三个核心概念。",
+      "input": "我答错了上一题。请用简单比喻重新解释 Process、Step、Event 在流程执行中怎样协作。",
       "expected": {
         "intent": "LEARNING_QUERY",
         "primary_action": "LEARNING_DIALOGUE",
@@ -1115,14 +1115,14 @@
         "source_title": "Create your first Process",
         "source_url": "https://learn.microsoft.com/en-us/semantic-kernel/frameworks/process/examples/example-first-process",
         "source_section": "Define flow、build and run",
-        "output_characteristics": "答错后应降低难度，使用更简单的语言和比喻解释 Process、Step、Event 三个概念",
+        "output_characteristics": "答错后应降低难度，使用更简单的语言和比喻解释 Process 包含 Step、Event 触发或传递步骤结果；不得声称官方 Core Concepts 将 Event 列为第三项",
         "publish_resource": false,
         "update_mirt": false
       },
       "judgment": {
         "content_correctness": "若未降低难度或未用简单语言解释，标记为动态调整失败",
         "difficulty_match": "答错后应降为 foundation 难度",
-        "knowledge_coverage": "必须覆盖 Process、Step、Event 三个核心概念",
+        "knowledge_coverage": "必须覆盖 Process、Step、Event 在事件驱动流程中的协作关系",
         "source_traceable": "检查 source_url 可打开且章节对应"
       }
     },

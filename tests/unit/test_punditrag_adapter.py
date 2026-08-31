@@ -3,6 +3,16 @@ from __future__ import annotations
 from integrations.punditrag import PunditRAGClient
 
 
+def test_punditrag_client_uses_separate_import_and_query_timeouts(monkeypatch) -> None:
+    monkeypatch.setenv("PUNDITRAG_TIMEOUT_SECONDS", "180")
+    monkeypatch.setenv("PUNDITRAG_QUERY_TIMEOUT_SECONDS", "60")
+
+    client = PunditRAGClient(base_url="http://punditrag.local")
+
+    assert client.import_http.timeout_seconds == 180
+    assert client.query_http.timeout_seconds == 60
+
+
 def test_punditrag_client_maps_search_to_native_query_contract(monkeypatch) -> None:
     client = PunditRAGClient(
         query_base_url="http://punditrag.local:8001",

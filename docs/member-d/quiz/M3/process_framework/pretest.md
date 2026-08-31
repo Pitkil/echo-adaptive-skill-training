@@ -10,7 +10,7 @@
 是否更新MIRT：是
 
 ---
-题目：Process Framework 的三个核心概念是什么？
+题目：在 Process Framework 的事件驱动流程中，哪组元素用于组织流程、执行步骤并触发转换？
 A. Process、Step、Event
 B. Kernel、Plugin、Function
 C. Agent、Thread、Memory
@@ -22,5 +22,5 @@ D. Prompt、Template、Variable
 评分方法：选 A 得 2 分，其他不得分。
 资料名称：Overview of the Process Framework
 官方链接：https://learn.microsoft.com/en-sg/semantic-kernel/frameworks/process/process-framework
-出处章节：Core Concepts
+出处章节：Introduction、Event-Driven Architecture、Define the process flow
 是否更新MIRT：是

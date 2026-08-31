@@ -261,6 +261,15 @@ docker compose config
 
 ## 十、运行环境维护记录
 
+- 2026-08-29：Docker Desktop 4.88.1 曾出现“backend process exited 0x40010004”、daemon
+  pipe 不可达、`wsl -l -v` 中 docker-desktop 为 Stopped 的连锁故障，根因是 Windows 侧本地
+  状态陈旧导致 Linux VM 无法启动，与项目代码无关。处理：备份并清理
+  `C:\Users\32354\AppData\Roaming\Docker Desktop` 与 `C:\Users\32354\AppData\Local\Docker`
+  的陈旧锁/缓存（未动 `D:\DockerDesktopData` 数据盘），`wsl --shutdown` 后重启 Docker
+  Desktop，daemon 恢复，项目栈与 PunditRAG、SimpleMem、微表征、ASR 重新健康。
+  已新增 `scripts\ensure_docker.ps1` 一键自检脚本与
+  `docs\docker-longterm-maintenance.md` 长期维护清单；后续先按“十一”流程处理，不要直接重装。
+
 - 2026-08-27：本地 ECHO/PunditRAG 正式知识库按 manifest v1.2 复核完成，外部 kb 为
   `b91a91086ffc4399aa6152d37b6e1d60`；15 份活动材料导入完成，固定 12 个知识点检索在关闭网页搜索、
   限定活动 document_ids 后 12/12 通过。`MS-SK-CONCEPTS-COMPONENTS` upload 20 已标记 `removed`，
@@ -275,3 +284,65 @@ docker compose config
   `--wsl-default-data-root=D:\DockerDesktopData`，不得使用“Reset to factory defaults”。
 - 主机存储复核：`C:\Users\<user>\AppData\Local\Docker` 下不应出现 `.vhdx`/`.vhd`；
   `docker version` 必须同时返回 Client 和 Server；`docker desktop status` 必须为 `running`。
+
+## 十一、Docker Desktop 故障处理与长期维护
+
+> 本机运行依赖 Docker Desktop 4.88.1。故障时先按本节处理，不要直接重装或重置。
+> 详细清单见 [docs/docker-longterm-maintenance.md](docs/docker-longterm-maintenance.md)。
+
+### 1. 固定路径与红线（不得违反）
+
+- 安装目录固定为 `D:\Docker\Docker`；WSL 数据根固定为 `D:\DockerDesktopData`。
+- 数据盘 `D:\DockerDesktopData`（含 `disk\docker_data.vhdx`、`main\ext4.vhdx`）
+  永不清理、不移动、不执行“Reset to factory defaults”。
+- C 盘只允许 Docker Desktop 必需的小型配置、日志、临时缓存和 Socket；
+  `C:\Users\<user>\AppData\Local\Docker` 下不应出现 `.vhdx`/`.vhd`。
+- 重装或升级必须同时传 `--installation-dir=D:\Docker\Docker` 和
+  `--wsl-default-data-root=D:\DockerDesktopData`。
+
+### 2. 出错时的标准处理顺序
+
+先运行一键自检（自动启动并等待 daemon，正常则直接 PASS）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\ensure_docker.ps1
+```
+
+仍未恢复时使用受控重启（只重启运行时，不删数据）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\ensure_docker.ps1 -Force
+```
+
+手动确认三连：
+
+```powershell
+wsl -l -v        # docker-desktop 应为 Running
+docker version   # Client 和 Server 都必须有输出
+docker ps        # 能看到项目容器
+```
+
+确认 Docker 健康后再启动项目栈：
+
+```powershell
+docker compose up -d
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8010/api/health -TimeoutSec 20
+```
+
+### 3. 故障分级判断
+
+| 现象 | 判断 | 处理 |
+| --- | --- | --- |
+| `docker ps` 报 pipe 找不到、daemon 未运行 | Docker 引擎未启动 | `ensure_docker.ps1 -Force`；仍失败则 `wsl --shutdown` 后重启 Docker Desktop |
+| `wsl -l -v` 中 docker-desktop 为 Stopped | WSL VM 未启动 | 启动 Docker Desktop 并等待，必要时 `wsl --shutdown` 后再启动 |
+| 8000/8001/8030/8010 端口不通 | 外部服务或容器未起 | 先确认第 2 节通过，再 `docker compose up -d` 并复查 `/health` |
+| 直连 `127.0.0.1:8020` 失败 | 正常现象 | SimpleMem 默认不发布到宿主机，只在容器内部网络可达；以 ECHO `/health` 中 simplemem 状态为准 |
+
+### 4. 恢复判定与红线
+
+- 恢复标准：`docker version` 同时返回 Client 和 Server；`docker ps` 能列出容器；
+  `GET /api/health` 返回 `status: ok` 且 `unavailable_count: 0`。
+- 外部服务（检索引擎、SimpleMem、微表征、ASR）未恢复时，不得把降级输出当作
+  正式评测证据；继续修复环境而不是伪造结果。
+- 症状重复出现且按上述流程无法恢复时，把当次日志与现象追加到“十、运行环境维护记录”，
+  再决定是否重装（重装也必须带固定参数）。

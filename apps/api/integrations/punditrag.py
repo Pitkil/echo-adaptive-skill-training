@@ -34,7 +34,12 @@ class PunditRAGClient:
         query_base_url: str | None = None,
         import_base_url: str | None = None,
     ) -> None:
-        timeout = timeout_seconds or float(os.getenv("PUNDITRAG_TIMEOUT_SECONDS", "30"))
+        import_timeout = timeout_seconds or float(
+            os.getenv("PUNDITRAG_TIMEOUT_SECONDS", "30")
+        )
+        query_timeout = timeout_seconds or float(
+            os.getenv("PUNDITRAG_QUERY_TIMEOUT_SECONDS", "60")
+        )
         configured_import_url = (
             import_base_url
             or base_url
@@ -47,8 +52,12 @@ class PunditRAGClient:
             or os.getenv("PUNDITRAG_QUERY_BASE_URL")
             or (_infer_query_url(configured_import_url) if configured_import_url else "")
         )
-        self.import_http = JsonHttpClient(configured_import_url, timeout_seconds=timeout)
-        self.query_http = JsonHttpClient(configured_query_url, timeout_seconds=timeout)
+        self.import_http = JsonHttpClient(
+            configured_import_url, timeout_seconds=import_timeout
+        )
+        self.query_http = JsonHttpClient(
+            configured_query_url, timeout_seconds=query_timeout
+        )
         self.http = self.query_http
 
     @property

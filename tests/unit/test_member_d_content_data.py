@@ -82,14 +82,14 @@ def test_official_material_registry_is_complete_and_truthful() -> None:
     registry = _load_json("official_materials_manifest.json")
     materials = registry["materials"]
 
-    assert registry["total_materials"] == 15
-    assert registry["coverage"]["total_materials"] == 15
-    assert len(materials) == 15
-    assert len({material["material_id"] for material in materials}) == 15
+    assert registry["total_materials"] == 20
+    assert registry["coverage"]["total_materials"] == 20
+    assert len(materials) == 20
+    assert len({material["material_id"] for material in materials}) == 20
     assert Counter(material["module_id"] for material in materials) == {
-        "M1": 6,
-        "M2": 5,
-        "M3": 4,
+        "M1": 8,
+        "M2": 7,
+        "M3": 5,
     }
     assert {material["import_status"] for material in materials} == {"pending"}
     assert all(not material["local_file"] for material in materials)
