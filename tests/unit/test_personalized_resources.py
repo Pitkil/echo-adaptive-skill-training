@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import app as app_module
+import resource_generation as resource_generation_module
 from app import app, create_access_token, ensure_catalog, get_db
+from catalog import PROGRAM_CODE
+from coverage_rubrics import request_coverage_issues
 from database import (
     Base,
     GeneratedResource,
@@ -23,9 +26,21 @@ from resource_generation import (
     ResourceGenerationAgent,
     build_personalization_plan,
 )
+from semantic_coverage import SemanticCoverageResult
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+
+
+def semantic_pass(**_kwargs) -> SemanticCoverageResult:
+    return SemanticCoverageResult(
+        passed=True,
+        issues=[],
+        mode="model_semantic",
+        confidence=1.0,
+        requirement_results=[],
+        factual_support_passed=True,
+    )
 
 
 class FakeMemoryClient:
@@ -52,6 +67,7 @@ class FakeMemoryClient:
 
 class FakePunditRAGClient:
     configured = True
+    requests = []
 
     def search(
         self,
@@ -65,6 +81,7 @@ class FakePunditRAGClient:
         knowledge_point_ids=None,
         top_k=None,
     ):
+        self.requests.append({"query": query, "knowledge_point_ids": knowledge_point_ids})
         return [
             {
                 "text": (
@@ -89,15 +106,127 @@ def test_draft_resources_do_not_claim_missing_evidence() -> None:
     assert error is None
     assert len(resources) == 1
     assert resources[0]["resource_type"] == "custom_note"
-    assert all("[1]" not in item["content"] for item in resources)
-    assert all(
-        not ContentVerificationAgent().verify(item, plan, []).passed
-        for item in resources
+    assert "[1]" not in resources[0]["content"]
+    assert ContentVerificationAgent().verify(resources[0], plan, []).passed is False
+
+
+def test_model_payload_parser_accepts_fenced_json() -> None:
+    payload = ResourceGenerationAgent._parse_model_payload(
+        '```json\n{"resource":{"resource_type":"custom_note"}}\n```'
     )
+
+    assert payload["resource"]["resource_type"] == "custom_note"
+
+
+def test_model_payload_parser_rejects_incomplete_json() -> None:
+    try:
+        ResourceGenerationAgent._parse_model_payload('{"resource":')
+    except ValueError as exc:
+        assert "JSON" in str(exc)
+    else:
+        raise AssertionError("incomplete model JSON must be rejected")
+
+
+def test_model_resource_exposes_claim_references_in_learner_content() -> None:
+    resource = {
+        "content": "Kernel 负责组织服务和插件。",
+        "claims": [{"text": "Kernel 负责组织服务和插件", "evidence_refs": [1]}],
+    }
+
+    ResourceGenerationAgent._ensure_content_citation_markers(
+        resource, [{"text": "Kernel 负责组织服务和插件。"}]
+    )
+
+    assert "官方证据索引：[1]" in resource["content"]
+
+
+def test_request_coverage_accepts_core_terms_without_full_point_name() -> None:
+    plan = build_personalization_plan(
+        {"views": {}},
+        knowledge_point_id=1,
+        knowledge_point_name="多智能体分工与协作",
+        program_code=PROGRAM_CODE,
+    )
+    resource = {
+        "content": "多智能体按职责分工，Sequential 传递输入和输出，Concurrent 处理独立任务并汇总结果。"
+    }
+
+    ResourceGenerationAgent._assert_request_coverage(resource, plan, "")
+
+
+def test_course_rubric_does_not_apply_to_another_course() -> None:
+    plan = build_personalization_plan(
+        {"views": {}},
+        knowledge_point_id=1,
+        knowledge_point_name="多智能体分工与协作",
+        program_code="ANOTHER-PROGRAM",
+    )
+    ResourceGenerationAgent._assert_request_coverage(
+        {"content": "多智能体分工与协作的课程资料。"}, plan, "多智能体协作"
+    )
+
+
+def test_dialogue_course_rubric_detects_missing_azure_connection_parameters() -> None:
+    issues = request_coverage_issues(
+        program_code=PROGRAM_CODE,
+        knowledge_point_name="Kernel 创建与模型服务接入",
+        user_input="如何接入 Azure OpenAI 服务到 Semantic Kernel？",
+        content="先向 Kernel 添加一个聊天完成服务。",
+    )
+
+    assert issues
+    assert "AzureChatCompletion" in issues[0]
+    assert "deployment_name" in issues[0]
+
+
+def test_dialogue_course_rubric_accepts_agent_definition_and_process_event() -> None:
+    assert request_coverage_issues(
+        program_code=PROGRAM_CODE,
+        knowledge_point_name="Agent 创建与指令设计",
+        user_input="Agent 是什么？",
+        content="Agent 可以参与对话，并执行有明确目标的任务。",
+    ) == []
+    assert request_coverage_issues(
+        program_code=PROGRAM_CODE,
+        knowledge_point_name="Process Framework 步骤与事件",
+        user_input="请解释 Process Framework 的三个核心概念",
+        content="Process 是流程，Step 是步骤，Event 负责触发和传递结果。",
+    ) == []
+
+
+def test_dialogue_course_rubric_rejects_required_term_in_insufficiency_paragraph() -> None:
+    issues = request_coverage_issues(
+        program_code=PROGRAM_CODE,
+        knowledge_point_name="Process Framework 步骤与事件",
+        user_input="请解释 Process Framework 的三个核心概念",
+        content=(
+            "Process 是完整流程，Step 是可执行步骤。\n\n"
+            "关于 Event，当前证据不足，暂不能确认。"
+        ),
+    )
+
+    assert issues
+    assert "Event" in issues[0]
+
+
+def test_dialogue_course_rubric_rejects_parameter_list_followed_by_disclaimer() -> None:
+    issues = request_coverage_issues(
+        program_code=PROGRAM_CODE,
+        knowledge_point_name="Kernel 创建与模型服务接入",
+        user_input="如何接入 Azure OpenAI 服务到 Semantic Kernel？",
+        content=(
+            "使用 AzureChatCompletion。\n\n"
+            "关于 deployment_name、endpoint 和 api_key，当前证据没有列出，暂不能确认。"
+        ),
+    )
+
+    assert issues
+    assert "deployment_name" in issues[0]
 
 
 def test_resource_generation_uses_profile_memory_and_blind_spot(monkeypatch) -> None:
     FakeMemoryClient.requests.clear()
+    FakePunditRAGClient.requests.clear()
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -183,6 +312,9 @@ def test_resource_generation_uses_profile_memory_and_blind_spot(monkeypatch) -> 
 
     monkeypatch.setattr(app_module, "SimpleMemClient", FakeMemoryClient)
     monkeypatch.setattr(app_module, "PunditRAGClient", FakePunditRAGClient)
+    monkeypatch.setattr(
+        resource_generation_module, "evaluate_semantic_coverage", semantic_pass
+    )
 
     def override_db():
         yield db
@@ -191,7 +323,11 @@ def test_resource_generation_uses_profile_memory_and_blind_spot(monkeypatch) -> 
     headers = {"Authorization": f"Bearer {create_access_token(learner)}"}
     response = TestClient(app).post(
         "/v1/resources/generate",
-        json={"user_id": learner.id, "module_id": module.id},
+        json={
+            "user_id": learner.id,
+            "module_id": module.id,
+            "user_input": "请给我一个包含变量的产品描述模板",
+        },
         headers=headers,
     )
 
@@ -226,12 +362,19 @@ def test_resource_generation_uses_profile_memory_and_blind_spot(monkeypatch) -> 
     memory_request = FakeMemoryClient.requests[-1]
     assert str(point.id) in memory_request.query
     assert point.name in memory_request.query
+    assert "产品描述模板" in memory_request.query
+    assert "产品描述模板" in FakePunditRAGClient.requests[-1]["query"]
+    assert execution.plan["learning_goal"] == "请给我一个包含变量的产品描述模板"
+    assert execution.result["agent_records"]["generation"]["input_summary"]["learning_goal"]
 
     app.dependency_overrides.clear()
     db.close()
 
 
-def test_failed_resource_receives_one_auditable_local_repair() -> None:
+def test_failed_resource_receives_one_auditable_local_repair(monkeypatch) -> None:
+    monkeypatch.setattr(
+        resource_generation_module, "evaluate_semantic_coverage", semantic_pass
+    )
     plan = build_personalization_plan(
         {"views": {}},
         knowledge_point_id=1,
@@ -255,6 +398,32 @@ def test_failed_resource_receives_one_auditable_local_repair() -> None:
     assert plan.knowledge_point_name in repaired["content"]
     assert "[1]" in repaired["content"]
     assert repaired["repair_issues"] == initial.issues
+
+
+def test_regeneration_fallback_preserves_the_failed_draft(monkeypatch) -> None:
+    plan = build_personalization_plan(
+        {"views": {}}, knowledge_point_id=1, knowledge_point_name="课程自定义知识点"
+    )
+    original = {
+        "resource_type": "custom_note",
+        "title": "原始标题",
+        "content": "原始学习内容。",
+    }
+    evidence = [{"text": "Official evidence", "metadata": {"document_id": "doc-1"}}]
+    monkeypatch.setattr("resource_generation.AIConfig.API_KEY", "")
+
+    repaired, note = ResourceGenerationAgent().regenerate_after_verification_failure(
+        plan,
+        evidence,
+        resource_type="custom_note",
+        user_input="解释这个知识点",
+        issues=["内容过短"],
+        original_resource=original,
+    )
+
+    assert note == "模型未配置，未执行定向重生成"
+    assert "原始学习内容" in repaired["content"]
+    assert repaired["repair_issues"] == ["内容过短"]
 
 
 def _verification_fixture(resource_type: str = "custom_note") -> tuple[dict, object, list[dict]]:
@@ -318,6 +487,17 @@ def test_verification_requires_three_staged_test_dimensions() -> None:
     result = ContentVerificationAgent().verify(resource, plan, evidence)
     assert result.passed is False
     assert "阶段测试未覆盖理解、应用、推理三个维度" in result.issues
+
+
+def test_verification_rejects_staged_test_metadata_without_real_questions() -> None:
+    resource, plan, evidence = _verification_fixture("staged_test")
+    resource["assessment_dimensions"] = ["understanding", "application", "reasoning"]
+    resource["content"] += " 本阶段测试包含三个维度和评分标准。"
+    result = ContentVerificationAgent().verify(resource, plan, evidence)
+
+    assert result.passed is False
+    assert "阶段测试缺少 understanding 真实题目" in result.issues
+    assert "阶段测试缺少可执行评分方法" in result.issues
 
 
 def test_gated_evaluation_endpoint_materializes_all_three_profiles(monkeypatch) -> None:

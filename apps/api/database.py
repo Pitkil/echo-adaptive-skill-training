@@ -211,6 +211,7 @@ class Upload(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     module_id = Column(Integer, ForeignKey("training_modules.id"), nullable=True, index=True)
     knowledge_base_id = Column(Integer, ForeignKey("knowledge_bases.id"), nullable=True, index=True)
+    knowledge_point_ids = Column(JSON, nullable=False, default=list)
     filename = Column(String(255), nullable=False)
     filepath = Column(String(500), nullable=False)
     file_type = Column(String(50), nullable=False)
@@ -727,6 +728,7 @@ def _ensure_upload_rag_columns() -> None:
         return
     existing = {column["name"] for column in inspector.get_columns("uploads")}
     additions = {
+        "knowledge_point_ids": "JSON DEFAULT '[]'",
         "source_title": "VARCHAR(255)",
         "source_url": "VARCHAR(500)",
         "source_section": "VARCHAR(255)",

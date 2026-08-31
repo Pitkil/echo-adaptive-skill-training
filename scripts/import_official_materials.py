@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import json
 import mimetypes
+import re
 import sys
 import time
 from copy import deepcopy
@@ -31,6 +32,7 @@ if str(API_DIR) not in sys.path:
 from app import ensure_catalog, is_official_microsoft_source_url  # noqa: E402
 from database import (  # noqa: E402
     KnowledgeBase,
+    KnowledgePoint,
     SessionLocal,
     TrainingModule,
     Upload,
@@ -63,6 +65,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
     for material in materials:
         material_id = str(material.get("material_id") or "").strip()
         source_url = str(material.get("url") or "").strip()
+        download_url = str(material.get("download_url") or source_url).strip()
         module_code = str(material.get("module_id") or "").strip()
         if not material_id or material_id in seen_ids:
             raise ValueError(f"invalid or duplicated material_id: {material_id!r}")
@@ -70,6 +73,10 @@ def load_manifest(path: Path) -> dict[str, Any]:
             raise ValueError(f"invalid or duplicated source URL: {source_url!r}")
         if not is_official_microsoft_source_url(source_url):
             raise ValueError(f"material is outside the allowed Microsoft sources: {source_url}")
+        if not is_official_microsoft_source_url(download_url):
+            raise ValueError(
+                f"material download is outside the allowed Microsoft sources: {download_url}"
+            )
         if module_code not in {"M1", "M2", "M3"}:
             raise ValueError(f"invalid module_id for {material_id}: {module_code}")
         seen_ids.add(material_id)
@@ -77,12 +84,12 @@ def load_manifest(path: Path) -> dict[str, Any]:
     return payload
 
 
-def download_official_html(url: str, *, timeout_seconds: float) -> tuple[bytes, str, str]:
+def download_official_content(url: str, *, timeout_seconds: float) -> tuple[bytes, str, str]:
     request = Request(
         url,
         headers={
             "User-Agent": USER_AGENT,
-            "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
+            "Accept": "text/markdown,text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
             "Accept-Language": "en-US,en;q=0.9",
         },
     )
@@ -97,7 +104,7 @@ def download_official_html(url: str, *, timeout_seconds: float) -> tuple[bytes, 
         raise RuntimeError(f"failed to download {url}: {exc}") from exc
     if len(content) < 2_000:
         raise ValueError(f"official page response is unexpectedly short: {url}")
-    if content_type not in {"text/html", "application/xhtml+xml"}:
+    if content_type not in {"text/html", "application/xhtml+xml", "text/markdown", "text/plain"}:
         raise ValueError(f"official page returned unsupported content type {content_type}: {url}")
     return content, final_url, content_type
 
@@ -150,6 +157,109 @@ def normalize_official_html(raw_html: bytes, material: dict[str, Any]) -> bytes:
     if len(" ".join(article.itertext()).strip()) < 500:
         raise ValueError(f"official page has too little article text: {material['url']}")
     return normalized
+
+
+def normalize_official_markdown(raw_markdown: bytes, material: dict[str, Any]) -> bytes:
+    """Convert official Markdown into retrieval-friendly semantic HTML."""
+
+    from lxml import etree, html
+
+    markdown_text = raw_markdown.decode("utf-8", errors="replace").strip()
+    if len(markdown_text) < 500:
+        raise ValueError(f"official Markdown has too little text: {material['url']}")
+    body = etree.Element("body")
+    metadata = etree.SubElement(body, "section")
+    metadata.set("data-echo-source-metadata", "true")
+    title = etree.SubElement(metadata, "h1")
+    title.text = str(material["title"])
+    for label, value in (
+        ("Material ID", material["material_id"]),
+        ("Official source URL", material["url"]),
+        ("Source version/date", material["version"]),
+        ("ECHO module", material["module_id"]),
+        ("Knowledge points", ", ".join(material.get("knowledge_point_ids") or [])),
+        ("Registered section", material.get("section") or "全文"),
+    ):
+        paragraph = etree.SubElement(metadata, "p")
+        strong = etree.SubElement(paragraph, "strong")
+        strong.text = f"{label}: "
+        strong.tail = str(value)
+    article = etree.SubElement(body, "article")
+    fenced_blocks = re.findall(
+        r"```([^\n]*)\n(.*?)```", markdown_text, flags=re.DOTALL
+    )
+    highlight_groups = material.get("highlight_term_groups") or []
+    if highlight_groups:
+        highlights = etree.SubElement(body, "section")
+        highlights.set("data-echo-retrieval-highlights", "true")
+        highlight_title = etree.SubElement(highlights, "h2")
+        highlight_title.text = "Official retrieval highlights"
+        for raw_group in highlight_groups:
+            terms = [str(term).strip() for term in raw_group if str(term).strip()]
+            matched_block = next(
+                (
+                    (language, block)
+                    for language, block in fenced_blocks
+                    if all(term.casefold() in block.casefold() for term in terms)
+                ),
+                None,
+            )
+            if matched_block is None:
+                raise ValueError(
+                    f"official Markdown is missing configured highlight terms for "
+                    f"{material['material_id']}: {terms}"
+                )
+            language, block = matched_block
+            # PunditRAG may omit pre/code blocks from returned source snippets.
+            # Keep the verbatim official block as plain text too so generated
+            # facts remain traceable to a visible retrieval result.
+            paragraph = etree.SubElement(highlights, "p")
+            language_label = f" ({language.strip()})" if language.strip() else ""
+            paragraph.text = f"Official code excerpt{language_label}:\n{block.strip()}"
+    code_lines: list[str] = []
+    code_language = ""
+    in_code_block = False
+    for raw_line in markdown_text.splitlines():
+        line = raw_line.rstrip()
+        if line.lstrip().startswith("```"):
+            if in_code_block:
+                preformatted = etree.SubElement(article, "pre")
+                code = etree.SubElement(preformatted, "code")
+                if code_language:
+                    code.set("data-language", code_language)
+                code.text = "\n".join(code_lines).strip()
+                code_lines = []
+                code_language = ""
+                in_code_block = False
+            else:
+                code_language = line.lstrip()[3:].strip()
+                in_code_block = True
+            continue
+        if in_code_block:
+            code_lines.append(line)
+            continue
+        stripped = line.strip()
+        if not stripped:
+            continue
+        heading_level = len(stripped) - len(stripped.lstrip("#"))
+        if 1 <= heading_level <= 6 and stripped[heading_level:].startswith(" "):
+            heading = etree.SubElement(article, f"h{heading_level}")
+            heading.text = stripped[heading_level:].strip()
+            continue
+        paragraph = etree.SubElement(article, "p")
+        paragraph.text = stripped
+    if code_lines:
+        preformatted = etree.SubElement(article, "pre")
+        code = etree.SubElement(preformatted, "code")
+        if code_language:
+            code.set("data-language", code_language)
+        code.text = "\n".join(code_lines).strip()
+    root = etree.Element("html")
+    head = etree.SubElement(root, "head")
+    charset = etree.SubElement(head, "meta")
+    charset.set("charset", "utf-8")
+    root.append(body)
+    return html.tostring(root, encoding="utf-8", method="html", pretty_print=True)
 
 
 def choose_import_user(db, username: str | None) -> User:
@@ -240,6 +350,12 @@ def import_materials(args: argparse.Namespace) -> dict[str, Any]:
             code: get_module(db, module_code=code, organization_id=user.organization_id)
             for code in ("M1", "M2", "M3")
         }
+        points_by_code = {
+            point.code: point
+            for point in db.query(KnowledgePoint)
+            .filter(KnowledgePoint.module_id.in_([module.id for module in modules.values()]))
+            .all()
+        }
         knowledge_base_ids = {module.knowledge_base_id for module in modules.values()}
         if len(knowledge_base_ids) != 1:
             raise ValueError("M1/M2/M3 must share one formal knowledge base")
@@ -276,11 +392,21 @@ def import_materials(args: argparse.Namespace) -> dict[str, Any]:
                 flush=True,
             )
             module = modules[str(material["module_id"])]
+            mapped_point_ids = [
+                points_by_code[code].id
+                for code in material.get("knowledge_point_ids") or []
+                if code in points_by_code
+            ]
+            if len(mapped_point_ids) != len(material.get("knowledge_point_ids") or []):
+                raise ValueError(
+                    f"material contains an unknown knowledge point: {material['material_id']}"
+                )
             previous = existing_upload(db, module, str(material["url"]))
             item: dict[str, Any] = {
                 "material_id": material["material_id"],
                 "module_id": material["module_id"],
                 "source_url": material["url"],
+                "download_url": material.get("download_url") or material["url"],
                 "previous_upload_id": previous.id if previous else None,
                 "previous_status": previous.index_status if previous else None,
             }
@@ -289,6 +415,9 @@ def import_materials(args: argparse.Namespace) -> dict[str, Any]:
                 item["status"] = "validated"
                 continue
             if previous and previous.index_status in {"completed", "pending", "processing"}:
+                if sorted(previous.knowledge_point_ids or []) != sorted(mapped_point_ids):
+                    previous.knowledge_point_ids = mapped_point_ids
+                    db.commit()
                 if previous.external_task_id and previous.index_status in ACTIVE_IMPORT_STATES:
                     task = wait_for_import(
                         client,
@@ -315,17 +444,23 @@ def import_materials(args: argparse.Namespace) -> dict[str, Any]:
                 )
                 continue
 
-            raw, final_url, content_type = download_official_html(
-                str(material["url"]), timeout_seconds=args.download_timeout_seconds
+            raw, final_url, content_type = download_official_content(
+                str(material.get("download_url") or material["url"]),
+                timeout_seconds=args.download_timeout_seconds,
             )
             if not is_official_microsoft_source_url(final_url):
                 raise ValueError(f"official page redirected outside the allowed sources: {final_url}")
-            normalized = normalize_official_html(raw, material)
+            normalized = (
+                normalize_official_markdown(raw, material)
+                if content_type in {"text/markdown", "text/plain"}
+                else normalize_official_html(raw, material)
+            )
             print(
                 f"  downloaded raw={len(raw)} bytes normalized={len(normalized)} bytes",
                 flush=True,
             )
-            raw_path = raw_root / f"{material['material_id']}.source.html"
+            raw_suffix = ".source.md" if content_type in {"text/markdown", "text/plain"} else ".source.html"
+            raw_path = raw_root / f"{material['material_id']}{raw_suffix}"
             normalized_path = normalized_root / f"{material['material_id']}.html"
             raw_path.write_bytes(raw)
             normalized_path.write_bytes(normalized)
@@ -334,6 +469,7 @@ def import_materials(args: argparse.Namespace) -> dict[str, Any]:
                 user_id=user.id,
                 module_id=module.id,
                 knowledge_base_id=module.knowledge_base_id,
+                knowledge_point_ids=mapped_point_ids,
                 filename=normalized_path.name,
                 filepath=str(normalized_path.resolve()),
                 file_type=mimetypes.guess_type(normalized_path.name)[0] or "text/html",

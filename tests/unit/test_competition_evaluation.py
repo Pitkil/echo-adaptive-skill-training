@@ -99,6 +99,33 @@ def test_live_client_keeps_token_in_memory_until_export(monkeypatch: pytest.Monk
     assert RUNNER.redact(response.payload)["access_token"] == "[REDACTED]"
 
 
+def test_transport_timeout_stops_batch_before_next_case(tmp_path: Path) -> None:
+    cases = load_frozen_cases(ROOT / "docs" / "member-d" / "eval_50_cases.json")[:2]
+
+    class Runner:
+        results_dir = tmp_path
+
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def run_case(self, case, _health_payload):
+            self.calls.append(case["case_id"])
+            raise RUNNER.EvaluationTransportError("request timed out")
+
+    runner = Runner()
+    with pytest.raises(RUNNER.EvaluationTransportError, match="timed out"):
+        RUNNER.run_pending_cases(
+            runner=runner,
+            cases=cases,
+            health_payload={"status": "ok"},
+            run_id="timeout-stop-test",
+        )
+
+    assert runner.calls == [cases[0]["case_id"]]
+    assert RUNNER.result_path(tmp_path, cases[0]["case_id"]).exists()
+    assert not RUNNER.result_path(tmp_path, cases[1]["case_id"]).exists()
+
+
 def test_human_review_template_requires_two_reviewers(tmp_path: Path) -> None:
     cases = load_frozen_cases(ROOT / "docs" / "member-d" / "eval_50_cases.json")
     path = tmp_path / "review.csv"

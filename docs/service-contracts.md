@@ -11,6 +11,10 @@ ECHO 对学习者和管理端继续提供版本化 `/v1` 接口，但
   `/status/{task_id}` 和 `/knowledge-bases/{kb_id}/documents`。
 - 查询服务（默认 `http://127.0.0.1:8001`）：`/query` 和 `/health`。
 
+导入和查询使用独立超时预算：`PUNDITRAG_TIMEOUT_SECONDS` 供可能耗时较长的材料导入，
+`PUNDITRAG_QUERY_TIMEOUT_SECONDS` 供在线检索，默认 60 秒。检索重试必须在调用方总请求预算内
+完成，不能让客户端超时后服务端继续占用业务数据库写事务。
+
 业务数据库中的整数 `knowledge_base_id` 不能直接当作 PunditRAG 的 `kb_id`。
 主系统必须把 PunditRAG 返回的字符串 `kb_id` 保存到 `KnowledgeBase.external_ref`，
 上传和检索均使用该映射。未建立映射时，材料上传流程先在 PunditRAG 创建知识库并保存映射。
@@ -294,10 +298,21 @@ ECHO 创建微表征录音任务后，会并行排队 ASR 和微表征检测。�
 `persisted_in_system`。资源状态枚举为 `draft`、`pending_review`、`verified`；自动检查通过后
 只能进入 `pending_review`，不得直接发布。
 
+请求可带 `user_input`（最长 4000 字）描述学习目标、场景或约束。它是学习数据而不是系统指令：
+系统会将其限制在当前课程、模块、知识点和已登记的官方材料范围内，用于检索查询、个性化生成
+以及审计摘要；不得把它当作越权指令。课程 rubric 只提供检索提示和本轮语义复核要求，不以字面
+关键词命中直接决定正式通过。引用编号、官方域名、JSON 结构、代码语法和阶段测试结构由程序
+确定性校验；是否真正回答用户问题、同义表达是否覆盖要求、专业结论是否得到本轮官方证据支持，
+由独立模型以结构化 JSON 复核。普通对话只检查本次问题触发的要求，不强迫回答同一知识点下所有
+概念；完整学习资源才检查知识点核心覆盖。模型复核不可用或返回无效结构时记录
+`lexical_fallback` 并失败关闭，不得用词表兜底冒充 AI 通过。新课程不会套用 Semantic Kernel 的
+rubric，课程负责人应在启用专项检查前配置本课程要求。
+
 `GET /v1/resources` 返回最近一次 `verification_passed`、`verification_issues`、
 `verification_details` 和完整 `verification_history`。检查明细至少覆盖事实声明与证据对齐、引用
 编号和官方域名、代码语法、实操步骤的 action/expected 字段，以及阶段测试的理解/应用/推理维度。
-检查失败时可以局部重做并增加 `retry_count`，每次结果独立保存。
+检查失败时优先根据失败原因进行一次定向模型重生成并增加 `retry_count`；模型不可用时才使用
+保守的确定性修复，并在检查记录中保留原因。每次结果独立保存。
 
 讲师或系统管理员调用 `POST /v1/resources/{resource_id}/publish` 执行人工发布门禁；只有最近一次
 自动检查通过的资源允许变为 `verified`。学习者无权发布。没有官方证据的资源保持 `draft`，不得伪造

@@ -803,7 +803,7 @@
       "question_index": 2,
       "source_title": "Overview of the Process Framework",
       "source_url": "https://learn.microsoft.com/en-sg/semantic-kernel/frameworks/process/process-framework",
-      "source_section": "Core Concepts",
+      "source_section": "Introduction、Event-Driven Architecture、Define the process flow",
       "counts_for_mirt": true,
       "status": "formal"
     },

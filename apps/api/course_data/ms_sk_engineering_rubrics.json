@@ -1,0 +1,61 @@
+{
+  "schema_version": "1.0",
+  "program_code": "MS-SK-ENGINEERING",
+  "knowledge_points": {
+    "Kernel 创建与模型服务接入": {
+      "concepts": [["Kernel"], ["服务", "模型服务"], ["插件", "Plugin"]],
+      "request_rules": [{"markers": ["azure openai", "接入"], "required_concepts": [["AzureChatCompletion"], ["deployment_name", "deployment name", "部署名称", "部署名"], ["endpoint", "终结点", "端点"], ["api_key", "api key", "密钥"]], "match_all": true}]
+    },
+    "提示词与聊天完成": {
+      "concepts": [["模板", "prompt template"], ["变量", "占位符"], ["调用", "invoke"]],
+      "request_rules": [{"markers": ["产品描述"], "required_concepts": [["模板"], ["变量"]]}]
+    },
+    "插件定义与函数调用": {"concepts": [["Plugin", "插件"], ["函数", "function", "方法"], ["参数", "入参", "输入参数"]]},
+    "多轮对话与执行设置": {
+      "concepts": [["ChatHistory", "聊天历史", "对话历史", "历史消息"], ["Execution Settings", "执行设置", "执行参数"], ["Temperature", "temperature", "温度"]],
+      "request_rules": [
+        {"markers": ["temperature"], "required_concepts": [["temperature", "温度"], ["随机", "随机性"]]},
+        {"markers": ["topp", "top p"], "required_concepts": [["topp", "top p"], ["概率", "候选"]]}
+      ]
+    },
+    "Agent 创建与指令设计": {
+      "concepts": [["Agent"], ["instructions", "指令"], ["工具", "tool"]],
+      "request_rules": [
+        {"markers": ["agent 是什么", "什么是 agent"], "required_concepts": [["对话", "conversation"], ["任务", "task", "执行"]]},
+        {"markers": ["chatcompletionagent", "创建"], "required_concepts": [["ChatCompletionAgent"], ["name"], ["instructions"], ["kernel"]], "match_all": true},
+        {"markers": ["chatcompletionagent", "openaiassistantagent", "比较"], "required_concepts": [["ChatCompletionAgent"], ["OpenAIAssistantAgent"], ["Assistant API", "Assistants API"], ["code interpreter", "代码解释器", "file search", "文件搜索"]], "match_all": true}
+      ]
+    },
+    "对话线程与状态管理": {
+      "concepts": [["线程", "thread"], ["状态", "state"], ["持久化", "恢复"]],
+      "request_rules": [{"markers": ["有状态", "无状态"], "required_concepts": [["有状态"], ["无状态"]]}]
+    },
+    "记忆与相关内容检索": {
+      "concepts": [["记忆", "memory"], ["检索", "retrieve"], ["权限", "隔离"]],
+      "difficulty_rules": [{"difficulties": ["standard", "advanced"], "required_concepts": [["后端", "存储实现", "连接器", "vector store"], ["选型", "选择依据", "权衡", "适合场景"]]}]
+    },
+    "多智能体分工与协作": {
+      "concepts": [["Sequential", "串行"], ["Concurrent", "并行"], ["汇总", "聚合", "合并"]],
+      "request_rules": [{"markers": ["多 agent", "多agent", "多智能体"], "required_concepts": [["职责", "角色", "分工"], ["输入", "input"], ["输出", "产出", "结果", "output"]]}]
+    },
+    "Process Framework 步骤与事件": {
+      "concepts": [["Process"], ["Step"], ["Event"]],
+      "request_rules": [{"markers": ["三个核心概念", "process framework"], "required_concepts": [["Process"], ["Step"], ["Event"]], "match_all": true}]
+    },
+    "日志、跟踪与可观测性": {
+      "concepts": [["日志", "log"], ["指标", "metric"], ["OpenTelemetry"]],
+      "request_rules": [
+        {"markers": ["性能", "成本"], "required_concepts": [["延迟", "latency"], ["成本", "cost"]]},
+        {"markers": ["漂移", "drift"], "required_concepts": [["漂移", "drift"], ["阈值", "告警"]]}
+      ]
+    },
+    "过滤、安全与异常处理": {"concepts": [["输入", "input"], ["函数调用", "tool call"], ["输出", "output"]]},
+    "部署与质量评测": {
+      "concepts": [["observe"], ["evaluate"], ["improve"]],
+      "request_rules": [
+        {"markers": ["部署", "semantic kernel"], "required_concepts": [["部署", "上线", "发布"], ["Azure Container Apps", "Container Apps", "容器应用"], ["azd up", "Azure Developer CLI"], ["版本", "版本号", "冻结"], ["回滚", "恢复上一版本", "降级"]], "match_all": true},
+        {"markers": ["实验"], "required_concepts": [["实验"], ["稳定性", "回归"]]}
+      ]
+    }
+  }
+}

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 from contextlib import asynccontextmanager
@@ -35,6 +36,10 @@ from catalog import (
     seed_question,
 )
 from config import Config
+from coverage_rubrics import (
+    request_coverage_requirements,
+    semantic_coverage_requirements,
+)
 from database import (
     ChatSession,
     CourseVideo,
@@ -140,11 +145,14 @@ from resource_generation import (
     ResourceGenerationAgent,
     build_personalization_plan,
 )
+from semantic_coverage import evaluate_semantic_coverage
 from sqlalchemy import and_, or_
 from sqlalchemy import text as sql_text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from video_analysis import run_video_analysis
+
+logger = logging.getLogger(__name__)
 
 API_DIR = Path(__file__).resolve().parent
 WEB_DIR = API_DIR / "web"
@@ -1547,6 +1555,21 @@ def enrich_official_evidence(
     return trusted
 
 
+MAX_PUNDITRAG_QUERY_VARIANTS = 3
+
+
+def _punditrag_search_queries(
+    query: str,
+    additional_queries: list[str] | None,
+    fallback_query: str | None,
+) -> list[str]:
+    """Return a stable, deduplicated query plan with a strict online-call bound."""
+
+    candidates = [query, *(additional_queries or []), fallback_query or ""]
+    normalized = [value.strip() for value in candidates if value and value.strip()]
+    return list(dict.fromkeys(normalized))[:MAX_PUNDITRAG_QUERY_VARIANTS]
+
+
 def search_official_evidence(
     db: Session,
     *,
@@ -1555,6 +1578,7 @@ def search_official_evidence(
     module_id: int,
     trace_id: str | None = None,
     knowledge_point_ids: list[int] | None = None,
+    additional_queries: list[str] | None = None,
 ) -> tuple[list[dict], str | None]:
     """Search the mapped PunditRAG knowledge base and keep publishable evidence."""
 
@@ -1564,23 +1588,36 @@ def search_official_evidence(
     client = PunditRAGClient()
     if not client.configured:
         return [], "PunditRAG查询服务未配置"
-    allowed_document_ids = [
-        str(value)
-        for (value,) in (
-            db.query(Upload.external_document_id)
-            .filter(
-                Upload.knowledge_base_id == knowledge_base_id,
-                Upload.module_id == module_id,
-                Upload.index_status == "completed",
-                Upload.external_document_id.isnot(None),
-            )
-            .all()
+    completed_uploads = (
+        db.query(Upload)
+        .filter(
+            Upload.knowledge_base_id == knowledge_base_id,
+            Upload.module_id == module_id,
+            Upload.index_status == "completed",
+            Upload.external_document_id.isnot(None),
         )
-        if value
+        .all()
+    )
+    scoped_uploads = completed_uploads
+    if knowledge_point_ids:
+        requested_ids = set(knowledge_point_ids)
+        mapped_uploads = [
+            upload
+            for upload in completed_uploads
+            if requested_ids.intersection(upload.knowledge_point_ids or [])
+        ]
+        # Backward compatibility for courses imported before material-to-point
+        # mapping existed.  New imports always persist the mapping.
+        if mapped_uploads:
+            scoped_uploads = mapped_uploads
+    allowed_document_ids = [
+        str(upload.external_document_id)
+        for upload in scoped_uploads
+        if upload.external_document_id
     ]
     if not allowed_document_ids:
         return [], "当前模块没有已完成索引的Microsoft官方材料"
-    search_queries = [query]
+    fallback_query = None
     if knowledge_point_ids:
         points = (
             db.query(KnowledgePoint)
@@ -1599,24 +1636,93 @@ def search_official_evidence(
                 if value.strip()
             )
         )
-        if fallback_query and fallback_query.casefold() != query.strip().casefold():
-            search_queries.append(fallback_query)
-    try:
-        raw_evidence: list[dict] = []
-        for search_query in search_queries:
-            raw_evidence = client.search(
+    search_queries = _punditrag_search_queries(
+        query, additional_queries, fallback_query
+    )
+    merged_evidence: list[dict] = []
+    seen_evidence: set[tuple[str, str]] = set()
+    last_transient_error: IntegrationTransientError | None = None
+
+    def merge_query_evidence(items: list[dict]) -> None:
+        for item in items:
+            metadata = item.get("metadata") or {}
+            identity = (
+                str(metadata.get("chunk_id") or metadata.get("document_id") or ""),
+                str(item.get("text") or "")[:500],
+            )
+            if identity in seen_evidence:
+                continue
+            seen_evidence.add(identity)
+            merged_evidence.append(item)
+
+    for query_index, search_query in enumerate(search_queries):
+        query_trace_id = trace_id
+        if trace_id and len(search_queries) > 1:
+            query_trace_id = f"{trace_id}-q{query_index}"
+        try:
+            query_evidence = client.search(
                 search_query,
                 knowledge_base_id,
                 module_id,
                 external_knowledge_base_id=knowledge_base.external_ref,
                 external_document_ids=allowed_document_ids,
-                trace_id=trace_id,
+                trace_id=query_trace_id,
                 knowledge_point_ids=knowledge_point_ids,
             )
-            if raw_evidence:
-                break
-    except (IntegrationUnavailable, ValueError) as exc:
-        return [], str(exc)
+        except IntegrationTransientError as exc:
+            last_transient_error = exc
+            logger.warning(
+                "PunditRAG query variant failed transiently; continuing within the "
+                "bounded query plan (trace_id=%s, module_id=%s, query_index=%s, error=%s)",
+                trace_id or "none",
+                module_id,
+                query_index,
+                exc,
+            )
+            continue
+        except (IntegrationContractError, ValueError) as exc:
+            return [], str(exc)
+        merge_query_evidence(query_evidence)
+        if query_evidence and not additional_queries:
+            break
+
+    if not merged_evidence:
+        retry_trace_id = f"{trace_id}-rag-retry-1" if trace_id else None
+        logger.warning(
+            "PunditRAG returned no usable evidence; retrying the primary query once "
+            "with a fresh retrieval session (trace_id=%s, retry_trace_id=%s, "
+            "module_id=%s, query_count=%s)",
+            trace_id or "none",
+            retry_trace_id or "server-generated",
+            module_id,
+            len(search_queries),
+        )
+        try:
+            retry_evidence = client.search(
+                search_queries[0],
+                knowledge_base_id,
+                module_id,
+                external_knowledge_base_id=knowledge_base.external_ref,
+                external_document_ids=allowed_document_ids,
+                trace_id=retry_trace_id,
+                knowledge_point_ids=knowledge_point_ids,
+            )
+            merge_query_evidence(retry_evidence)
+        except IntegrationTransientError as exc:
+            last_transient_error = exc
+            logger.warning(
+                "PunditRAG primary-query retry failed transiently "
+                "(trace_id=%s, retry_trace_id=%s, module_id=%s, error=%s)",
+                trace_id or "none",
+                retry_trace_id or "server-generated",
+                module_id,
+                exc,
+            )
+        except (IntegrationContractError, ValueError) as exc:
+            return [], str(exc)
+    raw_evidence = merged_evidence[:12]
+    if not raw_evidence and last_transient_error is not None:
+        return [], str(last_transient_error)
     evidence = enrich_official_evidence(
         db,
         knowledge_base_id=knowledge_base_id,
@@ -1634,6 +1740,7 @@ def safe_retrieve(
     query: str,
     *,
     knowledge_point_ids: list[int] | None = None,
+    additional_queries: list[str] | None = None,
 ) -> tuple[list[dict], str | None]:
     if not plan.use_rag:
         return [], None
@@ -1644,6 +1751,7 @@ def safe_retrieve(
         module_id=plan.context.module_id,
         trace_id=plan.trace_id,
         knowledge_point_ids=knowledge_point_ids,
+        additional_queries=additional_queries,
     )
 
 
@@ -1674,10 +1782,13 @@ def safe_memories(plan, user: User, query: str) -> tuple[list[dict], str | None]
 def _module_memory_query(
     module: TrainingModule,
     points: list[KnowledgePoint],
+    learning_goal: str = "",
 ) -> str:
     terms = [str(module.id), module.code, module.name]
     for point in points:
         terms.extend([str(point.id), point.code, point.name])
+    if learning_goal.strip():
+        terms.append(learning_goal.strip()[:1000])
     return " ".join(dict.fromkeys(term.strip() for term in terms if term.strip()))
 
 
@@ -1697,7 +1808,16 @@ def fixed_quiz_source(db: Session, session: ChatSession, quiz: Quiz) -> dict[str
     source_url = str(quiz.source_url or "").strip()
     if not source_url or not is_official_microsoft_source_url(source_url):
         return None
-    normalized_url = source_url.rstrip("/")
+    def official_source_identity(url: str) -> tuple[str, str]:
+        """Match one Microsoft Learn page across its language-region aliases."""
+
+        parsed = urlsplit(url.strip())
+        path_parts = [part for part in parsed.path.split("/") if part]
+        if path_parts and re.fullmatch(r"[a-z]{2}(?:-[a-z]{2})?", path_parts[0], re.IGNORECASE):
+            path_parts = path_parts[1:]
+        return (parsed.hostname or "").lower(), "/".join(part.casefold() for part in path_parts)
+
+    source_identity = official_source_identity(source_url)
     upload = next(
         (
             item
@@ -1708,13 +1828,13 @@ def fixed_quiz_source(db: Session, session: ChatSession, quiz: Quiz) -> dict[str
                 index_status="completed",
             )
             .all()
-            if str(item.source_url or "").strip().rstrip("/") == normalized_url
+            if official_source_identity(str(item.source_url or "")) == source_identity
         ),
         None,
     )
     return {
         "source_title": quiz.source_title or (upload.source_title if upload else None),
-        "source_url": source_url,
+        "source_url": upload.source_url if upload else source_url,
         "source_section": quiz.source_section or (upload.source_section if upload else None),
         "source_version": upload.source_version if upload else None,
         "document_id": upload.external_document_id if upload else None,
@@ -1857,6 +1977,7 @@ def execute_turn(
     analysis_finished_at = datetime.now(UTC)
     generation_started_at = datetime.now(UTC)
     requested_point = None
+    dialogue_semantic_result = None
     misconception_feedback_quiz: Quiz | None = None
     if request.knowledge_point_id is not None:
         requested_point = (
@@ -1994,14 +2115,31 @@ def execute_turn(
     elif action is PrimaryAction.LEARNING_DIALOGUE:
         retrieval_query = request.user_input
         knowledge_point_ids = None
+        dialogue_coverage_requirements: list[str] = []
         if requested_point is not None:
-            retrieval_query = f"{requested_point.name} {request.user_input}"
+            dialogue_coverage_requirements = request_coverage_requirements(
+                program_code=session.program.code,
+                knowledge_point_name=requested_point.name,
+                user_input=request.user_input,
+            )
+            retrieval_query = " ".join(
+                [
+                    requested_point.name,
+                    request.user_input,
+                    *dialogue_coverage_requirements,
+                ]
+            )
             knowledge_point_ids = [requested_point.id]
         evidence, rag_error = safe_retrieve(
             db,
             plan,
             retrieval_query,
             knowledge_point_ids=knowledge_point_ids,
+            additional_queries=(
+                [" ".join(dialogue_coverage_requirements), *dialogue_coverage_requirements]
+                if dialogue_coverage_requirements
+                else None
+            ),
         )
         memories, memory_error = safe_memories(plan, user, request.user_input)
         if rag_error:
@@ -2027,7 +2165,57 @@ def execute_turn(
             memories=memories,
             history=history,
             has_active_quiz=session.active_quiz_id is not None,
+            coverage_requirements=dialogue_coverage_requirements,
         )
+        if requested_point is not None:
+            semantic_requirements = semantic_coverage_requirements(
+                program_code=session.program.code,
+                knowledge_point_name=requested_point.name,
+                user_input=request.user_input,
+                include_core_concepts=False,
+            )
+            dialogue_semantic_result = evaluate_semantic_coverage(
+                program_code=session.program.code,
+                knowledge_point_name=requested_point.name,
+                user_input=request.user_input,
+                content=content,
+                requirements=semantic_requirements,
+                evidence=evidence,
+            )
+            if not dialogue_semantic_result.passed:
+                repaired_content = StudentHelper().repair_response(
+                    user_input=request.user_input,
+                    module_name=session.module.name,
+                    evidence=evidence,
+                    original_response=content,
+                    coverage_issues=dialogue_semantic_result.issues,
+                    echo_state=session.echo_state,
+                )
+                repaired_result = evaluate_semantic_coverage(
+                    program_code=session.program.code,
+                    knowledge_point_name=requested_point.name,
+                    user_input=request.user_input,
+                    content=repaired_content,
+                    requirements=semantic_requirements,
+                    evidence=evidence,
+                )
+                if repaired_result.passed:
+                    content = repaired_content
+                    dialogue_semantic_result = repaired_result
+                    degradation.append(
+                        "模型初稿未覆盖课程要求，已基于官方证据完成一次语义修复"
+                    )
+                else:
+                    content = (
+                        "本轮暂未生成通过内容检查的正式答复。系统已经保留失败原因，"
+                        "请稍后重试；在语义复核恢复或检索到足够官方证据前，"
+                        "不会把未经核验的专业内容作为答案展示。"
+                    )
+                    dialogue_semantic_result = repaired_result
+                    degradation.append(
+                        "语义复核或定向修复未通过，已阻止未经核验的专业答复发布"
+                    )
+            payload["semantic_coverage"] = dialogue_semantic_result.to_dict()
         fsm = EchoFSM(session.echo_stage_counts)
         proposed = "C" if session.echo_state == "E" else session.echo_state
         transition = fsm.update(request.user_input, proposed, session.echo_state)
@@ -2108,6 +2296,11 @@ def execute_turn(
         validation_issues.append("固定题判分结果缺少官方出处")
     if not content.strip():
         validation_issues.append("最终回复为空")
+    if action is PrimaryAction.LEARNING_DIALOGUE and requested_point is not None:
+        if dialogue_semantic_result is None:
+            validation_issues.append("语义覆盖复核记录缺失")
+        elif not dialogue_semantic_result.passed:
+            validation_issues.extend(dialogue_semantic_result.issues)
     validation_finished_at = datetime.now(UTC)
     next_action_started_at = datetime.now(UTC)
     result["agent_records"] = {
@@ -4373,6 +4566,7 @@ def generate_resources(
                     query=_module_memory_query(
                         module,
                         [requested_point] if requested_point is not None else points,
+                        request.user_input or "",
                     ),
                     knowledge_point_id=request.knowledge_point_id,
                 )
@@ -4430,6 +4624,7 @@ def generate_resources(
             "module_id": module.id,
             "knowledge_point_id": point.id,
             "single_primary_action": True,
+            "learning_goal": (request.user_input or "").strip()[:1000] or None,
         },
     )
     db.add(execution)
@@ -4439,12 +4634,18 @@ def generate_resources(
         profile,
         knowledge_point_id=point.id,
         knowledge_point_name=point.name,
+        program_code=module.program.code,
+        learning_goal=request.user_input or "",
     )
     analysis_finished_at = datetime.now(UTC)
     generation_started_at = datetime.now(UTC)
     evidence, rag_error = search_official_evidence(
         db,
-        query=f"{point.name} {plan.weakest_dimension_label}",
+        query=(
+            f"{point.name}\n学习目标：{request.user_input.strip()}"
+            if request.user_input and request.user_input.strip()
+            else f"{point.name} {plan.weakest_dimension_label}"
+        ),
         knowledge_base_id=module.knowledge_base_id,
         module_id=module.id,
         knowledge_point_ids=[point.id],
@@ -4501,12 +4702,15 @@ def generate_resources(
         db.add(initial_record)
         final_result = initial_result
         retry_count = 0
+        repair_note = None
         if not initial_result.passed and evidence:
-            repaired = ResourceGenerationAgent.repair_failed_resource(
-                item,
+            repaired, repair_note = ResourceGenerationAgent().regenerate_after_verification_failure(
                 plan,
                 evidence,
-                initial_result.issues,
+                resource_type=item["resource_type"],
+                user_input=request.user_input or "",
+                issues=initial_result.issues,
+                original_resource=item,
             )
             resource.title = repaired["title"]
             resource.content = repaired["content"]
@@ -4525,6 +4729,35 @@ def generate_resources(
                     retry_count=retry_count,
                 )
             )
+            if not final_result.passed:
+                # A model retry may repeat the same structural omission.  Do
+                # not expose that invalid draft as if it were the generated
+                # resource: apply the deterministic evidence-bound repair and
+                # run the complete verifier once more.
+                repaired = ResourceGenerationAgent().repair_failed_resource(
+                    repaired,
+                    plan,
+                    evidence,
+                    final_result.issues,
+                )
+                resource.title = repaired["title"]
+                resource.content = repaired["content"]
+                final_result = verifier.verify(repaired, plan, evidence)
+                retry_count = 2
+                repair_note = "模型定向重生成仍未通过，已执行确定性结构修复。"
+                db.add(
+                    VerificationResult(
+                        id=uuid4().hex,
+                        resource_id=resource.id,
+                        passed=final_result.passed,
+                        factual_score=final_result.factual_score,
+                        coverage_score=final_result.coverage_score,
+                        difficulty_score=final_result.difficulty_score,
+                        issues=final_result.issues,
+                        details=final_result.details,
+                        retry_count=retry_count,
+                    )
+                )
         if final_result.passed:
             # Automated verification is not the publication gate. A mentor or
             # administrator must explicitly publish the resource.
@@ -4542,6 +4775,7 @@ def generate_resources(
                     "issues": final_result.issues,
                 },
                 "retry_count": retry_count,
+                "retry_note": repair_note,
             }
         )
         resources.append(
@@ -4588,6 +4822,7 @@ def generate_resources(
                 "input_summary": {
                     "resource_type": selected_resource_type,
                     "official_evidence_count": len(evidence),
+                    "learning_goal": (request.user_input or "").strip()[:1000] or None,
                 },
                 "output": {
                     "resources": resources,

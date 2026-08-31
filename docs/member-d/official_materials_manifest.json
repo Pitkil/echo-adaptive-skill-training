@@ -1,9 +1,9 @@
 {
-  "version": "1.2",
-  "description": "ECHO 项目 12 个知识点的 15 份 Microsoft 官方材料来源清单",
+  "version": "1.7",
+  "description": "ECHO 项目 12 个知识点的 20 份 Microsoft 官方材料来源清单",
   "created_at": "2026-08-19",
-  "last_updated": "2026-08-26",
-  "total_materials": 15,
+  "last_updated": "2026-08-31",
+  "total_materials": 20,
   "materials": [
     {
       "material_id": "MS-SK-CONCEPTS-KERNEL",
@@ -37,6 +37,21 @@
       "import_status": "pending"
     },
     {
+      "material_id": "MS-SK-CHAT-COMPLETION-SERVICES",
+      "title": "Add chat completion services to Semantic Kernel",
+      "type": "Microsoft Learn 文档",
+      "url": "https://learn.microsoft.com/en-us/semantic-kernel/concepts/ai-services/chat-completion/",
+      "download_url": "https://learn.microsoft.com/en-us/semantic-kernel/concepts/ai-services/chat-completion/?accept=text/markdown",
+      "highlight_term_groups": [["AzureChatCompletion", "deployment_name", "endpoint", "api_key"]],
+      "version": "accessed-2026-08-31",
+      "module_id": "M1",
+      "knowledge_point_ids": ["M1-KP1"],
+      "section": "Creating chat completion services / Azure OpenAI",
+      "local_file": "",
+      "sha256": "",
+      "import_status": "pending"
+    },
+    {
       "material_id": "MS-SK-CHAT-HISTORY",
       "title": "Creating and managing a chat history object",
       "type": "Microsoft Learn 文档",
@@ -51,6 +66,21 @@
         "reason": "原条目与 KP1/KP2 资料重复，且清单未给 M1-KP4 配置任何正式材料；以当前官方 Chat History 文档补齐真实覆盖",
         "verified_at": "2026-08-26"
       },
+      "local_file": "",
+      "sha256": "",
+      "import_status": "pending"
+    },
+    {
+      "material_id": "MS-SK-OPENAI-TEMPERATURE-API",
+      "title": "OpenAIPromptExecutionSettings.Temperature Property",
+      "type": "Microsoft Learn API 参考",
+      "url": "https://learn.microsoft.com/en-us/dotnet/api/microsoft.semantickernel.connectors.openai.openaipromptexecutionsettings.temperature?view=semantic-kernel-dotnet",
+      "version": "accessed-2026-08-30",
+      "module_id": "M1",
+      "knowledge_point_ids": [
+        "M1-KP4"
+      ],
+      "section": "Temperature Property",
       "local_file": "",
       "sha256": "",
       "import_status": "pending"
@@ -131,6 +161,34 @@
       "import_status": "pending"
     },
     {
+      "material_id": "MS-SK-CHAT-COMPLETION-AGENT",
+      "title": "Exploring the Semantic Kernel ChatCompletionAgent",
+      "type": "Microsoft Learn 文档",
+      "url": "https://learn.microsoft.com/en-us/semantic-kernel/frameworks/agent/agent-types/chat-completion-agent",
+      "download_url": "https://learn.microsoft.com/en-us/semantic-kernel/frameworks/agent/agent-types/chat-completion-agent?accept=text/markdown",
+      "highlight_term_groups": [["ChatCompletionAgent(", "kernel=", "name=", "instructions="]],
+      "version": "accessed-2026-08-31",
+      "module_id": "M2",
+      "knowledge_point_ids": ["M2-KP1"],
+      "section": "Creating a ChatCompletionAgent / AI service selection",
+      "local_file": "",
+      "sha256": "",
+      "import_status": "pending"
+    },
+    {
+      "material_id": "MS-SK-OPENAI-ASSISTANT-AGENT",
+      "title": "Exploring the Semantic Kernel OpenAI Assistant Agent",
+      "type": "Microsoft Learn 文档",
+      "url": "https://learn.microsoft.com/en-us/semantic-kernel/frameworks/agent/agent-types/assistant-agent",
+      "version": "accessed-2026-08-31",
+      "module_id": "M2",
+      "knowledge_point_ids": ["M2-KP1"],
+      "section": "Assistant API capabilities / creating and using an assistant agent",
+      "local_file": "",
+      "sha256": "",
+      "import_status": "pending"
+    },
+    {
       "material_id": "MS-SK-AGENT-CONCURRENT",
       "title": "Concurrent Agent Orchestration",
       "type": "Microsoft Learn 文档",
@@ -174,6 +232,7 @@
       "title": "Overview of the Process Framework",
       "type": "Microsoft Learn 文档",
       "url": "https://learn.microsoft.com/en-us/semantic-kernel/frameworks/process/process-framework",
+      "download_url": "https://learn.microsoft.com/en-us/semantic-kernel/frameworks/process/process-framework?accept=text/markdown",
       "version": "accessed-2026-08-26",
       "module_id": "M3",
       "knowledge_point_ids": ["M3-KP1", "M3-KP4"],
@@ -209,6 +268,19 @@
       "import_status": "pending"
     },
     {
+      "material_id": "MS-SK-AZURE-CONTAINER-APPS-DEMO",
+      "title": "Extend Copilot Studio with Semantic Kernel",
+      "type": "microsoft/semantic-kernel 官方部署示例",
+      "url": "https://github.com/microsoft/semantic-kernel/blob/main/python/samples/demos/copilot_studio_skill/README.md",
+      "version": "main-accessed-2026-08-31",
+      "module_id": "M3",
+      "knowledge_point_ids": ["M3-KP4"],
+      "section": "Getting Started / azd up / Azure Container Apps architecture",
+      "local_file": "",
+      "sha256": "",
+      "import_status": "pending"
+    },
+    {
       "material_id": "MS-SK-FILTERS",
       "title": "Semantic Kernel Filters",
       "type": "Microsoft Learn 文档",
@@ -225,21 +297,21 @@
   "coverage": {
     "M1": {
       "knowledge_points": 4,
-      "materials": 6,
+      "materials": 8,
       "status": "covered"
     },
     "M2": {
       "knowledge_points": 4,
-      "materials": 5,
+      "materials": 7,
       "status": "covered"
     },
     "M3": {
       "knowledge_points": 4,
-      "materials": 4,
+      "materials": 5,
       "status": "covered"
     },
     "total_knowledge_points": 12,
-    "total_materials": 15
+    "total_materials": 20
   },
   "import_notes": [
     "本清单登记官方来源；local_file 和 sha256 仅在取得并上传原始材料后由导入程序填写",
@@ -248,6 +320,11 @@
     "M3 的 '部署与质量评测' 知识点由 Process Framework 和 Observability 文档联合覆盖",
     "版本 1.1 保留 3 条旧 Training URL 的替换记录；旧地址不得继续作为正式证据",
     "版本 1.2 用官方 Chat History 文档替换重复的 Components 条目，补齐 M1-KP4 的真实材料覆盖",
+    "版本 1.3 新增 Temperature API 参考，以覆盖冻结评测案例 041 的固定题官方出处；须完成导入和检索验证后才可用于正式评测",
+    "版本 1.4 新增 Chat Completion 服务、ChatCompletionAgent、OpenAI Assistant Agent 和 Azure Container Apps 官方部署示例，补齐服务接入、Agent 创建与对比、应用部署证据",
+    "版本 1.5 增加三份 Microsoft Learn 官方 Markdown 表示，保留网页动态标签中未进入检索正文的 Azure 参数、Agent 创建代码和 Event 定义",
+    "版本 1.6 不再并存重复材料；三份原 Microsoft Learn 来源改用官方 Markdown 下载正文，引用 URL 保持普通页面地址",
+    "版本 1.7 将官方 Markdown 中已核验的关键代码块同时保存为普通可检索正文，避免检索服务忽略 pre/code 后只返回说明段落",
     "所有材料必须以正式导入报告和逐知识点检索验证结果为准，不能仅凭本清单声明可检索或引用验证通过"
   ]
 }

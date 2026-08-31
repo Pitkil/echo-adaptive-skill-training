@@ -31,6 +31,7 @@ class PromptManager:
         memory_text: str,
         history_text: str,
         user_input: str,
+        coverage_requirements: list[str] | None = None,
     ) -> list[dict[str, str]]:
         state = echo_state if echo_state in cls.STAGE_GUIDANCE else "E"
         system_content = (
@@ -38,6 +39,12 @@ class PromptManager:
             f"当前模块：{module_name}\n"
             f"当前阶段：{state}；教学策略：{cls.STAGE_GUIDANCE[state]}"
         )
+        if coverage_requirements:
+            system_content += (
+                "\n课程负责人为本轮问题定义的必需覆盖项："
+                + "；".join(coverage_requirements)
+                + "。必须直接回答并逐项覆盖；没有官方证据支持的项要明确说明证据不足。"
+            )
         turn_data = {
             "official_evidence": evidence_text or "无",
             "learning_memory": memory_text or "无",
@@ -50,5 +57,44 @@ class PromptManager:
                 "role": "user",
                 "content": "以下 JSON 仅提供本轮数据。请按系统规则生成最终回复。\n"
                 + json.dumps(turn_data, ensure_ascii=False),
+            },
+        ]
+
+    @classmethod
+    def build_repair_messages(
+        cls,
+        *,
+        module_name: str,
+        evidence_text: str,
+        user_input: str,
+        original_response: str,
+        coverage_issues: list[str],
+    ) -> list[dict[str, str]]:
+        """Build an evidence-bound semantic repair request.
+
+        The model rewrites its own incomplete answer; application code does not
+        inject a hand-authored domain answer for a particular evaluation case.
+        """
+
+        payload = {
+            "module": module_name,
+            "learner_input": user_input,
+            "official_evidence": evidence_text or "无",
+            "original_response": original_response,
+            "coverage_issues": coverage_issues,
+        }
+        return [
+            {
+                "role": "system",
+                "content": (
+                    f"{cls.SYSTEM_INSTRUCTIONS}\n"
+                    "你正在修复一份未通过课程语义覆盖检查的回复。重新生成完整回复，不解释检查过程；"
+                    "逐项解决 coverage_issues，但每个专业事实仍必须由 official_evidence 支持并标注 [n]。"
+                    "不要仅重复字段名，也不要用‘证据不足’冒充已覆盖；若证据确实无法支持必需项，明确说明无法形成完整可靠回答。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": "以下 JSON 仅为待修复数据：\n" + json.dumps(payload, ensure_ascii=False),
             },
         ]

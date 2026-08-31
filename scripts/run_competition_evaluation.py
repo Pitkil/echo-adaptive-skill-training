@@ -56,6 +56,10 @@ class EvaluationRunError(RuntimeError):
     """Raised when a run cannot safely continue."""
 
 
+class EvaluationTransportError(EvaluationRunError):
+    """Raised when request completion is unknown and the batch must stop."""
+
+
 @dataclass(frozen=True)
 class TimedResponse:
     started_at: str
@@ -255,6 +259,11 @@ class LiveEchoClient:
 
     @staticmethod
     def require_success(response: TimedResponse, label: str) -> Any:
+        if response.status_code == 0:
+            raise EvaluationTransportError(
+                f"{label} ended without an HTTP response; the server may still be "
+                f"processing the request: {response.payload}"
+            )
         if not 200 <= response.status_code < 300:
             raise EvaluationRunError(
                 f"{label} failed with HTTP {response.status_code}: {response.payload}"
@@ -836,6 +845,77 @@ def create_manifest(
     }
 
 
+def failed_case_result(
+    *, run_id: str, case: dict[str, Any], exc: Exception
+) -> dict[str, Any]:
+    """Build the auditable failure record written before a batch stops or continues."""
+
+    case_id = str(case["case_id"])
+    return {
+        "schema_version": "1.0",
+        "run_id": run_id,
+        "case_id": case_id,
+        "learner_type": case["learner_type"],
+        "module": case["module"],
+        "knowledge_point": case["knowledge_point"],
+        "scenario_type": case["scenario_type"],
+        "status": "failed",
+        "started_at": utc_now(),
+        "finished_at": utc_now(),
+        "request": {"input": case["input"]},
+        "actual_output": {"error_type": type(exc).__name__, "error": str(exc)},
+        "agent_records": {
+            name: {
+                "status": "not_run",
+                "input_summary": None,
+                "output": None,
+                "failure_reason": str(exc),
+                "started_at": None,
+                "finished_at": None,
+                "persisted_in_system": False,
+            }
+            for name in AGENT_NAMES
+        },
+        "citations": [],
+        "resource_record": None,
+        "human_review": pending_human_review(case),
+        "metric_flags": {
+            "difficulty_match": None,
+            "knowledge_coverage": None,
+            "source_traceable": None,
+            "closed_loop_complete": False,
+        },
+        "metric_evidence": {
+            "required_citation_count": 0,
+            "traceable_citation_count": 0,
+        },
+        "failure_reasons": [f"RUNNER_OR_SYSTEM_ERROR({type(exc).__name__})"],
+    }
+
+
+def run_pending_cases(
+    *,
+    runner: CompetitionEvaluationRunner,
+    cases: list[dict[str, Any]],
+    health_payload: dict[str, Any],
+    run_id: str,
+) -> None:
+    """Run sequentially, stopping if the previous request may still be executing."""
+
+    for index, case in enumerate(cases, start=1):
+        case_id = str(case["case_id"])
+        print(f"[{index}/{len(cases)}] running case {case_id}", flush=True)
+        try:
+            result = runner.run_case(case, health_payload)
+        except Exception as exc:
+            result = failed_case_result(run_id=run_id, case=case, exc=exc)
+            write_json(result_path(runner.results_dir, case_id), result)
+            if isinstance(exc, EvaluationTransportError):
+                raise
+            continue
+        write_json(result_path(runner.results_dir, case_id), result)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="运行 ECHO 冻结的 50 组比赛评测案例。")
     parser.add_argument("--base-url", default="http://127.0.0.1:8010")
@@ -901,53 +981,12 @@ def main() -> int:
             write_review_template(run_dir / "human-review-template.csv", cases)
 
         todo = pending_cases(cases, runner.results_dir, selected_case_ids=selected)
-        for index, case in enumerate(todo, start=1):
-            case_id = str(case["case_id"])
-            print(f"[{index}/{len(todo)}] running case {case_id}", flush=True)
-            try:
-                result = runner.run_case(case, health_response.payload)
-            except Exception as exc:
-                result = {
-                    "schema_version": "1.0",
-                    "run_id": args.run_id,
-                    "case_id": case_id,
-                    "learner_type": case["learner_type"],
-                    "module": case["module"],
-                    "knowledge_point": case["knowledge_point"],
-                    "scenario_type": case["scenario_type"],
-                    "status": "failed",
-                    "started_at": utc_now(),
-                    "finished_at": utc_now(),
-                    "request": {"input": case["input"]},
-                    "actual_output": {"error_type": type(exc).__name__, "error": str(exc)},
-                    "agent_records": {
-                        name: {
-                            "status": "not_run",
-                            "input_summary": None,
-                            "output": None,
-                            "failure_reason": str(exc),
-                            "started_at": None,
-                            "finished_at": None,
-                            "persisted_in_system": False,
-                        }
-                        for name in AGENT_NAMES
-                    },
-                    "citations": [],
-                    "resource_record": None,
-                    "human_review": pending_human_review(case),
-                    "metric_flags": {
-                        "difficulty_match": None,
-                        "knowledge_coverage": None,
-                        "source_traceable": None,
-                        "closed_loop_complete": False,
-                    },
-                    "metric_evidence": {
-                        "required_citation_count": 0,
-                        "traceable_citation_count": 0,
-                    },
-                    "failure_reasons": [f"RUNNER_OR_SYSTEM_ERROR({type(exc).__name__})"],
-                }
-            write_json(result_path(runner.results_dir, case_id), result)
+        run_pending_cases(
+            runner=runner,
+            cases=todo,
+            health_payload=health_response.payload,
+            run_id=args.run_id,
+        )
     finally:
         client.close()
 
