@@ -29,6 +29,8 @@
         adminVideos: [],
         videoCheckpoints: new Set(),
         videoEvidenceContext: null,
+        pendingOralJobId: null,
+        pendingOralAttemptId: null,
         lastVideoProgressSave: 0,
         isSending: false,
         charts: {},
@@ -551,6 +553,7 @@
             knowledgePointId: Number(select.value) || null,
             knowledgePointLabel: selectedOption?.textContent || "本节知识点",
             promptText: state.activeCheckpoint?.question || null,
+            checkpointId: state.activeCheckpoint?.id || null,
             progressPercent: Number.isFinite(player.duration) && player.duration
                 ? Math.round(player.currentTime / player.duration * 100)
                 : null,
@@ -559,6 +562,7 @@
         renderVideoEvidenceContext();
         showView("evidence");
         setLearnerJobStatus("等待你授权并开始录音", "idle");
+        resetOralConfirmation();
         $("#video-evidence-context").scrollIntoView({block: "start"});
     }
 
@@ -577,6 +581,7 @@
 
     function clearVideoEvidenceContext() {
         state.videoEvidenceContext = null;
+        resetOralConfirmation();
         renderVideoEvidenceContext();
     }
 
@@ -1295,6 +1300,18 @@
         $("#learner-job-status-text").textContent = message;
     }
 
+    function resetOralConfirmation() {
+        state.pendingOralJobId = null;
+        state.pendingOralAttemptId = null;
+        const panel = $("#oral-transcript-confirmation");
+        if (!panel) return;
+        panel.classList.add("hidden");
+        $("#oral-confirmed-transcript").value = "";
+        $("#oral-transcript-confirmed").checked = false;
+        $("#oral-assessment-result").classList.add("hidden");
+        $("#oral-assessment-result").innerHTML = "";
+    }
+
     async function pollLearnerTranscription(jobId) {
         if (!jobId) return;
         for (let attempt = 0; attempt < 30; attempt += 1) {
@@ -1304,7 +1321,21 @@
                 const payload = await response.json();
                 if (payload.transcription_status === "completed") {
                     const transcript = payload.transcript || "（未识别到清晰语音）";
-                    setLearnerJobStatus(`转写完成：${transcript}`, "completed");
+                    if (
+                        state.videoEvidenceContext?.checkpointId
+                        && payload.video_checkpoint_id === state.videoEvidenceContext.checkpointId
+                    ) {
+                        state.pendingOralJobId = jobId;
+                        state.pendingOralAttemptId = window.crypto?.randomUUID?.()
+                            || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+                        $("#oral-confirmed-transcript").value = transcript;
+                        $("#oral-transcript-confirmed").checked = false;
+                        $("#oral-transcript-confirmation").classList.remove("hidden");
+                        setLearnerJobStatus("转写完成。请核对或修正文字，再明确确认并提交评分。", "completed");
+                        $("#oral-transcript-confirmation").scrollIntoView({block: "nearest"});
+                    } else {
+                        setLearnerJobStatus(`转写完成：${transcript}`, "completed");
+                    }
                     return;
                 }
                 if (["failed", "unavailable"].includes(payload.transcription_status)) {
@@ -1338,15 +1369,68 @@
         ) {
             data.append("knowledge_point_id", String(state.videoEvidenceContext.knowledgePointId));
         }
+        if (state.videoEvidenceContext?.checkpointId) {
+            data.append("video_checkpoint_id", String(state.videoEvidenceContext.checkpointId));
+        }
         data.append("audio", blob, selected?.name || "learner-turn.webm");
         try {
             setLearnerJobStatus("正在提交并创建检测任务", "processing");
             const response = await api("/v1/micro/detection-jobs", {method: "POST", body: data});
             const payload = await response.json();
             setLearnerJobStatus(`任务 ${payload.job_id} 已提交，状态：${payload.status}`, "submitted");
+            resetOralConfirmation();
             pollLearnerTranscription(payload.job_id);
         } catch (error) {
             setLearnerJobStatus(error.message, "error");
+        }
+    }
+
+    async function submitConfirmedOralAnswer() {
+        const context = state.videoEvidenceContext;
+        if (!context?.checkpointId || !state.pendingOralJobId) {
+            return toast("当前没有可评分的视频口述答案");
+        }
+        if (!$("#oral-transcript-confirmed").checked) {
+            return toast("请先确认转写内容已核对");
+        }
+        const transcript = $("#oral-confirmed-transcript").value.trim();
+        if (!transcript) return toast("确认后的口述答案不能为空");
+        const button = $("#submit-oral-answer");
+        button.disabled = true;
+        try {
+            const response = await api(
+                `/v1/video-checkpoints/${context.checkpointId}/oral-attempts`,
+                {
+                    method: "POST",
+                    body: JSON.stringify({
+                        job_id: state.pendingOralJobId,
+                        confirmed_transcript: transcript,
+                        attempt_id: state.pendingOralAttemptId,
+                        session_id: state.sessionId || null,
+                    }),
+                },
+            );
+            const result = await response.json();
+            const matched = result.matched_points.length
+                ? `已覆盖：${result.matched_points.join("；")}`
+                : "尚未覆盖已确认要点";
+            const missing = result.missing_points.length
+                ? `<small>还需补充：${escapeHtml(result.missing_points.join("；"))}</small>`
+                : "<small>已覆盖全部参考要点。</small>";
+            const panel = $("#oral-assessment-result");
+            panel.innerHTML = `
+                <strong>${result.is_correct ? "回答通过" : "建议继续巩固"} · ${Math.round(result.score * 100)} 分</strong>
+                <span>${escapeHtml(matched)}</span>
+                ${missing}
+                <p>${escapeHtml(result.feedback)}</p>
+                <em>U ${result.ability.U.toFixed(2)} · A ${result.ability.A.toFixed(2)} · R ${result.ability.R.toFixed(2)}；${escapeHtml(result.microrepresentation_note)}</em>`;
+            panel.classList.remove("hidden");
+            setLearnerJobStatus("口述答案已评分并记录；能力值仅依据评分结果更新。", "completed");
+            await Promise.all([loadInsight(), loadAssessmentProgress()]);
+        } catch (error) {
+            setLearnerJobStatus(error.message, "error");
+        } finally {
+            button.disabled = false;
         }
     }
 
@@ -1546,10 +1630,10 @@
         node.innerHTML = items.map((item) => `
             <article class="checkpoint-item" data-checkpoint-id="${item.id}">
                 <div class="checkpoint-head"><strong>${formatVideoTime(item.time_offset_seconds)} · ${item.status === "frozen" ? "已冻结" : "草稿"}</strong></div>
-                <label>题干<textarea data-checkpoint-field="question">${escapeHtml(item.question)}</textarea></label>
-                <label>参考要点（可选，每行一条）<textarea data-checkpoint-field="points">${escapeHtml((item.expected_points || []).join("\n"))}</textarea></label>
-                <label>官方出处（可选，每行一个 URL）<textarea data-checkpoint-field="sources">${escapeHtml((item.official_sources || []).join("\n"))}</textarea></label>
-                <div class="row-actions"><button class="button secondary" type="button" data-checkpoint-save="${item.id}"><i data-lucide="save"></i>保存</button></div>
+                <label>题干（必填）<textarea data-checkpoint-field="question" ${item.status === "frozen" ? "disabled" : ""}>${escapeHtml(item.question)}</textarea></label>
+                <label>参考要点（必填，每行一条）<textarea data-checkpoint-field="points" ${item.status === "frozen" ? "disabled" : ""}>${escapeHtml((item.expected_points || []).join("\n"))}</textarea></label>
+                <label>Microsoft 官方出处（必填，每行一个 URL）<textarea data-checkpoint-field="sources" ${item.status === "frozen" ? "disabled" : ""}>${escapeHtml((item.official_sources || []).join("\n"))}</textarea></label>
+                ${item.status === "frozen" ? '<small class="muted">已冻结并绑定可评分记录，不可直接修改。</small>' : `<div class="row-actions"><button class="button secondary" type="button" data-checkpoint-save="${item.id}"><i data-lucide="save"></i>保存</button></div>`}
             </article>`).join("");
         $$("[data-checkpoint-save]").forEach((button) => {
             button.addEventListener("click", () => saveCheckpoint(Number(button.dataset.checkpointSave)));
@@ -1904,6 +1988,7 @@
             if (selected) setLearnerJobStatus("已选择本地音频，可以提交", "ready");
         });
         $("#upload-learner-audio").addEventListener("click", uploadLearnerAudio);
+        $("#submit-oral-answer").addEventListener("click", submitConfirmedOralAnswer);
         $("#upload-mentor-audio").addEventListener("click", uploadMentorAudio);
         $("#speaker-confirmed").addEventListener("change", syncSpeakerBindingControl);
         $("#upload-knowledge").addEventListener("click", uploadKnowledge);

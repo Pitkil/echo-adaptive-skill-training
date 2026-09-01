@@ -72,6 +72,7 @@ from database import (
     VerificationResult,
     VideoAnalysisJob,
     VideoCheckpoint,
+    VideoOralAttempt,
     VideoProgress,
     init_db,
 )
@@ -125,6 +126,7 @@ from MIRT.memory_service import (
     MemoryEvidenceType,
 )
 from MIRT.mirt_daily_stats import build_daily_series
+from oral_assessment import OralAssessmentUnavailable, assess_oral_answer
 from passlib.context import CryptContext
 from pydantic import BaseModel, Field
 from Quiz.AdaptiveEngine import AdaptiveEngine
@@ -410,6 +412,7 @@ class MicroJobSubmissionResult(BaseModel):
     source_type: str
     is_duplicate: bool = False
     retry_scheduled: bool = False
+    video_checkpoint_id: int | None = None
 
 
 class MicroBatchJobStatus(BaseModel):
@@ -467,6 +470,7 @@ class MicroJobDetail(BaseModel):
     transcription_status: str = "pending"
     transcription_error: str | None = None
     transcribed_at: datetime | None = None
+    video_checkpoint_id: int | None = None
 
 
 class MicroEventIngestResult(BaseModel):
@@ -1283,6 +1287,10 @@ def request_user_data_deletion(
         micro_job_ids = [item.id for item in micro_jobs]
         owned_batches = db.query(MicroMentorBatch).filter_by(created_by_user_id=user.id).all()
         owned_batch_ids = [item.id for item in owned_batches]
+
+        db.query(VideoOralAttempt).filter_by(user_id=user.id).delete(
+            synchronize_session=False
+        )
 
         if session_ids:
             db.query(MicroRepresentationEvent).filter(
@@ -3116,6 +3124,7 @@ def validate_micro_job_scope(
     learner_id: int | None,
     session_id: int | None,
     knowledge_point_id: int | None,
+    video_checkpoint_id: int | None = None,
 ) -> None:
     module = (
         db.query(TrainingModule)
@@ -3138,6 +3147,23 @@ def validate_micro_job_scope(
         is None
     ):
         raise HTTPException(status_code=422, detail="knowledge point does not belong to module")
+    if video_checkpoint_id is not None:
+        checkpoint = (
+            db.query(VideoCheckpoint)
+            .join(CourseVideo, CourseVideo.id == VideoCheckpoint.video_id)
+            .filter(
+                VideoCheckpoint.id == video_checkpoint_id,
+                VideoCheckpoint.status == "frozen",
+                CourseVideo.module_id == module_id,
+            )
+            .first()
+        )
+        if checkpoint is None:
+            raise HTTPException(status_code=422, detail="视频口述检查点不存在或尚未冻结")
+        if checkpoint.video.knowledge_point_id is None:
+            raise HTTPException(status_code=409, detail="视频口述检查点尚未绑定知识点")
+        if knowledge_point_id != checkpoint.video.knowledge_point_id:
+            raise HTTPException(status_code=422, detail="视频口述检查点与知识点不一致")
     if learner_id is not None and (
         db.query(User.id)
         .filter(
@@ -3180,6 +3206,7 @@ def build_micro_dedupe_key(
     knowledge_point_id: int | None,
     source_type: MicroSource,
     audio_sha256: str,
+    video_checkpoint_id: int | None = None,
 ) -> str:
     scope = {
         "audio_sha256": audio_sha256,
@@ -3189,6 +3216,7 @@ def build_micro_dedupe_key(
         "organization_id": organization_id,
         "session_id": session_id,
         "source_type": source_type.value,
+        "video_checkpoint_id": video_checkpoint_id,
     }
     canonical = json.dumps(scope, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -3209,6 +3237,7 @@ def create_micro_job_record(
     learner_id: int | None,
     session_id: int | None,
     knowledge_point_id: int | None,
+    video_checkpoint_id: int | None = None,
 ) -> MicroJobCreation:
     job_id = uuid4().hex
     validate_micro_job_scope(
@@ -3219,6 +3248,7 @@ def create_micro_job_record(
         learner_id=learner_id,
         session_id=session_id,
         knowledge_point_id=knowledge_point_id,
+        video_checkpoint_id=video_checkpoint_id,
     )
     destination, audio_sha256, audio_size = save_audio_file(job_id, audio)
     dedupe_key = build_micro_dedupe_key(
@@ -3229,6 +3259,7 @@ def create_micro_job_record(
         knowledge_point_id=knowledge_point_id,
         source_type=source_type,
         audio_sha256=audio_sha256,
+        video_checkpoint_id=video_checkpoint_id,
     )
     existing = db.query(MicroDetectionJob).filter(
         MicroDetectionJob.organization_id == user.organization_id,
@@ -3243,6 +3274,9 @@ def create_micro_job_record(
         if knowledge_point_id is None
         else MicroDetectionJob.knowledge_point_id == knowledge_point_id,
         MicroDetectionJob.source_type == source_type.value,
+        MicroDetectionJob.video_checkpoint_id.is_(video_checkpoint_id)
+        if video_checkpoint_id is None
+        else MicroDetectionJob.video_checkpoint_id == video_checkpoint_id,
         MicroDetectionJob.audio_sha256 == audio_sha256,
     ).order_by(MicroDetectionJob.created_at, MicroDetectionJob.id).first()
     if existing is not None:
@@ -3256,6 +3290,7 @@ def create_micro_job_record(
         session_id=session_id,
         module_id=module_id,
         knowledge_point_id=knowledge_point_id,
+        video_checkpoint_id=video_checkpoint_id,
         source_type=source_type.value,
         audio_uri=destination.as_uri(),
         consent_granted=True,
@@ -3288,6 +3323,7 @@ def create_micro_job(
     session_id: Annotated[int | None, Form()] = None,
     knowledge_point_id: Annotated[int | None, Form()] = None,
     learner_id: Annotated[int | None, Form()] = None,
+    video_checkpoint_id: Annotated[int | None, Form()] = None,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):
@@ -3307,6 +3343,7 @@ def create_micro_job(
         learner_id=learner_id,
         session_id=session_id,
         knowledge_point_id=knowledge_point_id,
+        video_checkpoint_id=video_checkpoint_id,
     )
     job = creation.job
     try:
@@ -3331,6 +3368,7 @@ def create_micro_job(
             "source_type": job.source_type,
             "is_duplicate": True,
             "retry_scheduled": retry_scheduled,
+            "video_checkpoint_id": job.video_checkpoint_id,
         }
     return {
         "job_id": job.id,
@@ -3338,6 +3376,7 @@ def create_micro_job(
         "source_type": job.source_type,
         "is_duplicate": not creation.is_created,
         "retry_scheduled": retry_scheduled,
+        "video_checkpoint_id": job.video_checkpoint_id,
     }
 
 
@@ -3643,6 +3682,7 @@ def get_micro_job(
         "transcription_status": job.transcription_status,
         "transcription_error": job.transcription_error,
         "transcribed_at": job.transcribed_at,
+        "video_checkpoint_id": job.video_checkpoint_id,
     }
 
 
@@ -4290,6 +4330,28 @@ class VideoCheckpointEditRequest(BaseModel):
     official_sources: list[str] | None = None
 
 
+class VideoOralAttemptRequest(BaseModel):
+    job_id: str = Field(min_length=1, max_length=64)
+    confirmed_transcript: str = Field(min_length=1, max_length=10000)
+    attempt_id: str = Field(default_factory=lambda: uuid4().hex, max_length=64)
+    session_id: int | None = None
+
+
+class VideoOralAttemptResponse(BaseModel):
+    attempt_id: str
+    updated: bool
+    score: float
+    is_correct: bool
+    grading_mode: str
+    matched_points: list[str]
+    missing_points: list[str]
+    feedback: str
+    counts_for_mirt: bool
+    ability: dict[str, float]
+    attempt_count: int
+    microrepresentation_note: str
+
+
 class VideoAnalysisJobResponse(BaseModel):
     job_id: str
     status: str
@@ -4297,14 +4359,18 @@ class VideoAnalysisJobResponse(BaseModel):
     error: str | None
 
 
-def _video_checkpoint_payload(checkpoint: VideoCheckpoint) -> dict:
+def _video_checkpoint_payload(
+    checkpoint: VideoCheckpoint,
+    *,
+    include_scoring_details: bool = True,
+) -> dict:
     return {
         "id": checkpoint.id,
         "video_id": checkpoint.video_id,
         "time_offset_seconds": checkpoint.time_offset_seconds,
         "question": checkpoint.question,
-        "expected_points": checkpoint.expected_points,
-        "official_sources": checkpoint.official_sources,
+        "expected_points": checkpoint.expected_points if include_scoring_details else [],
+        "official_sources": checkpoint.official_sources if include_scoring_details else [],
         "status": checkpoint.status,
     }
 
@@ -4380,9 +4446,15 @@ def list_video_checkpoints(
         .filter_by(video_id=video_id)
         .order_by(VideoCheckpoint.time_offset_seconds, VideoCheckpoint.id)
     )
-    if user.role not in {UserRole.MENTOR.value, UserRole.SYSTEM_ADMIN.value}:
+    can_manage = user.role in {UserRole.MENTOR.value, UserRole.SYSTEM_ADMIN.value}
+    if not can_manage:
         query = query.filter(VideoCheckpoint.status == "frozen")
-    return {"items": [_video_checkpoint_payload(item) for item in query.all()]}
+    return {
+        "items": [
+            _video_checkpoint_payload(item, include_scoring_details=can_manage)
+            for item in query.all()
+        ]
+    }
 
 
 @app.put(
@@ -4409,6 +4481,8 @@ def edit_video_checkpoint(
     )
     if checkpoint is None:
         raise HTTPException(status_code=404, detail="口述题不存在")
+    if checkpoint.status == "frozen":
+        raise HTTPException(status_code=409, detail="已冻结口述题不可编辑；请新建并重新审核")
     if payload.time_offset_seconds is not None:
         checkpoint.time_offset_seconds = payload.time_offset_seconds
     if payload.question is not None:
@@ -4437,12 +4511,70 @@ def freeze_video_checkpoints(
     if video is None:
         raise HTTPException(status_code=404, detail="视频不存在")
     accessible_module(db, user, video.module_id)
-    checkpoints = (
+    all_checkpoints = (
         db.query(VideoCheckpoint)
-        .filter_by(video_id=video_id, status="draft")
+        .filter_by(video_id=video_id)
+        .order_by(VideoCheckpoint.time_offset_seconds, VideoCheckpoint.id)
         .all()
     )
+    if not all_checkpoints:
+        raise HTTPException(status_code=409, detail="当前视频没有可冻结的口述题")
+    checkpoints = [item for item in all_checkpoints if item.status == "draft"]
+    if not checkpoints:
+        return {
+            "items": [_video_checkpoint_payload(item) for item in all_checkpoints]
+        }
+    if video.knowledge_point_id is None:
+        raise HTTPException(status_code=409, detail="请先为视频绑定知识点，再冻结口述题")
     for item in checkpoints:
+        points = [str(point).strip() for point in (item.expected_points or []) if str(point).strip()]
+        sources = [str(source).strip() for source in (item.official_sources or []) if str(source).strip()]
+        valid_sources = []
+        for source in sources:
+            parsed = urlparse(source)
+            is_microsoft_github = (
+                parsed.hostname == "github.com"
+                and parsed.path.lower().startswith("/microsoft/semantic-kernel")
+            )
+            if parsed.scheme == "https" and (
+                parsed.hostname == "learn.microsoft.com" or is_microsoft_github
+            ):
+                valid_sources.append(source)
+        if not item.question.strip():
+            raise HTTPException(status_code=422, detail=f"检查点 {item.id} 缺少口述问题")
+        if not points:
+            raise HTTPException(status_code=422, detail=f"检查点 {item.id} 缺少参考要点")
+        if not valid_sources or len(valid_sources) != len(sources):
+            raise HTTPException(
+                status_code=422,
+                detail=f"检查点 {item.id} 必须只使用 Microsoft Learn 或 Semantic Kernel 官方仓库链接",
+            )
+        item.expected_points = points
+        item.official_sources = valid_sources
+    for item in checkpoints:
+        if item.quiz_id is None:
+            quiz = Quiz(
+                module_id=video.module_id,
+                knowledge_point_id=video.knowledge_point_id,
+                content=item.question.strip(),
+                answer=" | ".join(item.expected_points),
+                type="Open",
+                intercept_d=0.0,
+                U=1.0,
+                A=1.0,
+                R=1.0,
+                parameter_source="mentor_approved_video_checkpoint",
+                purpose="practice",
+                difficulty="standard",
+                scoring_method="AI 语义匹配讲师批准要点；服务端按覆盖比例计算分数",
+                source_title=f"{video.title} · 视频口述检查点",
+                source_url=item.official_sources[0],
+                source_section=f"视频 {item.time_offset_seconds:.1f} 秒",
+                counts_for_mirt=True,
+            )
+            db.add(quiz)
+            db.flush()
+            item.quiz_id = quiz.id
         item.status = "frozen"
         item.updated_at = datetime.now()
     db.commit()
@@ -4453,6 +4585,157 @@ def freeze_video_checkpoints(
         .all()
     )
     return {"items": [_video_checkpoint_payload(item) for item in frozen]}
+
+
+def _video_oral_attempt_payload(
+    attempt: VideoOralAttempt,
+    ability: LearnerAbility,
+    *,
+    updated: bool,
+    counts_for_mirt: bool,
+) -> dict[str, Any]:
+    return {
+        "attempt_id": attempt.attempt_id,
+        "updated": updated,
+        "score": attempt.score,
+        "is_correct": attempt.is_correct,
+        "grading_mode": attempt.grading_mode,
+        "matched_points": attempt.matched_points,
+        "missing_points": attempt.missing_points,
+        "feedback": attempt.feedback,
+        "counts_for_mirt": counts_for_mirt,
+        "ability": {"U": ability.U, "A": ability.A, "R": ability.R},
+        "attempt_count": ability.attempt_count,
+        "microrepresentation_note": "微表征仅用于调整提示节奏，不参与答案对错和 U/A/R 计算。",
+    }
+
+
+@app.post(
+    "/v1/video-checkpoints/{checkpoint_id}/oral-attempts",
+    response_model=VideoOralAttemptResponse,
+)
+def submit_video_oral_attempt(
+    checkpoint_id: int,
+    payload: VideoOralAttemptRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    if user.role != UserRole.LEARNER.value:
+        raise HTTPException(status_code=403, detail="只有学习者可以提交视频口述答案")
+    checkpoint = db.query(VideoCheckpoint).filter_by(id=checkpoint_id).first()
+    if checkpoint is None or checkpoint.status != "frozen" or checkpoint.quiz_id is None:
+        raise HTTPException(status_code=404, detail="可评分的视频口述检查点不存在")
+    video = db.get(CourseVideo, checkpoint.video_id)
+    if video is None:
+        raise HTTPException(status_code=404, detail="课程视频不存在")
+    quiz = db.get(Quiz, checkpoint.quiz_id)
+    if quiz is None:
+        raise HTTPException(status_code=409, detail="视频口述检查点的评分记录不存在")
+    accessible_module(db, user, video.module_id)
+    job = (
+        db.query(MicroDetectionJob)
+        .filter_by(
+            id=payload.job_id,
+            organization_id=user.organization_id,
+            learner_id=user.id,
+            source_type=MicroSource.LEARNER_VOICE.value,
+            video_checkpoint_id=checkpoint.id,
+        )
+        .first()
+    )
+    if job is None:
+        raise HTTPException(status_code=404, detail="该录音任务未绑定当前视频口述检查点")
+    if job.transcription_status != "completed" or not (job.transcript or "").strip():
+        raise HTTPException(status_code=409, detail="语音转写尚未完成，暂不能提交评分")
+    confirmed_transcript = payload.confirmed_transcript.strip()
+    if payload.session_id is not None and payload.session_id != job.session_id:
+        raise HTTPException(status_code=422, detail="学习会话与录音任务不一致")
+    if job.session_id is not None:
+        get_owned_session(db, job.session_id, user.id)
+
+    existing = db.query(VideoOralAttempt).filter_by(attempt_id=payload.attempt_id).first()
+    if existing is not None:
+        if (
+            existing.user_id != user.id
+            or existing.checkpoint_id != checkpoint.id
+            or existing.job_id != job.id
+        ):
+            raise HTTPException(status_code=409, detail="attempt_id 已用于其他口述答案")
+        ability = AdaptiveEngine(db).get_learner_ability(user.id, video.module_id)
+        db.commit()
+        return _video_oral_attempt_payload(
+            existing,
+            ability,
+            updated=False,
+            counts_for_mirt=bool(quiz.counts_for_mirt),
+        )
+    if db.query(VideoOralAttempt).filter_by(job_id=job.id).first() is not None:
+        raise HTTPException(status_code=409, detail="该录音已经提交评分")
+    if db.query(StudentQuestionHistory).filter_by(attempt_id=payload.attempt_id).first() is not None:
+        raise HTTPException(status_code=409, detail="attempt_id 已用于其他作答")
+
+    expected_points = [
+        str(point).strip()
+        for point in checkpoint.expected_points or []
+        if str(point).strip()
+    ]
+    if not expected_points:
+        raise HTTPException(status_code=409, detail="视频口述检查点缺少有效评分要点")
+    try:
+        assessment = assess_oral_answer(
+            question=checkpoint.question,
+            expected_points=expected_points,
+            confirmed_transcript=confirmed_transcript,
+        )
+    except OralAssessmentUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    matched_index_set = set(assessment.matched_indices)
+    matched_points = [expected_points[index] for index in assessment.matched_indices]
+    missing_points = [
+        point for index, point in enumerate(expected_points)
+        if index not in matched_index_set
+    ]
+    score = len(matched_points) / len(expected_points)
+    is_correct = score >= 0.6
+    attempt = VideoOralAttempt(
+        attempt_id=payload.attempt_id,
+        checkpoint_id=checkpoint.id,
+        job_id=job.id,
+        quiz_id=checkpoint.quiz_id,
+        user_id=user.id,
+        session_id=job.session_id,
+        confirmed_transcript=confirmed_transcript,
+        matched_points=matched_points,
+        missing_points=missing_points,
+        score=score,
+        is_correct=is_correct,
+        grading_mode=assessment.mode,
+        feedback=assessment.feedback,
+        mirt_updated=bool(quiz.counts_for_mirt),
+    )
+    try:
+        db.add(attempt)
+        db.flush()
+        ability, updated = AdaptiveEngine(db).update_student_state(
+            user_id=user.id,
+            question_id=checkpoint.quiz_id,
+            is_correct=is_correct,
+            attempt_id=payload.attempt_id,
+            submitted_answer=confirmed_transcript,
+            score=score,
+            session_id=job.session_id,
+            stage="video_checkpoint",
+        )
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="口述答案已提交，请勿重复操作") from exc
+    return _video_oral_attempt_payload(
+        attempt,
+        ability,
+        updated=updated,
+        counts_for_mirt=bool(quiz.counts_for_mirt),
+    )
 
 
 @app.get("/v1/resources")

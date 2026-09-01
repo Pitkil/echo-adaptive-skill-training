@@ -311,7 +311,7 @@
             </section>
 
             <section id="view-evidence" class="view">
-                <div class="section-heading"><div><p class="eyebrow">辅助证据</p><h1>语音与互动记录</h1><p>仅在明确授权后分析，用于调整提示方式，不改写专业能力结果。</p></div></div>
+                <div class="section-heading"><div><p class="eyebrow">语音学习</p><h1>口述练习与互动记录</h1><p>普通语音只辅助调整提示；视频检查点答案经你确认、后台评分后，才作为可评分作答更新能力。</p></div></div>
                 <div id="video-evidence-context" class="video-evidence-context hidden" aria-live="polite">
                     <i data-lucide="circle-play"></i>
                     <div><strong id="video-evidence-title">来自视频伴学的口述练习</strong><span id="video-evidence-prompt">说明刚刚学习的关键概念。</span></div>
@@ -326,7 +326,7 @@
                         <p class="audio-guidance">录音只在停止后提交分析，不会持续采集。你也可以直接选择已有音频。</p>
                         <label class="consent consent-card">
                             <input id="learner-consent" type="checkbox">
-                            <span><strong>授权本轮录音用于学习诊断</strong><small>仅用于调整提示节奏和辅导方式，不直接改变能力分数。</small></span>
+                            <span><strong>授权本轮录音用于转写与学习诊断</strong><small>微表征不判断对错；若来自视频检查点，只有你确认转写并提交评分后，评分结果才会更新能力。</small></span>
                         </label>
                         <div class="audio-input-grid">
                             <button id="record-button" class="audio-input-button" type="button" aria-pressed="false">
@@ -341,6 +341,22 @@
                         </div>
                         <button id="upload-learner-audio" class="button primary full audio-submit"><i data-lucide="arrow-up-from-line"></i>提交本轮音频</button>
                         <div id="learner-job-status" class="job-status audio-status" data-state="idle"><i data-lucide="activity"></i><span id="learner-job-status-text">等待录音或选择文件</span></div>
+                        <section id="oral-transcript-confirmation" class="oral-transcript-confirmation hidden" aria-labelledby="oral-confirmation-title">
+                            <div>
+                                <p class="eyebrow">提交前确认</p>
+                                <h3 id="oral-confirmation-title">核对口述答案转写</h3>
+                                <p>ASR 可能听错专有名词。请先修改为你实际表达的内容，系统不会直接拿未经确认的转写更新能力。</p>
+                            </div>
+                            <label>确认后的答案
+                                <textarea id="oral-confirmed-transcript" rows="5" maxlength="10000"></textarea>
+                            </label>
+                            <label class="consent oral-confirm-check">
+                                <input id="oral-transcript-confirmed" type="checkbox">
+                                我已核对或修正以上文字，确认它代表我的本次回答
+                            </label>
+                            <button id="submit-oral-answer" class="button primary full" type="button"><i data-lucide="badge-check"></i>提交后台评分</button>
+                            <div id="oral-assessment-result" class="oral-assessment-result hidden" aria-live="polite"></div>
+                        </section>
                     </section>
                     <section class="upload-panel manager-only">
                         <div class="panel-heading"><div><h2>讲师批量录音</h2><span>培训讨论与辅导录音</span></div><i data-lucide="files"></i></div>

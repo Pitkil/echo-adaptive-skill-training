@@ -261,8 +261,14 @@ ECHO 可选接入仓库内的轻量 `faster-whisper` 服务，默认模型为多
 
 ECHO 创建微表征录音任务后，会并行排队 ASR 和微表征检测。转写结果保存在
 `micro_detection_jobs` 的 `transcript` 字段，并带有 `transcription_status`、
-`transcription_error` 和 `transcribed_at`。ASR 不可用时保留录音任务和明确降级原因，
-不得把摘要或错误信息伪装成学习者原话。模型权重只写入 Docker 的
+`transcription_error` 和 `transcribed_at`。ASR 不可用时保留录音任务和明确降级原因，且不得把
+摘要或错误信息伪装成学习者原话。
+`video_checkpoint_id` 仅在学习者从冻结的视频口述检查点进入时填写。转写文本本身不直接更新
+MIRT；学习者必须核对或纠错后调用
+`POST /v1/video-checkpoints/{checkpoint_id}/oral-attempts`，提交 `job_id`、
+`confirmed_transcript`、唯一 `attempt_id` 和可选 `session_id`。服务端验证录音归属与检查点绑定，
+AI 只返回匹配的冻结要点编号，分数与是否通过由服务端计算；AI 不可用或结构无效时失败关闭，
+不创建作答记录。相同 `attempt_id` 不重复更新 MIRT。模型权重只写入 Docker 的
 `asr-model-cache` 卷，不进入 Git。
 
 ## 学习画像
@@ -348,6 +354,7 @@ HTTP 4xx（429 除外）、响应格式错误和业务范围不一致属于确�
 
 录音去重范围固定为 `organization_id`、`learner_id`、`session_id`、`module_id`、
 `knowledge_point_id`、`source_type` 和 `audio_sha256`，`created_by_user_id` 仅用于权限与审计。
+视频口述检查点录音额外包含 `video_checkpoint_id`，避免同一音频在不同检查点间被错误复用。
 跨讲师命中已有任务时不创建第二个检测任务，也不向后上传者公开原任务详情和检测事件。
 `POST /v1/micro/detection-jobs` 固定返回 `job_id`、`status`、`source_type`、`is_duplicate`
 和 `retry_scheduled`。跨讲师命中时 `job_id` 为 `null`、`status` 为 `already_submitted`；
