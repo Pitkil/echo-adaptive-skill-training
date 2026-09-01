@@ -60,6 +60,33 @@ powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
 推荐顺序：数据库 → PunditRAG 导入/查询 → SimpleMem → 微表征 → ECHO。已有账号需要提升时显式
 追加 `--promote-existing`；不要把管理员密码放进脚本、截图或报告。
 
+## 先启动 PunditRAG（正式知识检索必需）
+
+PunditRAG 是独立私有仓库，不以源代码、镜像或索引数据的形式复制进 ECHO 仓库。每位需要运行
+正式检索链路的成员必须同时拥有 `Pitkil/PunditRAG` 的访问权限，并把两个仓库克隆在非桌面的
+工作目录中，例如 `D:\\workspaces\\PunditRAG` 与 `D:\\workspaces\\echo-adaptive-skill-training`。
+
+首次准备 PunditRAG 时，先运行 `Copy-Item .env.docker.example .env.docker`，再按其仓库 README
+填写模型配置，并替换 MongoDB 和 MinIO 的示例密码；没有 CUDA 时按 PunditRAG README 切换 CPU 运行参数。
+不得把该文件、模型缓存、Mongo/Milvus/MinIO 数据或材料索引提交到 Git。
+然后从 ECHO 仓库执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\start_punditrag.ps1 `
+  -PunditRAGRoot D:\workspaces\PunditRAG -Build
+```
+
+脚本只启动 PunditRAG 自己的 Compose 项目，并等待 `8000/health` 与 `8001/health` 同时返回
+`status: ok`；不会删除 Docker volume 或导入任何知识库数据。后续日常启动可省略 `-Build`。如果成员已设置
+环境变量 `PUNDITRAG_ROOT`，则可省略 `-PunditRAGRoot`。
+
+首次初始化后，不要随意改动 PunditRAG 的 MongoDB/MinIO 凭据；它们必须与已持久化的 Docker
+volume 一致。日常启动脚本默认使用 `--no-recreate`，避免本机环境变量改动意外重建已有引擎；确需
+更新 PunditRAG 镜像或源码时才使用 `-Build`，并先按 PunditRAG 自身的迁移说明备份数据。
+
+ECHO Docker 容器通过 `host.docker.internal:8000/8001` 访问本机 PunditRAG；因此先确认 PunditRAG
+健康，再启动 ECHO。Linux 环境需要将这两个地址改为宿主机可达地址或使用明确的 Compose 网络。
+
 ## Docker 启动
 
 ```powershell
@@ -70,7 +97,7 @@ docker compose ps
 docker compose exec echo-api python /workspace/scripts/bootstrap_admin.py --username admin
 ```
 
-容器通过 `host.docker.internal:8000/8001` 访问宿主机 PunditRAG。Linux Engine 若不自动解析该
+容器通过 `host.docker.internal:8000/8001` 访问前一步已启动的宿主机 PunditRAG。Linux Engine 若不自动解析该
 名称，应配置明确的 host-gateway 并记录修改。基础 Compose 使用命名 volume；本机联调 SimpleMem：
 
 ```powershell
