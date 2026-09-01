@@ -763,6 +763,17 @@ label { display: grid; gap: 7px; color: var(--ink-soft); font-size: 13px; font-w
 .audio-status[data-state="ready"], .audio-status[data-state="submitted"] { border-color: rgba(66,111,98,.18); background: rgba(229,239,235,.82); color: var(--green); }
 .audio-status[data-state="processing"] svg { animation: audio-spin 1.2s linear infinite; }
 .audio-status[data-state="error"] { border-color: rgba(157,64,59,.18); background: rgba(246,233,231,.74); color: var(--red); }
+.oral-transcript-confirmation { display: grid; gap: 14px; margin-top: 16px; padding: 18px; border: 1px solid rgba(70,98,112,.18); border-radius: 16px; background: rgba(255,255,255,.82); }
+.oral-transcript-confirmation h3 { margin: 2px 0 5px; font-size: 17px; }
+.oral-transcript-confirmation p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.oral-transcript-confirmation label:not(.oral-confirm-check) { display: grid; gap: 7px; color: var(--ink); font-size: 12px; font-weight: 600; }
+.oral-transcript-confirmation textarea { width: 100%; min-height: 112px; resize: vertical; padding: 12px 13px; border: 1px solid var(--line-strong); border-radius: 12px; background: white; color: var(--ink); font: inherit; font-weight: 400; line-height: 1.65; }
+.oral-confirm-check { align-items: flex-start; margin: 0; padding: 11px 12px; border-radius: 11px; background: var(--surface-soft); font-size: 11px; line-height: 1.55; }
+.oral-assessment-result { display: grid; gap: 6px; padding: 14px; border-left: 3px solid var(--green); border-radius: 10px; background: rgba(229,239,235,.72); }
+.oral-assessment-result strong, .oral-assessment-result span, .oral-assessment-result small, .oral-assessment-result em { display: block; }
+.oral-assessment-result strong { color: var(--ink); font-size: 14px; }
+.oral-assessment-result span, .oral-assessment-result small, .oral-assessment-result p { color: var(--muted); font-size: 11px; line-height: 1.55; }
+.oral-assessment-result em { color: var(--green); font-size: 10px; font-style: normal; line-height: 1.55; }
 @keyframes audio-pulse { 50% { transform: scale(.84); opacity: .56; } }
 @keyframes audio-spin { to { transform: rotate(360deg); } }
 .record-list.wide { margin-top: 18px; grid-template-columns: repeat(2, minmax(0,1fr)); }

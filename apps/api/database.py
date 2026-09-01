@@ -274,6 +274,7 @@ class VideoCheckpoint(Base):
     question = Column(Text, nullable=False)
     expected_points = Column(JSON, nullable=False, default=list)
     official_sources = Column(JSON, nullable=False, default=list)
+    quiz_id = Column(Integer, ForeignKey("quizzes.id"), nullable=True, unique=True, index=True)
     status = Column(String(20), nullable=False, default="draft")
     created_at = Column(DateTime, nullable=False, default=datetime.now)
     updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
@@ -391,6 +392,12 @@ class MicroDetectionJob(Base):
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=True, index=True)
     module_id = Column(Integer, ForeignKey("training_modules.id"), nullable=False, index=True)
     knowledge_point_id = Column(Integer, ForeignKey("knowledge_points.id"), nullable=True, index=True)
+    video_checkpoint_id = Column(
+        Integer,
+        ForeignKey("video_checkpoints.id"),
+        nullable=True,
+        index=True,
+    )
     source_type = Column(String(30), nullable=False)
     audio_uri = Column(String(500), nullable=False)
     consent_granted = Column(Boolean, nullable=False, default=False)
@@ -413,6 +420,40 @@ class MicroDetectionJob(Base):
     __table_args__ = (
         UniqueConstraint("dedupe_key", name="uq_micro_detection_job_dedupe_key"),
     )
+
+
+class VideoOralAttempt(Base):
+    """Auditable learner-confirmed answer to one frozen video checkpoint."""
+
+    __tablename__ = "video_oral_attempts"
+
+    id = Column(Integer, primary_key=True)
+    attempt_id = Column(String(64), nullable=False, unique=True, index=True)
+    checkpoint_id = Column(
+        Integer,
+        ForeignKey("video_checkpoints.id"),
+        nullable=False,
+        index=True,
+    )
+    job_id = Column(
+        String(64),
+        ForeignKey("micro_detection_jobs.id"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    quiz_id = Column(Integer, ForeignKey("quizzes.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=True, index=True)
+    confirmed_transcript = Column(Text, nullable=False)
+    matched_points = Column(JSON, nullable=False, default=list)
+    missing_points = Column(JSON, nullable=False, default=list)
+    score = Column(Float, nullable=False)
+    is_correct = Column(Boolean, nullable=False)
+    grading_mode = Column(String(50), nullable=False, default="ai_expected_points")
+    feedback = Column(Text, nullable=False)
+    mirt_updated = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
 
 
 class MicroMentorBatch(Base):
@@ -580,6 +621,7 @@ def init_db() -> None:
     _ensure_quiz_metadata_columns()
     _ensure_quiz_history_columns()
     _ensure_micro_job_columns()
+    _ensure_video_checkpoint_columns()
     _ensure_micro_event_columns()
     _ensure_upload_rag_columns()
     _ensure_verification_result_columns()
@@ -631,8 +673,6 @@ def _ensure_quiz_history_columns() -> None:
                         f"ADD COLUMN {column_name} {definition}"
                     )
                 )
-
-
 def _ensure_micro_job_columns() -> None:
     """Add synchronization and ownership fields to existing micro jobs."""
 
@@ -653,6 +693,7 @@ def _ensure_micro_job_columns() -> None:
         "transcription_status": "VARCHAR(20) DEFAULT 'pending' NOT NULL",
         "transcription_error": "TEXT",
         "transcribed_at": "DATETIME",
+        "video_checkpoint_id": "INTEGER",
     }
     with engine.begin() as connection:
         for column_name, definition in additions.items():
@@ -677,6 +718,37 @@ def _ensure_micro_job_columns() -> None:
                 text(
                     "CREATE UNIQUE INDEX uq_micro_detection_job_dedupe_key "
                     "ON micro_detection_jobs (dedupe_key)"
+                )
+            )
+
+
+def _ensure_video_checkpoint_columns() -> None:
+    """Bind existing video checkpoints to stable scoring records in place."""
+
+    inspector = inspect(engine)
+    if "video_checkpoints" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("video_checkpoints")}
+    if "quiz_id" not in existing:
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE video_checkpoints ADD COLUMN quiz_id INTEGER")
+            )
+    indexes = inspect(engine).get_indexes("video_checkpoints")
+    unique_constraints = inspect(engine).get_unique_constraints("video_checkpoints")
+    has_unique_quiz_index = any(
+        index.get("unique") and index.get("column_names") == ["quiz_id"]
+        for index in indexes
+    ) or any(
+        constraint.get("column_names") == ["quiz_id"]
+        for constraint in unique_constraints
+    )
+    if not has_unique_quiz_index:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX uq_video_checkpoints_quiz_id "
+                    "ON video_checkpoints (quiz_id)"
                 )
             )
 
