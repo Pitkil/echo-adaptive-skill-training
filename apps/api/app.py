@@ -4511,13 +4511,19 @@ def freeze_video_checkpoints(
     if video is None:
         raise HTTPException(status_code=404, detail="视频不存在")
     accessible_module(db, user, video.module_id)
-    checkpoints = (
+    all_checkpoints = (
         db.query(VideoCheckpoint)
         .filter_by(video_id=video_id)
+        .order_by(VideoCheckpoint.time_offset_seconds, VideoCheckpoint.id)
         .all()
     )
-    if not checkpoints:
+    if not all_checkpoints:
         raise HTTPException(status_code=409, detail="当前视频没有可冻结的口述题")
+    checkpoints = [item for item in all_checkpoints if item.status == "draft"]
+    if not checkpoints:
+        return {
+            "items": [_video_checkpoint_payload(item) for item in all_checkpoints]
+        }
     if video.knowledge_point_id is None:
         raise HTTPException(status_code=409, detail="请先为视频绑定知识点，再冻结口述题")
     for item in checkpoints:
@@ -4551,7 +4557,7 @@ def freeze_video_checkpoints(
                 module_id=video.module_id,
                 knowledge_point_id=video.knowledge_point_id,
                 content=item.question.strip(),
-                answer=json.dumps(item.expected_points, ensure_ascii=False),
+                answer=" | ".join(item.expected_points),
                 type="Open",
                 intercept_d=0.0,
                 U=1.0,
@@ -4668,7 +4674,13 @@ def submit_video_oral_attempt(
     if db.query(StudentQuestionHistory).filter_by(attempt_id=payload.attempt_id).first() is not None:
         raise HTTPException(status_code=409, detail="attempt_id 已用于其他作答")
 
-    expected_points = [str(point).strip() for point in checkpoint.expected_points or []]
+    expected_points = [
+        str(point).strip()
+        for point in checkpoint.expected_points or []
+        if str(point).strip()
+    ]
+    if not expected_points:
+        raise HTTPException(status_code=409, detail="视频口述检查点缺少有效评分要点")
     try:
         assessment = assess_oral_answer(
             question=checkpoint.question,

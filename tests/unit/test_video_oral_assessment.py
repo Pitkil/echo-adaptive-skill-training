@@ -103,6 +103,7 @@ def test_freeze_creates_stable_quiz_and_hides_scoring_details(tmp_path) -> None:
     assert quiz is not None
     assert quiz.purpose == "practice"
     assert quiz.counts_for_mirt is True
+    assert quiz.answer == "组织模型服务 | 注册并调用插件"
 
     learner_view = client.get(
         f"/v1/videos/{video.id}/checkpoints",
@@ -114,6 +115,35 @@ def test_freeze_creates_stable_quiz_and_hides_scoring_details(tmp_path) -> None:
     second_freeze = _freeze(client, mentor, video)
     assert second_freeze.status_code == 200
     assert db.query(Quiz).filter_by(id=checkpoint.quiz_id).count() == 1
+    app.dependency_overrides.clear()
+
+
+def test_freeze_ignores_legacy_frozen_rows_and_only_validates_new_drafts(tmp_path) -> None:
+    client, db, mentor, learner, module, point, video, checkpoint = _build_client(tmp_path)
+    checkpoint.status = "frozen"
+    checkpoint.expected_points = []
+    checkpoint.official_sources = []
+    new_draft = VideoCheckpoint(
+        video_id=video.id,
+        time_offset_seconds=40,
+        question="请说明插件调用。",
+        expected_points=["注册插件", "调用函数"],
+        official_sources=["https://learn.microsoft.com/semantic-kernel/concepts/plugins/"],
+        status="draft",
+    )
+    db.add(new_draft)
+    db.commit()
+
+    response = _freeze(client, mentor, video)
+    assert response.status_code == 200
+    db.refresh(new_draft)
+    assert new_draft.status == "frozen"
+    assert new_draft.quiz_id is not None
+    assert checkpoint.quiz_id is None
+
+    repeated = _freeze(client, mentor, video)
+    assert repeated.status_code == 200
+    assert len(repeated.json()["items"]) == 2
     app.dependency_overrides.clear()
 
 
@@ -252,6 +282,53 @@ def test_ai_failure_does_not_create_attempt_or_update_mirt(monkeypatch, tmp_path
     assert response.status_code == 503
     assert db.query(VideoOralAttempt).count() == 0
     assert db.query(StudentQuestionHistory).filter_by(attempt_id="failed-attempt").count() == 0
+    app.dependency_overrides.clear()
+
+
+def test_empty_historical_expected_points_fail_closed(monkeypatch, tmp_path) -> None:
+    client, db, mentor, learner, module, point, video, checkpoint = _build_client(tmp_path)
+    assert _freeze(client, mentor, video).status_code == 200
+    db.refresh(checkpoint)
+    checkpoint.expected_points = ["", "   "]
+    db.add(
+        MicroDetectionJob(
+            id="empty-points-job",
+            organization_id=learner.organization_id,
+            created_by_user_id=learner.id,
+            learner_id=learner.id,
+            module_id=module.id,
+            knowledge_point_id=point.id,
+            video_checkpoint_id=checkpoint.id,
+            source_type="learner_voice",
+            audio_uri="file:///tmp/empty-points.wav",
+            consent_granted=True,
+            status="completed",
+            transcript="回答",
+            transcription_status="completed",
+        )
+    )
+    db.commit()
+    called = False
+
+    def must_not_call(**kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("AI grader must not receive an empty rubric")
+
+    monkeypatch.setattr(app_module, "assess_oral_answer", must_not_call)
+    response = client.post(
+        f"/v1/video-checkpoints/{checkpoint.id}/oral-attempts",
+        headers={"Authorization": f"Bearer {create_access_token(learner)}"},
+        json={
+            "job_id": "empty-points-job",
+            "confirmed_transcript": "回答",
+            "attempt_id": "empty-points-attempt",
+        },
+    )
+    assert response.status_code == 409
+    assert "缺少有效评分要点" in response.json()["detail"]
+    assert called is False
+    assert db.query(VideoOralAttempt).filter_by(attempt_id="empty-points-attempt").count() == 0
     app.dependency_overrides.clear()
 
 
