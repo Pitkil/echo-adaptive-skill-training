@@ -1321,7 +1321,10 @@
                 const payload = await response.json();
                 if (payload.transcription_status === "completed") {
                     const transcript = payload.transcript || "（未识别到清晰语音）";
-                    if (state.videoEvidenceContext?.checkpointId && payload.video_checkpoint_id) {
+                    if (
+                        state.videoEvidenceContext?.checkpointId
+                        && payload.video_checkpoint_id === state.videoEvidenceContext.checkpointId
+                    ) {
                         state.pendingOralJobId = jobId;
                         state.pendingOralAttemptId = window.crypto?.randomUUID?.()
                             || `${Date.now()}-${Math.random().toString(16).slice(2)}`;

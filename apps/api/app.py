@@ -4586,6 +4586,7 @@ def _video_oral_attempt_payload(
     ability: LearnerAbility,
     *,
     updated: bool,
+    counts_for_mirt: bool,
 ) -> dict[str, Any]:
     return {
         "attempt_id": attempt.attempt_id,
@@ -4596,7 +4597,7 @@ def _video_oral_attempt_payload(
         "matched_points": attempt.matched_points,
         "missing_points": attempt.missing_points,
         "feedback": attempt.feedback,
-        "counts_for_mirt": True,
+        "counts_for_mirt": counts_for_mirt,
         "ability": {"U": ability.U, "A": ability.A, "R": ability.R},
         "attempt_count": ability.attempt_count,
         "microrepresentation_note": "微表征仅用于调整提示节奏，不参与答案对错和 U/A/R 计算。",
@@ -4621,6 +4622,9 @@ def submit_video_oral_attempt(
     video = db.get(CourseVideo, checkpoint.video_id)
     if video is None:
         raise HTTPException(status_code=404, detail="课程视频不存在")
+    quiz = db.get(Quiz, checkpoint.quiz_id)
+    if quiz is None:
+        raise HTTPException(status_code=409, detail="视频口述检查点的评分记录不存在")
     accessible_module(db, user, video.module_id)
     job = (
         db.query(MicroDetectionJob)
@@ -4653,7 +4657,12 @@ def submit_video_oral_attempt(
             raise HTTPException(status_code=409, detail="attempt_id 已用于其他口述答案")
         ability = AdaptiveEngine(db).get_learner_ability(user.id, video.module_id)
         db.commit()
-        return _video_oral_attempt_payload(existing, ability, updated=False)
+        return _video_oral_attempt_payload(
+            existing,
+            ability,
+            updated=False,
+            counts_for_mirt=bool(quiz.counts_for_mirt),
+        )
     if db.query(VideoOralAttempt).filter_by(job_id=job.id).first() is not None:
         raise HTTPException(status_code=409, detail="该录音已经提交评分")
     if db.query(StudentQuestionHistory).filter_by(attempt_id=payload.attempt_id).first() is not None:
@@ -4690,7 +4699,7 @@ def submit_video_oral_attempt(
         is_correct=is_correct,
         grading_mode=assessment.mode,
         feedback=assessment.feedback,
-        mirt_updated=True,
+        mirt_updated=bool(quiz.counts_for_mirt),
     )
     try:
         db.add(attempt)
@@ -4709,7 +4718,12 @@ def submit_video_oral_attempt(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="口述答案已提交，请勿重复操作") from exc
-    return _video_oral_attempt_payload(attempt, ability, updated=updated)
+    return _video_oral_attempt_payload(
+        attempt,
+        ability,
+        updated=updated,
+        counts_for_mirt=bool(quiz.counts_for_mirt),
+    )
 
 
 @app.get("/v1/resources")

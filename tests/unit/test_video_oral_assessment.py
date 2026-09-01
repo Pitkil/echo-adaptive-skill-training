@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import app as app_module
 from app import app, create_access_token, ensure_catalog, get_db
 from database import (
@@ -253,6 +255,55 @@ def test_ai_failure_does_not_create_attempt_or_update_mirt(monkeypatch, tmp_path
     app.dependency_overrides.clear()
 
 
+def test_quiz_mirt_flag_controls_audit_and_response(monkeypatch, tmp_path) -> None:
+    client, db, mentor, learner, module, point, video, checkpoint = _build_client(tmp_path)
+    assert _freeze(client, mentor, video).status_code == 200
+    db.refresh(checkpoint)
+    quiz = db.get(Quiz, checkpoint.quiz_id)
+    quiz.counts_for_mirt = False
+    db.add(
+        MicroDetectionJob(
+            id="non-mirt-job",
+            organization_id=learner.organization_id,
+            created_by_user_id=learner.id,
+            learner_id=learner.id,
+            module_id=module.id,
+            knowledge_point_id=point.id,
+            video_checkpoint_id=checkpoint.id,
+            source_type="learner_voice",
+            audio_uri="file:///tmp/non-mirt.wav",
+            consent_granted=True,
+            status="completed",
+            transcript="完整回答",
+            transcription_status="completed",
+        )
+    )
+    db.commit()
+    monkeypatch.setattr(
+        app_module,
+        "assess_oral_answer",
+        lambda **kwargs: OralAssessmentResult(
+            matched_indices=[0, 1],
+            feedback="回答完整。",
+        ),
+    )
+    response = client.post(
+        f"/v1/video-checkpoints/{checkpoint.id}/oral-attempts",
+        headers={"Authorization": f"Bearer {create_access_token(learner)}"},
+        json={
+            "job_id": "non-mirt-job",
+            "confirmed_transcript": "完整回答",
+            "attempt_id": "non-mirt-attempt",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["counts_for_mirt"] is False
+    assert response.json()["attempt_count"] == 0
+    attempt = db.query(VideoOralAttempt).filter_by(attempt_id="non-mirt-attempt").one()
+    assert attempt.mirt_updated is False
+    app.dependency_overrides.clear()
+
+
 def test_oral_assessment_parser_rejects_duplicate_or_out_of_range_indices() -> None:
     for raw in (
         '{"matched_point_indices":[0,0],"feedback":"ok"}',
@@ -263,3 +314,13 @@ def test_oral_assessment_parser_rejects_duplicate_or_out_of_range_indices() -> N
         except ValueError:
             continue
         raise AssertionError("invalid model indices must be rejected")
+
+
+def test_frontend_requires_polled_job_to_match_active_checkpoint() -> None:
+    script = (
+        Path(__file__).resolve().parents[2] / "apps" / "api" / "web" / "echo-app.js"
+    ).read_text(encoding="utf-8")
+    assert (
+        "payload.video_checkpoint_id === state.videoEvidenceContext.checkpointId"
+        in script
+    )
