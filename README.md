@@ -236,6 +236,30 @@ powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
 
 ### Docker
 
+正式 RAG 需要先在独立的 PunditRAG 仓库启动导入与查询服务；团队成员需同时拥有该私有仓库权限。
+以下步骤足以从零启动两套服务，建议将两个仓库放在 `D:\\workspaces` 等非桌面目录：
+
+```powershell
+# 1. 在有 PunditRAG 权限的前提下获取引擎本体
+Set-Location D:\workspaces
+git clone https://github.com/Pitkil/PunditRAG.git
+Copy-Item .\PunditRAG\.env.docker.example .\PunditRAG\.env.docker
+
+# 2. 编辑 .\PunditRAG\.env.docker：至少替换模型 API Key、
+#    MONGO_ROOT_PASSWORD 和 MINIO_ROOT_PASSWORD；首次启动保持两类凭据一致。
+#    没有 NVIDIA CUDA 时，将 BGE_DEVICE / BGE_RERANKER_DEVICE 改为 cpu，
+#    并关闭两项 FP16，再按 PunditRAG README 调整 GPU Compose 配置。
+
+# 3. 从 ECHO 仓库启动并等待两个 RAG 健康检查
+Set-Location D:\workspaces\echo-adaptive-skill-training
+powershell -ExecutionPolicy Bypass -File scripts\start_punditrag.ps1 `
+  -PunditRAGRoot D:\workspaces\PunditRAG -Build
+```
+
+脚本会等待 `8000/health` 和 `8001/health` 同时通过；完整的双仓库配置、团队权限和故障排查见
+[部署运行手册](docs/deployment/runbook.md)。随后按下方命令配置并启动 ECHO。`.env.docker`、数据库、
+模型缓存和知识库索引均为本机运行数据，禁止提交。
+
 ```powershell
 Copy-Item .env.example .env
 # 填写模型配置，并为 SIMPLEMEM_API_KEY 设置至少 32 字节的随机密钥
