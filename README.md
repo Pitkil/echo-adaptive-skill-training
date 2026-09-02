@@ -11,7 +11,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-API-426f62?logo=fastapi&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-ready-466270?logo=docker&logoColor=white)
 
-[产品全景](#产品全景) · [学习闭环](#学习闭环) · [语音链路](#语音链路) · [快速开始](#快速开始) · [部署与服务](#部署与服务) · [开发文档](#开发文档)
+[产品全景](#产品全景) · [学习闭环](#学习闭环) · [语音链路](#语音链路) · [快速开始](#快速开始) · [Windows](#windows-docker) · [macOS](#macos-docker) · [开发文档](#开发文档)
 
 </div>
 
@@ -204,9 +204,15 @@ README 只描述代码已经提供的能力，不把样例数据或适配器写�
 
 - Git
 - Python 3.11、3.12 或 3.13
-- Docker Desktop，仅容器部署时需要
+- Docker Desktop 与 Docker Compose v2，完整部署时需要
+- 完整 RAG 需要同时拥有私有 `Pitkil/PunditRAG` 仓库权限
+- 建议 16 GB 内存、25 GB 可用磁盘空间
 
-### 本地开发
+> 每位成员电脑上的 `127.0.0.1` 都只指向自己的电脑。克隆 ECHO 不会自动得到负责人电脑里的
+> PunditRAG 服务、模型缓存和知识库索引。第一次部署请按
+> [Windows / macOS 团队本地部署指南](docs/team-setup-windows-macos.md) 完成权限、模型和正式材料配置。
+
+### Windows 本地开发
 
 ```powershell
 git clone https://github.com/Pitkil/echo-adaptive-skill-training.git
@@ -234,7 +240,7 @@ powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
 .\.venv\Scripts\python.exe scripts\bootstrap_admin.py --username admin
 ```
 
-### Docker
+### Windows Docker
 
 正式 RAG 需要先在独立的 PunditRAG 仓库启动导入与查询服务；团队成员需同时拥有该私有仓库权限。
 以下步骤足以从零启动两套服务，建议将两个仓库放在 `D:\\workspaces` 等非桌面目录：
@@ -248,7 +254,8 @@ Copy-Item .\PunditRAG\.env.docker.example .\PunditRAG\.env.docker
 # 2. 编辑 .\PunditRAG\.env.docker：至少替换模型 API Key、
 #    MONGO_ROOT_PASSWORD 和 MINIO_ROOT_PASSWORD；首次启动保持两类凭据一致。
 #    没有 NVIDIA CUDA 时，将 BGE_DEVICE / BGE_RERANKER_DEVICE 改为 cpu，
-#    并关闭两项 FP16，再按 PunditRAG README 调整 GPU Compose 配置。
+#    将 BGE_FP16 / BGE_RERANKER_FP16 改为 0，并删除 PunditRAG
+#    docker-compose.yml 中 app 服务的 `gpus: all`。只改 .env 仍会启动失败。
 
 # 3. 从 ECHO 仓库启动并等待两个 RAG 健康检查
 Set-Location D:\workspaces\echo-adaptive-skill-training
@@ -280,6 +287,61 @@ Invoke-WebRequest http://127.0.0.1:8010/health
 
 Docker Desktop 的 WSL 数据根目录应保持在专用磁盘（当前维护记录为 `D:\DockerDesktopData`），不要执行
 “Reset to factory defaults”；重装或升级时同时指定 `--installation-dir` 和 `--wsl-default-data-root`。
+
+### macOS Docker
+
+macOS 不能使用 PunditRAG 默认的 CUDA 配置。Apple Silicon 与 Intel Mac 都必须使用 CPU 模式。
+
+```bash
+mkdir -p ~/workspaces
+cd ~/workspaces
+git clone https://github.com/Pitkil/PunditRAG.git
+git clone https://github.com/Pitkil/echo-adaptive-skill-training.git
+
+cd ~/workspaces/PunditRAG
+cp .env.docker.example .env.docker
+```
+
+在 `PunditRAG/.env.docker` 中填写模型 API、模型名、MongoDB 与 MinIO 密码，并设置：
+
+```dotenv
+BGE_DEVICE=cpu
+BGE_FP16=0
+BGE_RERANKER_DEVICE=cpu
+BGE_RERANKER_FP16=0
+```
+
+随后删除 `PunditRAG/docker-compose.yml` 中 `app` 服务的 `gpus: all`；NVIDIA 的两个环境变量也可删除。
+先检查配置，再启动 PunditRAG：
+
+```bash
+docker compose --env-file .env.docker config >/dev/null
+docker compose --env-file .env.docker up -d --build
+curl -fsS http://127.0.0.1:8000/health
+curl -fsS http://127.0.0.1:8001/health
+```
+
+两个接口均返回 `status: ok` 后配置 ECHO：
+
+```bash
+cd ~/workspaces/echo-adaptive-skill-training
+cp .env.example .env
+```
+
+在 `.env` 中填写 `OPENAI_*`，并为 `JWT_SECRET_KEY`、`SECRET_KEY`、`SIMPLEMEM_API_KEY`
+设置三个不同的高强度随机值。Docker Desktop for Mac 支持 `host.docker.internal`，因此 PunditRAG
+Docker 地址保持模板默认值即可。最后执行：
+
+```bash
+docker compose up --build -d
+docker compose exec echo-api python /workspace/scripts/bootstrap_admin.py --username admin
+curl -fsS http://127.0.0.1:8010/health
+```
+
+访问 <http://127.0.0.1:8010>。首次真实查询会下载并加载 BGE Reranker；下载期间不要并发发起多个查询，
+也不要反复重启容器。代码克隆完成不代表已有正式知识库，每位成员仍需在本机重新导入材料并等待
+状态变为 `indexed`。完整命令和验收清单见
+[团队本地部署指南](docs/team-setup-windows-macos.md#五导入正式课程材料)。
 
 ## 部署与服务
 
@@ -349,6 +411,7 @@ tests/                        单元测试与跨服务契约测试
 
 ## 开发文档
 
+- [Windows / macOS 团队本地部署指南](docs/team-setup-windows-macos.md)
 - [系统功能与完整流程](docs/system-overview.md)
 - [架构与数据边界](docs/architecture.md)
 - [跨服务接口契约](docs/service-contracts.md)
