@@ -1183,9 +1183,10 @@
         }).join("") || `<li class="muted">暂未取得可追溯的官方依据，后续补充后会更新校验结果。</li>`;
         const questions = item.resource_type === "staged_test" ? (item.learning_payload?.questions || []) : [];
         const questionsPanel = questions.length ? `<section class="resource-questions"><div><span class="eyebrow">本次练习</span><h3>按顺序完成三道题</h3></div><ol>${questions.map((question) => `<li><strong>${escapeHtml({understanding: "理解", application: "应用", reasoning: "推理"}[question.dimension] || "练习")}</strong><p>${escapeHtml(question.question || "")}</p></li>`).join("")}</ol><p class="muted">${escapeHtml(item.learning_payload?.activity_note || "完成后可在 ECHO 对话中提交作答。")}</p></section>` : "";
+        const downloadAction = `<button class="button secondary compact-button" type="button" data-download-resource="${escapeHtml(item.resource_id)}"><i data-lucide="file-down"></i>下载 Word</button>`;
         const learningAction = item.resource_type === "staged_test"
-            ? (questions.length ? `<button class="button primary compact-button" type="button" data-start-stage-practice="${escapeHtml(item.resource_id)}">开始阶段练习</button>` : "")
-            : `<button class="button secondary compact-button" type="button" data-download-resource="${escapeHtml(item.resource_id)}">下载${item.resource_type === "practice_guide" ? "指南" : "资料"}</button>`;
+            ? `${questions.length ? `<button class="button primary compact-button" type="button" data-start-stage-practice="${escapeHtml(item.resource_id)}">开始阶段练习</button>` : ""}${downloadAction}`
+            : downloadAction;
         return `<article class="resource-card">
             <header><span class="eyebrow">${escapeHtml(typeLabel)}</span><span class="resource-status ${item.status}">${escapeHtml(statusLabel)}</span></header>
             <h2>${escapeHtml(item.title)}</h2>
@@ -1201,18 +1202,27 @@
         return Array.from(document.querySelectorAll(".resource-card")).find((node) => node.querySelector(`[data-download-resource="${CSS.escape(resourceId)}"], [data-start-stage-practice="${CSS.escape(resourceId)}"]`));
     }
 
-    function downloadResource(resourceId) {
-        const card = findLoadedResource(resourceId);
-        if (!card) return;
-        const title = card.querySelector("h2")?.textContent?.trim() || "ECHO 学习资源";
-        const content = card.querySelector(".resource-content")?.textContent?.trim() || "";
-        const sources = Array.from(card.querySelectorAll(".resource-proof li")).map((item) => item.textContent.trim()).join("\n");
-        const file = new Blob([`${title}\n\n${content}\n\n官方出处\n${sources}\n`], {type: "text/markdown;charset=utf-8"});
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(file);
-        link.download = `${title.replaceAll(/[\\/:*?\"<>|]/g, "_")}.md`;
-        link.click();
-        URL.revokeObjectURL(link.href);
+    async function downloadResource(resourceId, button) {
+        button.disabled = true;
+        try {
+            const response = await api(`/v1/resources/${encodeURIComponent(resourceId)}/download`);
+            const disposition = response.headers.get("Content-Disposition") || "";
+            const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+            const filename = encodedName ? decodeURIComponent(encodedName) : "ECHO学习资源.docx";
+            const file = await response.blob();
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(file);
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+            toast("Word 学习资料已下载");
+        } catch (error) {
+            toast(`下载失败：${error.message}`);
+        } finally {
+            button.disabled = false;
+        }
     }
 
     function startStagePractice(resourceId) {
@@ -2027,7 +2037,7 @@
         $$(".resource-action").forEach((button) => button.addEventListener("click", (event) => generateResources(button.dataset.resourceType, event.currentTarget)));
         $("#resource-list").addEventListener("click", (event) => {
             const downloadButton = event.target.closest("[data-download-resource]");
-            if (downloadButton) return downloadResource(downloadButton.dataset.downloadResource);
+            if (downloadButton) return downloadResource(downloadButton.dataset.downloadResource, downloadButton);
             const practiceButton = event.target.closest("[data-start-stage-practice]");
             if (practiceButton) startStagePractice(practiceButton.dataset.startStagePractice);
         });

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, Literal
-from urllib.parse import unquote, urlparse, urlsplit
+from urllib.parse import quote, unquote, urlparse, urlsplit
 from urllib.request import url2pathname
 from uuid import uuid4
 
@@ -85,6 +85,7 @@ from fastapi import (
     Header,
     HTTPException,
     Request,
+    Response,
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
@@ -141,6 +142,7 @@ from Quiz.import_from_document import (
     extract_quiz_preview,
     validate_quiz_item,
 )
+from resource_export import build_resource_docx
 from resource_generation import (
     RESOURCE_TYPES,
     ContentVerificationAgent,
@@ -4829,6 +4831,35 @@ def list_resources(
             }
         )
     return {"items": items}
+
+
+@app.get("/v1/resources/{resource_id}/download")
+def download_resource_docx(
+    resource_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """Download one learner-owned generated resource as a formatted Word document."""
+
+    resource = (
+        db.query(GeneratedResource)
+        .filter_by(id=resource_id, user_id=user.id)
+        .first()
+    )
+    if resource is None:
+        raise HTTPException(status_code=404, detail="学习资源不存在")
+    document = build_resource_docx(resource)
+    safe_title = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "_", resource.title).strip(" .")
+    filename = f"{safe_title or 'ECHO学习资源'}.docx"
+    return Response(
+        content=document,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=echo-resource.docx; filename*=UTF-8''{quote(filename)}"
+            )
+        },
+    )
 
 
 @app.post("/v1/resources/generate")
