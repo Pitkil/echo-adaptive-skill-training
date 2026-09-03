@@ -154,7 +154,12 @@ from sqlalchemy import and_, or_
 from sqlalchemy import text as sql_text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
-from video_analysis import run_video_analysis
+from video_analysis import (
+    CHECKPOINT_RATIOS,
+    VideoAnalysisError,
+    probe_video_duration,
+    run_video_analysis,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -4161,6 +4166,7 @@ def _stream_identity(
 @app.post("/v1/modules/{module_id}/videos", response_model=CourseVideoUploadResponse)
 def upload_course_videos(
     module_id: int,
+    background_tasks: BackgroundTasks,
     files: Annotated[list[UploadFile], File()],
     knowledge_point_id: Annotated[int | None, Form()] = None,
     db: Session = Depends(get_db),
@@ -4181,6 +4187,7 @@ def upload_course_videos(
     destination_dir = UPLOAD_DIR / "videos"
     destination_dir.mkdir(parents=True, exist_ok=True)
     created: list[dict] = []
+    analysis_jobs: list[VideoAnalysisJob] = []
     total_size = 0
     max_mb = Config.upload.VIDEO_MAX_FILE_SIZE // (1024 * 1024)
     for upload in files:
@@ -4222,9 +4229,14 @@ def upload_course_videos(
         )
         db.add(video)
         db.flush()
+        analysis_job = VideoAnalysisJob(id=uuid4().hex, video_id=video.id, status="queued")
+        db.add(analysis_job)
+        analysis_jobs.append(analysis_job)
         created.append(_course_video_payload(video, None, user_id=user.id))
         total_size += size
     db.commit()
+    for analysis_job in analysis_jobs:
+        background_tasks.add_task(run_video_analysis_task, analysis_job.id)
     return {"items": created, "total_size": total_size}
 
 
@@ -4407,6 +4419,22 @@ def generate_video_checkpoints(
     if video is None:
         raise HTTPException(status_code=404, detail="视频不存在")
     accessible_module(db, user, video.module_id)
+    active_job = (
+        db.query(VideoAnalysisJob)
+        .filter(
+            VideoAnalysisJob.video_id == video_id,
+            VideoAnalysisJob.status.in_({"queued", "processing"}),
+        )
+        .order_by(VideoAnalysisJob.created_at.desc())
+        .first()
+    )
+    if active_job is not None:
+        return {
+            "job_id": active_job.id,
+            "status": active_job.status,
+            "frames_count": active_job.frames_count,
+            "error": active_job.error,
+        }
     job = VideoAnalysisJob(id=uuid4().hex, video_id=video_id, status="queued")
     db.add(job)
     db.commit()
@@ -4527,6 +4555,30 @@ def freeze_video_checkpoints(
     )
     if not all_checkpoints:
         raise HTTPException(status_code=409, detail="当前视频没有可冻结的口述题")
+    duration = video.duration_seconds
+    if not duration:
+        try:
+            duration = probe_video_duration(Path(video.filepath))
+        except VideoAnalysisError:
+            duration = None
+        else:
+            video.duration_seconds = duration
+    if duration:
+        tolerance = max(2.0, duration * 0.04)
+        missing_ratios = [
+            ratio
+            for ratio in CHECKPOINT_RATIOS
+            if not any(
+                abs(item.time_offset_seconds - duration * ratio) <= tolerance
+                for item in all_checkpoints
+            )
+        ]
+        if missing_ratios:
+            labels = "、".join(f"{int(ratio * 100)}%" for ratio in missing_ratios)
+            raise HTTPException(
+                status_code=409,
+                detail=f"视频口述题尚未覆盖 {labels} 节点，请重新生成或人工补齐后再冻结",
+            )
     checkpoints = [item for item in all_checkpoints if item.status == "draft"]
     if not checkpoints:
         return {
@@ -4653,7 +4705,7 @@ def submit_video_oral_attempt(
     )
     if job is None:
         raise HTTPException(status_code=404, detail="该录音任务未绑定当前视频口述检查点")
-    if job.transcription_status != "completed" or not (job.transcript or "").strip():
+    if job.transcription_status != "completed":
         raise HTTPException(status_code=409, detail="语音转写尚未完成，暂不能提交评分")
     confirmed_transcript = payload.confirmed_transcript.strip()
     if payload.session_id is not None and payload.session_id != job.session_id:

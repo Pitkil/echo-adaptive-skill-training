@@ -219,6 +219,49 @@ def test_confirmed_transcript_is_scored_once_and_updates_mirt(monkeypatch, tmp_p
     app.dependency_overrides.clear()
 
 
+def test_confirmed_answer_can_replace_empty_completed_asr_transcript(monkeypatch, tmp_path) -> None:
+    client, db, mentor, learner, module, point, video, checkpoint = _build_client(tmp_path)
+    assert _freeze(client, mentor, video).status_code == 200
+    db.refresh(checkpoint)
+    job = MicroDetectionJob(
+        id="empty-asr-job",
+        organization_id=learner.organization_id,
+        created_by_user_id=learner.id,
+        learner_id=learner.id,
+        module_id=module.id,
+        knowledge_point_id=point.id,
+        video_checkpoint_id=checkpoint.id,
+        source_type="learner_voice",
+        audio_uri="file:///tmp/empty-asr.wav",
+        consent_granted=True,
+        status="failed",
+        transcript="",
+        transcription_status="completed",
+    )
+    db.add(job)
+    db.commit()
+    monkeypatch.setattr(
+        app_module,
+        "assess_oral_answer",
+        lambda **kwargs: OralAssessmentResult(matched_indices=[0], feedback="已按确认文本评分。"),
+    )
+
+    response = client.post(
+        f"/v1/video-checkpoints/{checkpoint.id}/oral-attempts",
+        headers={"Authorization": f"Bearer {create_access_token(learner)}"},
+        json={
+            "job_id": job.id,
+            "confirmed_transcript": "我确认这是刚才口述内容的准确文本。",
+            "attempt_id": "empty-asr-attempt",
+        },
+    )
+
+    assert response.status_code == 200
+    attempt = db.query(VideoOralAttempt).filter_by(attempt_id="empty-asr-attempt").one()
+    assert attempt.confirmed_transcript == "我确认这是刚才口述内容的准确文本。"
+    app.dependency_overrides.clear()
+
+
 def test_learner_audio_job_is_bound_to_frozen_checkpoint(monkeypatch, tmp_path) -> None:
     client, db, mentor, learner, module, point, video, checkpoint = _build_client(tmp_path)
     assert _freeze(client, mentor, video).status_code == 200

@@ -7,10 +7,11 @@
     <title>ECHO 企业技能训练系统</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@500;600&family=Source+Serif+4:ital,wght@0,500;0,600;1,500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/web/echo-shell.css?v=0.6.18">
-    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@500;600&family=Source+Serif+4:ital,wght@0,500;0,600;1,500&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@500;600&family=Source+Serif+4:ital,wght@0,500;0,600;1,500&display=swap" rel="stylesheet"></noscript>
+    <link rel="stylesheet" href="/web/echo-shell.css?v=0.6.41">
+    <script async src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" onload="window.dispatchEvent(new Event('echo:icons-ready'))"></script>
+    <script async src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" onload="window.dispatchEvent(new Event('echo:charts-ready'))"></script>
 </head>
 <body>
     <a class="skip-link" href="#main-content">跳到主要内容</a>
@@ -173,11 +174,19 @@
                             <span id="video-progress-label">尚未开始</span>
                         </div>
                         <div class="video-frame">
-                            <video id="course-video-player" controls preload="metadata" poster="/web/assets/images/auth-library.jpg"></video>
-                            <div id="video-empty-state" class="video-empty-state">
-                                <i data-lucide="play-square"></i>
-                                <strong>选择下方课程视频</strong>
-                                <p>讲师上传的视频会保存在服务器，并记录你的观看进度。</p>
+                            <video id="course-video-player" preload="auto" poster="/web/assets/images/auth-library.jpg"></video>
+                            <div id="video-controls" class="video-controls hidden" aria-label="视频播放控制">
+                                <button id="video-play-toggle" type="button" aria-label="播放"><i data-lucide="play"></i></button>
+                                <span id="video-current-time">0:00</span>
+                                <input id="video-seek" type="range" min="0" max="100" step="0.1" value="0" aria-label="视频进度">
+                                <span id="video-duration">0:00</span>
+                                <button id="video-mute-toggle" type="button" aria-label="静音"><i data-lucide="volume-2"></i></button>
+                                <button id="video-fullscreen" type="button" aria-label="全屏"><i data-lucide="maximize"></i></button>
+                            </div>
+                            <div id="video-empty-state" class="video-empty-state" data-state="empty">
+                                <i id="video-empty-icon" data-lucide="play-square"></i>
+                                <strong id="video-empty-title">选择下方课程视频</strong>
+                                <p id="video-empty-description">讲师上传的视频会保存在服务器，并记录你的观看进度。</p>
                             </div>
                         </div>
                         <div class="video-source-actions">
@@ -190,7 +199,6 @@
                     <aside class="video-companion-panel">
                         <div class="video-companion-intro"><i data-lucide="headphones"></i><div><h2>ECHO 伴学</h2><p>播放进度会保存到服务器，下次继续观看。</p></div></div>
                         <label>本节对应知识点<select id="video-knowledge-point"><option value="">读取知识点中</option></select></label>
-                        <div class="video-privacy-note"><i data-lucide="mic-off"></i><div><strong>麦克风保持关闭</strong><span>播放、暂停和拖动进度都不会触发录音。</span></div></div>
                         <section id="video-checkpoint" class="video-checkpoint hidden" aria-live="polite">
                             <span>学习节点</span>
                             <h3 id="video-checkpoint-title">用自己的话讲清本节内容</h3>
@@ -203,6 +211,9 @@
                         <section id="video-inline-recorder" class="video-inline-recorder hidden" aria-label="本页口述练习">
                             <div id="video-inline-recorder-content"></div>
                         </section>
+                        <div id="video-review-progress" class="video-review-progress hidden" data-state="idle" aria-live="polite">
+                            <i data-lucide="loader-circle"></i><span id="video-review-progress-label">等待口述练习</span>
+                        </div>
                         <button id="video-manual-evidence" class="video-evidence-action" type="button"><i data-lucide="audio-lines"></i><span><strong>随时发起口述练习</strong><small>先暂停视频，再由你主动授权录音</small></span><i data-lucide="arrow-up-right"></i></button>
                     </aside>
                 </div>
@@ -326,8 +337,8 @@
                     <div class="resource-recommendation"><span>推荐难度</span><strong id="resource-difficulty-label">画像分析后确定</strong></div>
                     <div class="resource-actions" aria-label="分别生成三类个性化资源">
                         <button id="generate-resources" class="button secondary" type="button" data-resource-type="custom_note"><i data-lucide="book-open-text"></i><span id="generate-resources-label">生成学习资料</span></button>
-                        <button class="button secondary resource-action" type="button" data-resource-type="practice_guide"><i data-lucide="list-checks"></i>生成实操指南</button>
-                        <button class="button secondary resource-action" type="button" data-resource-type="staged_test"><i data-lucide="clipboard-pen-line"></i>生成阶段练习</button>
+                        <button class="button secondary resource-action" type="button" data-resource-type="practice_guide"><i data-lucide="list-checks"></i><span>生成实操指南</span></button>
+                        <button class="button secondary resource-action" type="button" data-resource-type="staged_test"><i data-lucide="clipboard-pen-line"></i><span>生成阶段练习</span></button>
                     </div>
                 </div>
                 <div id="resource-plan-reason" class="reason-box hidden"></div>
@@ -374,7 +385,7 @@
                                 <p>ASR 可能听错专有名词。请先修改为你实际表达的内容，系统不会直接拿未经确认的转写更新能力。</p>
                             </div>
                             <label>确认后的答案
-                                <textarea id="oral-confirmed-transcript" rows="5" maxlength="10000"></textarea>
+                                <textarea id="oral-confirmed-transcript" rows="5" maxlength="10000" placeholder="请核对转写；若未识别到文字，请补充你刚才的口述内容。"></textarea>
                             </label>
                             <label class="consent oral-confirm-check">
                                 <input id="oral-transcript-confirmed" type="checkbox">
@@ -570,6 +581,6 @@
         </section>
     </div>
     <div id="toast" class="toast" role="status"></div>
-    <script src="/web/echo-app.js?v=0.6.18"></script>
+    <script src="/web/echo-app.js?v=0.6.41"></script>
 </body>
 </html>

@@ -48,6 +48,10 @@ def test_visual_system_has_desktop_and_mobile_layout_contracts() -> None:
     assert '.resource-list > .empty-state' in STYLES
     assert 'grid-column: 1 / -1' in STYLES
     assert 'overflow-x: hidden' in STYLES
+    assert '@media (min-width: 861px)' in STYLES
+    assert '@media (min-width: 861px) {' in STYLES
+    assert '.app-shell { min-height: calc(100dvh / .9); zoom: .9; }' in STYLES
+    assert '.sidebar { height: calc(100dvh / .9); }' in STYLES
 
 
 def test_learner_insight_exposes_required_visual_report_views() -> None:
@@ -98,6 +102,31 @@ def test_chat_submission_exposes_pending_feedback() -> None:
     assert 'max-height: 76px; overflow-y: auto; resize: none;' in STYLES
 
 
+def test_assistant_messages_render_safe_inline_markdown() -> None:
+    assert "function renderAssistantMessage" in SCRIPT
+    assert "document.createTextNode" in SCRIPT
+    assert 'document.createElement(isStrong ? "strong" : "code")' in SCRIPT
+    workspace_message_flow = SCRIPT.split("function appendMessage", 1)[1].split(
+        "function syncChatScrollControl", 1
+    )[0]
+    assert 'renderAssistantMessage(message, content);' in workspace_message_flow
+    assert "message.innerHTML = content" not in SCRIPT
+    assert ".message.assistant strong" in STYLES
+    assert ".message.assistant code" in STYLES
+
+
+def test_workspace_composer_preserves_desktop_and_mobile_spacing() -> None:
+    assert "padding: 24px clamp(14px, 1.8vw, 26px) 5px;" in STYLES
+    assert "grid-template-rows: auto minmax(170px, 1fr) auto;" in STYLES
+    assert ".composer { display: grid; gap: 12px;" in STYLES
+    assert "transform: translateY(8px);" in STYLES
+    assert "padding: 9px 16px 10px 15px;" in STYLES
+    assert "margin-top: -55px; padding: 0 16px 9px;" in STYLES
+    assert ".composer-actions > .button.primary { transform: translateY(4px); }" in STYLES
+    assert ".composer-actions > .button.primary svg { width: 15px; height: 15px;" in STYLES
+    assert ".composer-actions > .button.primary { width: 100%; transform: none; }" in STYLES
+
+
 def test_resource_generation_exposes_progress_and_failure_feedback() -> None:
     assert 'id="generate-resources-label"' in INDEX
     assert 'label.textContent = "正在生成，请稍候"' not in SCRIPT
@@ -113,10 +142,21 @@ def test_resource_generation_exposes_progress_and_failure_feedback() -> None:
     assert '待人工发布' not in SCRIPT
     assert '.button.is-loading > svg { animation: none; }' in STYLES
     assert 'class="resource-toolbar"' in INDEX
+    assert 'data-resource-type="practice_guide"><i data-lucide="list-checks"></i><span>' in INDEX
     assert 'grid-template-columns: repeat(3, minmax(0, 1fr))' in STYLES
     assert '草稿，可预览' not in SCRIPT
     assert '下载${isDraft' not in SCRIPT
     assert 'data-publish-resource' not in SCRIPT
+
+
+def test_resource_generation_does_not_allow_stale_list_requests_to_replace_loading_state() -> None:
+    assert 'isGeneratingResources: false' in SCRIPT
+    assert 'resourceLoadRequestId: 0' in SCRIPT
+    assert '++state.resourceLoadRequestId;' in SCRIPT
+    assert 'await loadResources({allowDuringGeneration: true});' in SCRIPT
+    assert 'async function loadResources({allowDuringGeneration = false} = {})' in SCRIPT
+    assert 'if (state.isGeneratingResources && !allowDuringGeneration) return;' in SCRIPT
+    assert 'requestId !== state.resourceLoadRequestId' in SCRIPT
 
 
 def test_auth_layout_scales_with_short_desktop_viewports() -> None:
@@ -140,6 +180,22 @@ def test_learner_audio_panel_uses_a_finished_product_control() -> None:
     assert '.upload-grid:has(> .manager-only.hidden)' in STYLES
 
 
+def test_general_audio_submission_closes_the_completed_panel() -> None:
+    audio_submission_flow = SCRIPT.split("async function uploadLearnerAudio()", 1)[1].split(
+        "async function submitConfirmedOralAnswer", 1
+    )[0]
+    assert "function closeSubmittedLearnerAudioPanel" in SCRIPT
+    assert 'panel.classList.add("hidden");' in SCRIPT
+    assert "const isVideoOralAttempt" in audio_submission_flow
+    assert "closeSubmittedLearnerAudioPanel();" in audio_submission_flow
+    assert audio_submission_flow.index("closeSubmittedLearnerAudioPanel();") < audio_submission_flow.index(
+        "if (!isVideoOralAttempt)"
+    )
+    assert "后台完成转写与微表征分析" in audio_submission_flow
+    assert 'panel.dataset.audioState = "awaiting_confirmation";' in SCRIPT
+    assert '[data-audio-state="awaiting_confirmation"] .audio-submit' in STYLES
+
+
 def test_course_center_exposes_one_real_course_and_honest_samples() -> None:
     assert 'data-view="courses"' in INDEX
     assert 'id="view-courses" class="view active"' in INDEX
@@ -152,6 +208,16 @@ def test_course_center_exposes_one_real_course_and_honest_samples() -> None:
     assert 'showView("courses")' in SCRIPT
 
 
+def test_course_module_cards_open_video_learning() -> None:
+    select_module_flow = SCRIPT.split("async function selectCourseModule(moduleId)", 1)[1].split(
+        "function openCourseWorkspace", 1
+    )[0]
+    assert 'openVideoLearning();' in select_module_flow
+    assert 'showView("workspace")' not in select_module_flow
+    assert '"继续视频伴学"' in SCRIPT
+    assert '"视频伴学"' in SCRIPT
+
+
 def test_video_learning_never_starts_microphone_implicitly() -> None:
     assert 'id="course-video-player"' in INDEX
     assert 'id="course-video-list"' in INDEX
@@ -162,6 +228,7 @@ def test_video_learning_never_starts_microphone_implicitly() -> None:
     assert 'id="video-evidence-context"' in INDEX
     assert 'id="video-inline-recorder"' in INDEX
     assert 'id="video-inline-recorder-content"' in INDEX
+    assert 'id="video-review-progress"' in INDEX
     assert 'id="learner-audio-panel"' in INDEX
     assert "startVideoEvidence" in SCRIPT
     inline_flow = SCRIPT.split("function startVideoEvidence()", 1)[1].split(
@@ -171,6 +238,10 @@ def test_video_learning_never_starts_microphone_implicitly() -> None:
     assert 'showView("evidence")' not in inline_flow
     assert '$("#video-inline-recorder").scrollIntoView' in inline_flow
     assert "function restoreEvidenceRecorder()" in SCRIPT
+    assert "function setVideoReviewProgress" in SCRIPT
+    assert "activeVideoKnowledgePointId: null" in SCRIPT
+    assert "const checkpointKnowledgePointId = state.activeCheckpoint" in SCRIPT
+    assert "knowledgePointId: checkpointKnowledgePointId" in SCRIPT
     assert 'data.append("knowledge_point_id"' in SCRIPT
     assert "getUserMedia({audio: true})" in SCRIPT
     assert 'addEventListener("play", startOrStopRecording)' not in SCRIPT
@@ -186,24 +257,65 @@ def test_video_learning_has_an_in_page_echo_companion() -> None:
     assert 'id="video-echo-panel"' in INDEX
     assert 'id="video-echo-form"' in INDEX
     assert "function toggleVideoEchoPanel" in SCRIPT
+    assert "function bindVideoEchoDrag" in SCRIPT
+    assert "function positionVideoEchoPanel" in SCRIPT
+    assert 'trigger.setPointerCapture(pointerId);' in SCRIPT
+    assert 'trigger.dataset.dragged === "true"' in SCRIPT
     assert "async function sendVideoEchoMessage" in SCRIPT
     assert 'appendVideoEchoMessage("user", userInput)' in SCRIPT
     assert 'api("/chat"' in SCRIPT
     assert '.video-echo-float {' in STYLES
     assert '.video-echo-panel {' in STYLES
+    assert 'cursor: grab;' in STYLES
+    assert '.video-echo-float.is-dragging' in STYLES
+
+
+def test_video_oral_flow_has_compact_visible_progress_and_toast() -> None:
+    assert '$("#video-checkpoint").classList.add("hidden");' in SCRIPT
+    assert 'requestAnimationFrame(() => {' in SCRIPT
+    assert '.video-review-progress {' in STYLES
+    assert 'max-width: min(260px, calc(100vw - 32px))' in STYLES
+
+
+def test_video_privacy_note_is_removed_and_resource_empty_state_is_compact() -> None:
+    assert 'video-privacy-note' not in INDEX
+    assert 'data-lucide="mic-off"' not in INDEX
+    assert '.resource-list > .empty-state { grid-column: 1 / -1; display: grid;' in STYLES
+    assert '.resource-list > .empty-state { grid-column: 1 / -1; min-height:' not in STYLES
 
 
 def test_video_checkpoint_advances_and_closes_after_audio_submission() -> None:
     checkpoint_flow = SCRIPT.split("function handleVideoTimeUpdate()", 1)[1].split(
         "function showVideoCheckpoint", 1
     )[0]
-    assert "const reached = state.activeCheckpoints.filter" in checkpoint_flow
-    assert "const pending = reached.at(-1)" in checkpoint_flow
-    assert "reached.forEach" in checkpoint_flow
+    assert "return pauseForPendingVideoCheckpoint();" in checkpoint_flow
+    assert "function pauseForPendingVideoCheckpoint" in SCRIPT
+    assert "void loadCourseCheckpoints(video.id);" in SCRIPT
+    assert "window.requestAnimationFrame(pauseForPendingVideoCheckpoint);" in SCRIPT
+    assert "isLoadingVideoCheckpoints: false" in SCRIPT
+    assert "if (state.isLoadingVideoCheckpoints) return;" in SCRIPT
+    assert "VIDEO_CHECKPOINT_TOLERANCE_SECONDS = 0.75" in SCRIPT
+    assert "promptedCheckpointIds: new Set()" in SCRIPT
+    assert "&& !state.promptedCheckpointIds.has(item.id)" in SCRIPT
+    assert "state.promptedCheckpointIds.add(pending.id);" in SCRIPT
+    assert "&& !state.triggeredCheckpointIds.has(item.id)" not in SCRIPT
+    assert "state.triggeredCheckpointIds.add(state.videoEvidenceContext.checkpointId);" in SCRIPT
+    assert "if (state.activeCheckpoint?.id) state.triggeredCheckpointIds.add" in SCRIPT
     upload_flow = SCRIPT.split("async function uploadLearnerAudio()", 1)[1].split(
         "async function submitConfirmedOralAnswer", 1
     )[0]
     assert '$("#video-checkpoint").classList.add("hidden")' in upload_flow
+
+
+def test_video_uses_zoom_safe_synchronized_controls() -> None:
+    assert '<video id="course-video-player" preload="auto"' in INDEX
+    assert 'id="video-seek" type="range"' in INDEX
+    assert "function syncVideoControls()" in SCRIPT
+    assert "function seekCourseVideo(event)" in SCRIPT
+    assert 'addEventListener("input", seekCourseVideo)' in SCRIPT
+    assert '.video-controls input[type="range"]::-webkit-slider-runnable-track' in STYLES
+    assert "function revealVideoControls()" in SCRIPT
+    assert '.video-frame.is-playing .video-controls:not(.is-active):not(:focus-within)' in STYLES
 
 
 def test_course_and_video_views_have_mobile_collapse_rules() -> None:
@@ -211,3 +323,4 @@ def test_course_and_video_views_have_mobile_collapse_rules() -> None:
     assert '.course-module-item { grid-template-columns: 43px minmax(0, 1fr) 18px;' in STYLES
     assert '.video-learning-grid { grid-template-columns: minmax(0, 1fr); }' in STYLES
     assert '.video-source-actions, .video-source-actions .button { width: 100%; }' in STYLES
+    assert '.video-lesson-heading > div, .video-lesson-heading h2 { width: 100%; max-width: 100%; }' in STYLES

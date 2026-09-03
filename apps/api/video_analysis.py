@@ -24,6 +24,10 @@ class OcrUnavailable(VideoAnalysisError):
     """Raised when neither a vision model nor local OCR is available."""
 
 
+CHECKPOINT_RATIOS = (0.25, 0.5, 0.75)
+CHECKPOINT_CONTEXT_FRAMES = 24
+
+
 def resolve_ffmpeg() -> str | None:
     system = shutil.which("ffmpeg")
     if system:
@@ -34,6 +38,20 @@ def resolve_ffmpeg() -> str | None:
         return imageio_ffmpeg.get_ffmpeg_exe()
     except Exception:
         return None
+
+
+def probe_video_duration(video_path: Path) -> float:
+    """Read the real media duration without changing the extraction cadence."""
+
+    try:
+        import imageio_ffmpeg
+
+        _, duration = imageio_ffmpeg.count_frames_and_secs(str(video_path))
+    except Exception as exc:
+        raise VideoAnalysisError(f"无法读取视频时长：{exc}") from exc
+    if not duration or duration <= 0:
+        raise VideoAnalysisError("无法读取有效视频时长")
+    return float(duration)
 
 
 def extract_frames(
@@ -215,6 +233,88 @@ def _generate_question(text: str, knowledge_point_name: str | None) -> str:
     return _template_question(text, knowledge_point_name)
 
 
+def _checkpoint_context(
+    readings: list[tuple[float, dict]],
+    target_offset: float,
+) -> str:
+    """Build chronological context from prior frames plus the nearest next frame."""
+
+    previous = [item for item in readings if item[0] <= target_offset]
+    following = [item for item in readings if item[0] > target_offset]
+    if len(previous) > CHECKPOINT_CONTEXT_FRAMES:
+        recent_count = CHECKPOINT_CONTEXT_FRAMES // 2
+        older = previous[:-recent_count]
+        older_count = CHECKPOINT_CONTEXT_FRAMES - recent_count
+        step = max(1, len(older) // older_count)
+        selected = older[::step][-older_count:] + previous[-recent_count:]
+    else:
+        selected = previous
+    if following:
+        selected.append(following[0])
+    lines = []
+    for offset, reading in selected:
+        text = re.sub(r"\s+", " ", str(reading.get("text") or "")).strip()
+        topic = re.sub(r"\s+", " ", str(reading.get("topic") or "")).strip()
+        frame_question = re.sub(r"\s+", " ", str(reading.get("question") or "")).strip()
+        content = text or topic or frame_question
+        if content:
+            lines.append(f"[{int(offset // 60)}:{int(offset % 60):02d}] {content[:500]}")
+    return "\n".join(lines)
+
+
+def _llm_checkpoint_from_context(context: str, knowledge_point_name: str | None) -> dict:
+    """Generate one reviewable oral checkpoint from chronological frame context."""
+
+    api_key = os.getenv("VISION_API_KEY") or os.getenv("OPENAI_API_KEY") or ""
+    base_url = os.getenv("VISION_BASE_URL") or os.getenv("OPENAI_BASE_URL") or ""
+    model = os.getenv("VISION_MODEL") or os.getenv("OPENAI_MODEL") or ""
+    if not api_key or not model:
+        raise OcrUnavailable("大模型未配置（缺少 VISION_* / OPENAI_* 的模型名或密钥）")
+    import openai
+
+    client = openai.OpenAI(api_key=api_key, base_url=base_url or None)
+    subject = knowledge_point_name or "本节内容"
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "你是课程口述练习的出题助手。以下内容来自同一教学视频按时间连续抽取的多帧识别结果，"
+                    "最后一帧可能略晚于检查点，仅用于补足上下文。"
+                    f"对应知识点是「{subject}」。\n"
+                    "请结合上下文拟一道口头回答题，检查学习者是否理解截至当前的核心内容；"
+                    "不要询问画面文字，不要引入上下文没有出现的事实。"
+                    "同时给出 2 至 4 条简短参考要点，供讲师审核，不能包含评分比例。\n"
+                    '只返回 JSON：{"question":"口述问题","expected_points":["要点1","要点2"]}。\n\n'
+                    f"连续画面上下文：\n{context}"
+                ),
+            }
+        ],
+        temperature=0.2,
+    )
+    return _parse_model_json(response.choices[0].message.content or "")
+
+
+def _generate_contextual_checkpoint(
+    context: str,
+    knowledge_point_name: str | None,
+) -> tuple[str, list[str]]:
+    try:
+        payload = _llm_checkpoint_from_context(context, knowledge_point_name)
+        question = str(payload.get("question") or "").strip()
+        points = [
+            str(item).strip()
+            for item in (payload.get("expected_points") or [])
+            if str(item).strip()
+        ][:4]
+        if question:
+            return question, points
+    except Exception:
+        pass
+    return _template_question(context, knowledge_point_name), []
+
+
 def run_video_analysis(db: Session, job_id: str) -> None:
     """Run frame extraction + OCR and persist draft checkpoints for one job."""
 
@@ -242,32 +342,79 @@ def run_video_analysis(db: Session, job_id: str) -> None:
             if video.knowledge_point_id
             else None
         )
-        generated = 0
+        readings: list[tuple[float, dict]] = []
         for time_offset, frame_path in frames:
             reading = read_frame(frame_path)
             text = (reading.get("text") or "").strip()
             question = (reading.get("question") or "").strip()
             if not question and not text:
                 continue
-            if not question:
-                question = _generate_question(
-                    text,
+            readings.append((time_offset, reading))
+
+        generated = 0
+        try:
+            duration = video.duration_seconds or probe_video_duration(Path(video.filepath))
+        except VideoAnalysisError:
+            duration = None
+        if duration:
+            video.duration_seconds = duration
+            targets = [duration * ratio for ratio in CHECKPOINT_RATIOS]
+            tolerance = max(2.0, duration * 0.04)
+            frozen_offsets = [
+                item.time_offset_seconds
+                for item in db.query(VideoCheckpoint).filter_by(video_id=video.id, status="frozen").all()
+            ]
+            db.query(VideoCheckpoint).filter_by(video_id=video.id, status="draft").delete()
+            for target in targets:
+                if any(abs(target - offset) <= tolerance for offset in frozen_offsets):
+                    continue
+                context = _checkpoint_context(readings, target)
+                if not context:
+                    continue
+                question, expected_points = _generate_contextual_checkpoint(
+                    context,
                     knowledge_point.name if knowledge_point else None,
                 )
-            db.add(
-                VideoCheckpoint(
-                    video_id=video.id,
-                    time_offset_seconds=time_offset,
-                    question=question,
-                    expected_points=[],
-                    official_sources=[],
-                    status="draft",
+                db.add(
+                    VideoCheckpoint(
+                        video_id=video.id,
+                        time_offset_seconds=round(target, 1),
+                        question=question,
+                        expected_points=expected_points,
+                        official_sources=[],
+                        status="draft",
+                    )
                 )
-            )
-            generated += 1
+                generated += 1
+        else:
+            # Legacy/test media without readable duration keeps the earlier draft behavior.
+            for time_offset, reading in readings:
+                text = (reading.get("text") or "").strip()
+                question = (reading.get("question") or "").strip()
+                if not question:
+                    question = _generate_question(
+                        text,
+                        knowledge_point.name if knowledge_point else None,
+                    )
+                db.add(
+                    VideoCheckpoint(
+                        video_id=video.id,
+                        time_offset_seconds=time_offset,
+                        question=question,
+                        expected_points=[],
+                        official_sources=[],
+                        status="draft",
+                    )
+                )
+                generated += 1
         if generated == 0:
-            job.status = "requires_manual"
-            job.error = "未能从画面识别出有效内容，请人工填写口述题。"
+            frozen_count = db.query(VideoCheckpoint).filter_by(video_id=video.id, status="frozen").count()
+            if duration and frozen_count >= len(CHECKPOINT_RATIOS):
+                job.status = "completed"
+                job.error = None
+            else:
+                job.status = "requires_manual"
+                job.error = "未能从连续画面上下文生成完整的 25%、50%、75% 口述题，请人工补充。"
         else:
             job.status = "completed"
             job.error = None

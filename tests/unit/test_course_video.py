@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import app as app_module
 from app import app, create_access_token, ensure_catalog, get_db
-from database import Base, KnowledgePoint, Organization, TrainingModule, User, UserRole
+from database import (
+    Base,
+    KnowledgePoint,
+    Organization,
+    TrainingModule,
+    User,
+    UserRole,
+    VideoAnalysisJob,
+)
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -66,6 +74,7 @@ def test_admin_uploads_videos_and_learner_resumes_progress(monkeypatch, tmp_path
     payload = response.json()
     assert payload["total_size"] == len(b"fake-video-bytes") + len(b"another-video")
     assert len(payload["items"]) == 2
+    assert db.query(VideoAnalysisJob).count() == 2
     video_id = payload["items"][0]["id"]
     assert payload["items"][0]["knowledge_point_id"] == point.id
 

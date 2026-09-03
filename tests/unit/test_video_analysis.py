@@ -178,6 +178,57 @@ def test_llm_falls_back_to_template_when_unavailable(monkeypatch, tmp_path) -> N
     app.dependency_overrides.clear()
 
 
+def test_video_analysis_builds_three_ratio_checkpoints_from_prior_frame_context(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    client, db, mentor, learner, module, point, tmp_path = _build_client(monkeypatch, tmp_path)
+    video = _add_video(db, module, point, mentor, tmp_path)
+    job = VideoAnalysisJob(id="job-context", video_id=video.id, status="queued")
+    db.add(job)
+    db.commit()
+    offsets = [float(value) for value in range(0, 100, 5)]
+    monkeypatch.setattr(video_analysis, "probe_video_duration", lambda path: 100.0)
+    monkeypatch.setattr(
+        video_analysis,
+        "extract_frames",
+        lambda *args, **kwargs: [(offset, tmp_path / f"f{int(offset)}.jpg") for offset in offsets],
+    )
+    monkeypatch.setattr(
+        video_analysis,
+        "read_frame",
+        lambda path, backend=None: {
+            "text": f"第 {path.stem[1:]} 秒的连续课程内容",
+            "topic": "Kernel",
+            "question": "",
+        },
+    )
+    contexts: list[str] = []
+
+    def generate(context, knowledge_point_name):
+        contexts.append(context)
+        return "请概括截至当前的课程内容。", ["说明关键概念", "联系前文"]
+
+    monkeypatch.setattr(video_analysis, "_generate_contextual_checkpoint", generate)
+
+    video_analysis.run_video_analysis(db, "job-context")
+
+    checkpoints = (
+        db.query(VideoCheckpoint)
+        .filter_by(video_id=video.id)
+        .order_by(VideoCheckpoint.time_offset_seconds)
+        .all()
+    )
+    assert [item.time_offset_seconds for item in checkpoints] == [25.0, 50.0, 75.0]
+    assert all(item.expected_points == ["说明关键概念", "联系前文"] for item in checkpoints)
+    assert "[0:00]" in contexts[0]
+    assert "[0:25]" in contexts[0]
+    assert "[0:30]" in contexts[0]
+    assert "[0:00]" in contexts[2]
+    assert "[1:15]" in contexts[2]
+    app.dependency_overrides.clear()
+
+
 def test_checkpoint_freeze_gates_learner_visibility(monkeypatch, tmp_path) -> None:
     client, db, mentor, learner, module, point, tmp_path = _build_client(monkeypatch, tmp_path)
     video = _add_video(db, module, point, mentor, tmp_path)
