@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from io import BytesIO
+
 import app as app_module
 import resource_generation as resource_generation_module
 from app import _legacy_staged_resource_questions, app, create_access_token, ensure_catalog, get_db
@@ -20,6 +22,7 @@ from database import (
     User,
     UserRole,
 )
+from docx import Document
 from fastapi.testclient import TestClient
 from resource_generation import (
     ContentVerificationAgent,
@@ -361,6 +364,20 @@ def test_resource_generation_uses_profile_memory_and_blind_spot(monkeypatch) -> 
     assert all(item.knowledge_point_id == point.id for item in resources)
     assert all(item.difficulty == "foundation" for item in resources)
     assert all(point.name in item.content for item in resources)
+    download = TestClient(app).get(
+        f"/v1/resources/{resources[0].id}/download",
+        headers=headers,
+    )
+    assert download.status_code == 200
+    assert download.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert "filename*=UTF-8''" in download.headers["content-disposition"]
+    exported = Document(BytesIO(download.content))
+    exported_text = "\n".join(paragraph.text for paragraph in exported.paragraphs)
+    assert resources[0].title in exported_text
+    assert "为什么为你推荐" in exported_text
+    assert "官方出处" in exported_text
     execution = db.query(TurnExecution).filter_by(user_id=learner.id).one()
     assert execution.primary_action == "GENERATE_RESOURCE"
     assert set(execution.result["agent_records"]) == {

@@ -103,7 +103,8 @@ def test_resource_generation_exposes_progress_and_failure_feedback() -> None:
     assert '.resource-generation-state {' in STYLES
     assert 'data-resource-type="practice_guide"' in INDEX
     assert 'data-resource-type="staged_test"' in INDEX
-    assert '下载${item.resource_type' in SCRIPT
+    assert '下载 Word' in SCRIPT
+    assert '/download`' in SCRIPT
     assert '开始阶段练习' in SCRIPT
     assert '待人工发布' not in SCRIPT
     assert '.button.is-loading > svg { animation: none; }' in STYLES
