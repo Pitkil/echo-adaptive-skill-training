@@ -180,6 +180,19 @@ def test_video_learning_never_starts_microphone_implicitly() -> None:
     assert '.video-inline-recorder {' in STYLES
 
 
+def test_video_learning_has_an_in_page_echo_companion() -> None:
+    assert 'id="video-echo-float"' in INDEX
+    assert 'aria-controls="video-echo-panel"' in INDEX
+    assert 'id="video-echo-panel"' in INDEX
+    assert 'id="video-echo-form"' in INDEX
+    assert "function toggleVideoEchoPanel" in SCRIPT
+    assert "async function sendVideoEchoMessage" in SCRIPT
+    assert 'appendVideoEchoMessage("user", userInput)' in SCRIPT
+    assert 'api("/chat"' in SCRIPT
+    assert '.video-echo-float {' in STYLES
+    assert '.video-echo-panel {' in STYLES
+
+
 def test_course_and_video_views_have_mobile_collapse_rules() -> None:
     assert '.course-hero { min-height: 0; border-radius: 20px; }' in STYLES
     assert '.course-module-item { grid-template-columns: 43px minmax(0, 1fr) 18px;' in STYLES

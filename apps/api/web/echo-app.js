@@ -713,6 +713,71 @@
         window.setTimeout(syncChatScrollControl, 260);
     }
 
+    function toggleVideoEchoPanel(forceOpen = null) {
+        const panel = $("#video-echo-panel");
+        const trigger = $("#video-echo-float");
+        const shouldOpen = forceOpen === null ? panel.classList.contains("hidden") : forceOpen;
+        panel.classList.toggle("hidden", !shouldOpen);
+        trigger.setAttribute("aria-expanded", String(shouldOpen));
+        if (shouldOpen) {
+            $("#video-echo-input").focus();
+        }
+    }
+
+    function appendVideoEchoMessage(role, content, extraClass = "") {
+        const container = $("#video-echo-messages");
+        container.querySelector(".video-echo-empty")?.remove();
+        const message = document.createElement("div");
+        message.className = `message ${role} ${extraClass}`.trim();
+        message.textContent = content;
+        container.appendChild(message);
+        container.scrollTop = container.scrollHeight;
+        return message;
+    }
+
+    async function sendVideoEchoMessage(text) {
+        const input = $("#video-echo-input");
+        const submit = $("#video-echo-form button[type='submit']");
+        const userInput = text.trim();
+        if (!userInput || state.isSending) return;
+        setChatSending(true);
+        submit.disabled = true;
+        input.value = "";
+        appendVideoEchoMessage("user", userInput);
+        const pending = appendVideoEchoMessage("assistant", "正在结合当前课程与学习记录整理回答…", "pending");
+        const body = {
+            user_input: userInput,
+            user_id: state.userId,
+            session_id: state.sessionId,
+            program_id: state.program.id,
+            module_id: state.moduleId,
+            request_id: crypto.randomUUID().replaceAll("-", ""),
+            requested_module_id: null,
+        };
+        try {
+            const response = await api("/chat", {method: "POST", body: JSON.stringify(body)});
+            const result = await parseNdjson(response);
+            state.sessionId = result.meta?.session_id || state.sessionId;
+            pending.remove();
+            appendVideoEchoMessage("assistant", result.content || "本轮已完成。");
+            renderTrace(result.meta || {});
+            renderQuiz(result.meta?.quiz);
+            if (result.meta?.assessment_progress) {
+                renderAssessmentProgress(result.meta.assessment_progress);
+            } else {
+                await loadAssessmentProgress();
+            }
+            setEchoStage(result.meta?.echo_state || "E");
+        } catch (error) {
+            pending.remove();
+            appendVideoEchoMessage("assistant", `本轮执行失败：${error.message}`);
+        } finally {
+            setChatSending(false);
+            submit.disabled = false;
+            input.focus();
+        }
+    }
+
     async function parseNdjson(response) {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -2033,6 +2098,12 @@
             showVideoCheckpoint();
         });
         $("#video-skip-checkpoint").addEventListener("click", skipVideoCheckpoint);
+        $("#video-echo-float").addEventListener("click", () => toggleVideoEchoPanel());
+        $("#video-echo-close").addEventListener("click", () => toggleVideoEchoPanel(false));
+        $("#video-echo-form").addEventListener("submit", (event) => {
+            event.preventDefault();
+            sendVideoEchoMessage($("#video-echo-input").value);
+        });
         $("#clear-video-evidence").addEventListener("click", clearVideoEvidenceContext);
         $("#module-select").addEventListener("change", changeModule);
         $$(".nav-item").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
