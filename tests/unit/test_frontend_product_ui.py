@@ -52,13 +52,17 @@ def test_learner_insight_exposes_required_visual_report_views() -> None:
     assert 'renderBlindspotChart' in SCRIPT
     assert 'type: "line"' in SCRIPT
     assert '.learning-path::before' in STYLES
+    assert '.path-grid { align-items: start; }' in STYLES
+    assert '#difficulty-chart { width: 100% !important; height: 250px !important;' in STYLES
 
 
 def test_learner_workspace_exposes_current_learning_path() -> None:
     assert 'id="workspace-learning-path"' in INDEX
     assert 'id="workspace-path-next-title"' in INDEX
     assert 'renderWorkspacePath' in SCRIPT
-    assert 'grid-template-columns: minmax(0, 1fr) minmax(214px, 230px)' in STYLES
+    assert 'grid-template-columns: minmax(0, 1fr) clamp(280px, 22vw, 340px)' in STYLES
+    assert "当前学习任务" in INDEX
+    assert "当前优先知识点" in INDEX
     assert '#view-workspace { width: 100%; padding: 0 0 22px; }' in STYLES
     assert 'align-items: stretch;' in STYLES
 
@@ -87,6 +91,7 @@ def test_chat_submission_exposes_pending_feedback() -> None:
     assert 'setChatSending(true)' in SCRIPT
     assert 'aria-busy' in SCRIPT
     assert '.message.pending' in STYLES
+    assert 'max-height: 76px; overflow-y: auto; resize: none;' in STYLES
 
 
 def test_auth_layout_scales_with_short_desktop_viewports() -> None:
