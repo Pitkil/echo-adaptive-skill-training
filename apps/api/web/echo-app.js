@@ -499,12 +499,13 @@
         saveVideoProgress();
         if (!Number.isFinite(player.duration)) return;
         if (state.activeCheckpoints.length) {
-            const pending = state.activeCheckpoints.find(
+            const reached = state.activeCheckpoints.filter(
                 (item) => player.currentTime >= item.time_offset_seconds
                     && !state.triggeredCheckpointIds.has(item.id)
             );
+            const pending = reached.at(-1);
             if (!pending) return;
-            state.triggeredCheckpointIds.add(pending.id);
+            reached.forEach((item) => state.triggeredCheckpointIds.add(item.id));
             player.pause();
             showVideoCheckpoint(pending);
             return;
@@ -1521,6 +1522,9 @@
             setLearnerJobStatus("正在提交并创建检测任务", "processing");
             const response = await api("/v1/micro/detection-jobs", {method: "POST", body: data});
             const payload = await response.json();
+            if (state.videoEvidenceContext?.checkpointId) {
+                $("#video-checkpoint").classList.add("hidden");
+            }
             setLearnerJobStatus(`任务 ${payload.job_id} 已提交，状态：${payload.status}`, "submitted");
             resetOralConfirmation();
             pollLearnerTranscription(payload.job_id);
@@ -1569,6 +1573,8 @@
                 <p>${escapeHtml(result.feedback)}</p>
                 <em>U ${result.ability.U.toFixed(2)} · A ${result.ability.A.toFixed(2)} · R ${result.ability.R.toFixed(2)}；${escapeHtml(result.microrepresentation_note)}</em>`;
             panel.classList.remove("hidden");
+            $("#video-checkpoint").classList.add("hidden");
+            state.activeCheckpoint = null;
             setLearnerJobStatus("口述答案已评分并记录；能力值仅依据评分结果更新。", "completed");
             await Promise.all([loadInsight(), loadAssessmentProgress()]);
         } catch (error) {

@@ -193,6 +193,19 @@ def test_video_learning_has_an_in_page_echo_companion() -> None:
     assert '.video-echo-panel {' in STYLES
 
 
+def test_video_checkpoint_advances_and_closes_after_audio_submission() -> None:
+    checkpoint_flow = SCRIPT.split("function handleVideoTimeUpdate()", 1)[1].split(
+        "function showVideoCheckpoint", 1
+    )[0]
+    assert "const reached = state.activeCheckpoints.filter" in checkpoint_flow
+    assert "const pending = reached.at(-1)" in checkpoint_flow
+    assert "reached.forEach" in checkpoint_flow
+    upload_flow = SCRIPT.split("async function uploadLearnerAudio()", 1)[1].split(
+        "async function submitConfirmedOralAnswer", 1
+    )[0]
+    assert '$("#video-checkpoint").classList.add("hidden")' in upload_flow
+
+
 def test_course_and_video_views_have_mobile_collapse_rules() -> None:
     assert '.course-hero { min-height: 0; border-radius: 20px; }' in STYLES
     assert '.course-module-item { grid-template-columns: 43px minmax(0, 1fr) 18px;' in STYLES
