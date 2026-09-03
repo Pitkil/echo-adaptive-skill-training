@@ -13,8 +13,8 @@ services:
       DB_TYPE: sqlite
       SQLITE_PATH: /workspace/data/echo.db
       UPLOAD_DIR: /workspace/data/uploads
-      PUNDITRAG_IMPORT_BASE_URL: ${PUNDITRAG_DOCKER_IMPORT_BASE_URL:-http://host.docker.internal:8000}
-      PUNDITRAG_QUERY_BASE_URL: ${PUNDITRAG_DOCKER_QUERY_BASE_URL:-http://host.docker.internal:8001}
+      PUNDITRAG_IMPORT_BASE_URL: http://punditrag:8000
+      PUNDITRAG_QUERY_BASE_URL: http://punditrag:8001
       PUNDITRAG_TIMEOUT_SECONDS: ${PUNDITRAG_TIMEOUT_SECONDS:-180}
       PUNDITRAG_QUERY_TIMEOUT_SECONDS: ${PUNDITRAG_QUERY_TIMEOUT_SECONDS:-60}
       SIMPLEMEM_BASE_URL: ${SIMPLEMEM_DOCKER_BASE_URL:-http://simplemem:8020}
@@ -23,6 +23,8 @@ services:
       ASR_BASE_URL: ${ASR_DOCKER_BASE_URL:-http://asr:8040}
       EVALUATION_PROFILE_SEED_KEY: ${EVALUATION_PROFILE_SEED_KEY:-}
     depends_on:
+      punditrag:
+        condition: service_healthy
       simplemem:
         condition: service_healthy
       asr:
@@ -32,6 +34,226 @@ services:
     volumes:
       - echo-data:/workspace/data
     restart: unless-stopped
+
+  punditrag:
+    build:
+      context: services/punditrag
+      dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PROJECT_ROOT: /app
+      HF_HOME: /app/.cache/huggingface
+      MONGO_URL: mongodb://${PUNDITRAG_MONGO_USERNAME:-punditrag}:${PUNDITRAG_MONGO_PASSWORD:-change-before-first-start}@punditrag-mongo:27017/${PUNDITRAG_MONGO_DATABASE:-kb002}?authSource=admin
+      MONGO_DB_NAME: ${PUNDITRAG_MONGO_DATABASE:-kb002}
+      MILVUS_URL: http://punditrag-milvus:19530
+      CHUNKS_COLLECTION: ${PUNDITRAG_CHUNKS_COLLECTION:-kb_chunks}
+      ITEM_NAME_COLLECTION: ${PUNDITRAG_ITEM_NAME_COLLECTION:-kb_item_names}
+      MINIO_ENDPOINT: punditrag-minio:9000
+      MINIO_PUBLIC_ENDPOINT: ${PUNDITRAG_MINIO_PUBLIC_ENDPOINT:-127.0.0.1:9100}
+      MINIO_ACCESS_KEY: ${PUNDITRAG_MINIO_USERNAME:-punditrag}
+      MINIO_SECRET_KEY: ${PUNDITRAG_MINIO_PASSWORD:-change-before-first-start}
+      MINIO_BUCKET_NAME: ${PUNDITRAG_MINIO_BUCKET_NAME:-knowledge-base-files}
+      MINIO_IMG_DIR: ${PUNDITRAG_MINIO_IMG_DIR:-upload-images}
+      MINIO_SECURE: "False"
+      MINIO_PUBLIC_READ: "False"
+      ASSET_BASE_URL: ${PUNDITRAG_ASSET_BASE_URL:-http://127.0.0.1:8000/assets}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      LLM_DEFAULT_MODEL: ${PUNDITRAG_LLM_MODEL:-${OPENAI_MODEL:-}}
+      VL_MODEL: ${PUNDITRAG_VL_MODEL:-${VISION_MODEL:-}}
+      LLM_DEFAULT_TEMPERATURE: ${PUNDITRAG_LLM_TEMPERATURE:-0.1}
+      BGE_M3: ${BGE_M3:-BAAI/bge-m3}
+      BGE_M3_PATH: /app/models/bge-m3
+      BGE_DEVICE: ${BGE_DEVICE:-cpu}
+      BGE_FP16: ${BGE_FP16:-0}
+      BGE_RERANKER_MODEL_ID: ${BGE_RERANKER_MODEL_ID:-BAAI/bge-reranker-v2-m3}
+      BGE_RERANKER_PATH: /app/models/bge-reranker-v2-m3
+      BGE_RERANKER_DEVICE: ${BGE_RERANKER_DEVICE:-cpu}
+      BGE_RERANKER_FP16: ${BGE_RERANKER_FP16:-0}
+      HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
+      HF_HUB_DOWNLOAD_TIMEOUT: ${HF_HUB_DOWNLOAD_TIMEOUT:-600}
+      PLANNER_TIMEOUT_SECONDS: ${PUNDITRAG_PLANNER_TIMEOUT_SECONDS:-10}
+      HYDE_TIMEOUT_SECONDS: ${PUNDITRAG_HYDE_TIMEOUT_SECONDS:-10}
+      WEB_SEARCH_TIMEOUT_SECONDS: ${PUNDITRAG_WEB_SEARCH_TIMEOUT_SECONDS:-30}
+      MCP_DASHSCOPE_BASE_URL: ${MCP_DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp}
+      CORS_ALLOW_ORIGINS: ${PUNDITRAG_CORS_ALLOW_ORIGINS:-http://127.0.0.1:8000,http://127.0.0.1:8001,http://localhost:8000,http://localhost:8001}
+      MAX_UPLOAD_FILES: ${PUNDITRAG_MAX_UPLOAD_FILES:-20}
+      MAX_UPLOAD_SIZE_MB: ${PUNDITRAG_MAX_UPLOAD_SIZE_MB:-50}
+      CHUNK_SIZE_TOKENS: ${PUNDITRAG_CHUNK_SIZE_TOKENS:-500}
+      CHUNK_OVERLAP_TOKENS: ${PUNDITRAG_CHUNK_OVERLAP_TOKENS:-80}
+      DENSE_SPEC_GROUP_LINES: ${PUNDITRAG_DENSE_SPEC_GROUP_LINES:-5}
+      DENSE_SPEC_OVERLAP_LINES: ${PUNDITRAG_DENSE_SPEC_OVERLAP_LINES:-1}
+      RETRIEVAL_TOP_K: ${PUNDITRAG_RETRIEVAL_TOP_K:-20}
+      TOPIC_EXPANSION_TOP_K: ${PUNDITRAG_TOPIC_EXPANSION_TOP_K:-10}
+      RRF_TOP_K: ${PUNDITRAG_RRF_TOP_K:-30}
+      RERANK_INPUT_TOP_K: ${PUNDITRAG_RERANK_INPUT_TOP_K:-30}
+      RERANK_MAX_TOP_K: ${PUNDITRAG_RERANK_MAX_TOP_K:-8}
+      RERANK_MIN_TOP_K: ${PUNDITRAG_RERANK_MIN_TOP_K:-2}
+      RERANK_FALLBACK_TOP_K: ${PUNDITRAG_RERANK_FALLBACK_TOP_K:-8}
+      RERANK_MIN_SCORE: ${PUNDITRAG_RERANK_MIN_SCORE:-0.09}
+      RERANK_GAP_ABS: ${PUNDITRAG_RERANK_GAP_ABS:-0.18}
+      RERANK_GAP_RATIO: ${PUNDITRAG_RERANK_GAP_RATIO:-0.35}
+      DIRECT_DOCUMENT_MAX_CHARS: ${PUNDITRAG_DIRECT_DOCUMENT_MAX_CHARS:-64000}
+      NEIGHBOR_EXPAND_PARTS: ${PUNDITRAG_NEIGHBOR_EXPAND_PARTS:-1}
+      MINERU_API_TOKEN: ${MINERU_API_TOKEN:-}
+      MINERU_BASE_URL: ${MINERU_BASE_URL:-https://mineru.net/api/v4}
+      LOG_CONSOLE_ENABLE: "True"
+      LOG_CONSOLE_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FILE_ENABLE: "True"
+      LOG_FILE_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FILE_RETENTION: ${PUNDITRAG_LOG_FILE_RETENTION:-7 days}
+      SUMMARY_BATCH_CHARS: ${PUNDITRAG_SUMMARY_BATCH_CHARS:-24000}
+      SUMMARY_MAX_CHUNKS: ${PUNDITRAG_SUMMARY_MAX_CHUNKS:-2000}
+    command:
+      - sh
+      - -c
+      - |
+        case "$$MONGO_URL" in
+          *replace-with-*|*change-before-*) echo "Set PUNDITRAG_MONGO_PASSWORD in .env before first start" >&2; exit 1 ;;
+        esac
+        case "$$MINIO_SECRET_KEY" in
+          replace-with-*|change-before-*) echo "Set PUNDITRAG_MINIO_PASSWORD in .env before first start" >&2; exit 1 ;;
+        esac
+        uvicorn app.import_process.agent.api.server:app --host 0.0.0.0 --port 8000 &
+        import_pid=$$!
+        uvicorn app.query_process.api.server:app --host 0.0.0.0 --port 8001 &
+        query_pid=$$!
+        trap 'kill "$$import_pid" "$$query_pid" 2>/dev/null || true' TERM INT
+        while kill -0 "$$import_pid" 2>/dev/null && kill -0 "$$query_pid" 2>/dev/null; do
+          sleep 2
+        done
+        kill "$$import_pid" "$$query_pid" 2>/dev/null || true
+        wait "$$import_pid" 2>/dev/null || true
+        wait "$$query_pid" 2>/dev/null || true
+        exit 1
+    depends_on:
+      punditrag-milvus:
+        condition: service_healthy
+      punditrag-mongo:
+        condition: service_healthy
+      punditrag-create-minio-bucket:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; [urllib.request.urlopen(f'http://127.0.0.1:{port}/health', timeout=3).read() for port in (8000, 8001)]"]
+      interval: 15s
+      timeout: 8s
+      retries: 8
+      start_period: 60s
+    ports:
+      - "${PUNDITRAG_IMPORT_PORT:-8000}:8000"
+      - "${PUNDITRAG_QUERY_PORT:-8001}:8001"
+    volumes:
+      - punditrag-models:/app/models
+      - punditrag-hf-cache:/app/.cache/huggingface
+      - punditrag-temp:/app/temp-files
+      - punditrag-logs:/app/logs
+    restart: unless-stopped
+
+  punditrag-etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command: etcd -advertise-client-urls=http://punditrag-etcd:2379 -listen-client-urls=http://0.0.0.0:2379 --data-dir=/etcd
+    volumes:
+      - punditrag-etcd-data:/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  punditrag-milvus-minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: minio server /minio_data
+    volumes:
+      - punditrag-milvus-minio-data:/minio_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  punditrag-milvus:
+    image: milvusdb/milvus:v2.4.5
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: punditrag-etcd:2379
+      MINIO_ADDRESS: punditrag-milvus-minio:9000
+      MINIO_ACCESS_KEY_ID: minioadmin
+      MINIO_SECRET_ACCESS_KEY: minioadmin
+    volumes:
+      - punditrag-milvus-data:/var/lib/milvus
+    depends_on:
+      punditrag-etcd:
+        condition: service_healthy
+      punditrag-milvus-minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 5
+    restart: unless-stopped
+
+  punditrag-mongo:
+    image: mongo:7
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${PUNDITRAG_MONGO_USERNAME:-punditrag}
+      MONGO_INITDB_ROOT_PASSWORD: ${PUNDITRAG_MONGO_PASSWORD:-change-before-first-start}
+    volumes:
+      - punditrag-mongo-data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand('ping').ok\" -u \"$$MONGO_INITDB_ROOT_USERNAME\" -p \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin"]
+      interval: 30s
+      start_period: 30s
+      timeout: 20s
+      retries: 5
+    restart: unless-stopped
+
+  punditrag-minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    environment:
+      MINIO_ROOT_USER: ${PUNDITRAG_MINIO_USERNAME:-punditrag}
+      MINIO_ROOT_PASSWORD: ${PUNDITRAG_MINIO_PASSWORD:-change-before-first-start}
+    command: minio server /data --console-address ":9001"
+    ports:
+      - "${PUNDITRAG_MINIO_PORT:-9100}:9000"
+      - "${PUNDITRAG_MINIO_CONSOLE_PORT:-9101}:9001"
+    volumes:
+      - punditrag-minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  punditrag-create-minio-bucket:
+    image: minio/mc:RELEASE.2023-03-20T17-17-53Z
+    depends_on:
+      punditrag-minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${PUNDITRAG_MINIO_USERNAME:-punditrag}
+      MINIO_ROOT_PASSWORD: ${PUNDITRAG_MINIO_PASSWORD:-change-before-first-start}
+      MINIO_BUCKET_NAME: ${PUNDITRAG_MINIO_BUCKET_NAME:-knowledge-base-files}
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://punditrag-minio:9000 \"$$MINIO_ROOT_USER\" \"$$MINIO_ROOT_PASSWORD\"; do sleep 2; done;
+      mc mb --ignore-existing local/\"$$MINIO_BUCKET_NAME\";
+      exit 0;
+      "
 
   simplemem:
     build:
@@ -78,3 +300,12 @@ volumes:
   echo-data:
   simplemem-data:
   asr-model-cache:
+  punditrag-models:
+  punditrag-hf-cache:
+  punditrag-temp:
+  punditrag-logs:
+  punditrag-etcd-data:
+  punditrag-milvus-data:
+  punditrag-milvus-minio-data:
+  punditrag-mongo-data:
+  punditrag-minio-data:

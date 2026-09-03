@@ -1,0 +1,55 @@
+import sys
+from pathlib import Path
+from uuid import uuid4
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from app.core.logger import logger
+from app.query_process.agent.nodes.node_search_embedding_hyde import (
+    node_search_embedding_hyde,
+    step_1_data_validates,
+    step_2_call_llm,
+)
+from app.query_process.agent.state import create_query_default_state
+from unittest.mock import patch
+
+
+def test_hyde_failure_returns_empty_fallback():
+    with patch(
+        "app.query_process.agent.nodes.node_search_embedding_hyde.get_llm_client",
+        side_effect=TimeoutError("simulated timeout"),
+    ):
+        assert step_2_call_llm("测试问题") == ""
+
+
+if __name__ == "__main__":
+    """HyDE 假设文档向量检索节点本地集成测试。"""
+    item_names, original_query = step_1_data_validates(
+        {"item_names": [], "original_query": "全库检索测试"}
+    )
+    assert item_names == [] and original_query == "全库检索测试"
+    test_hyde_failure_returns_empty_fallback()
+    test_state = create_query_default_state(
+        session_id=f"test_search_embedding_hyde_{uuid4().hex}",
+        original_query="RS-12数字万用表怎么测量电压？",
+        rewritten_query="如何使用RS-12数字万用表测量电压？",
+        item_names=["RS-12数字万用表"],
+        is_stream=False,
+    )
+
+    logger.info("=== 开始执行 HyDE 假设文档向量检索节点测试 ===")
+    result_state = node_search_embedding_hyde(test_state)
+    chunks = result_state.get("hyde_embedding_chunks", [])
+
+    assert chunks, "HyDE 检索未返回任何相关切片"
+    assert all(chunk.get("entity", {}).get("item_name") == "RS-12数字万用表" for chunk in chunks), (
+        "HyDE 检索结果包含过滤范围之外的资料"
+    )
+
+    logger.info("=== HyDE 假设文档向量检索节点测试通过 ===")
+    logger.info(f"原始问题：{test_state['original_query']}")
+    logger.info(f"资料范围：{test_state['item_names']}")
+    logger.info(f"返回切片数量：{len(chunks)}")
+    logger.info(f"首条切片：{chunks[0].get('entity', {})}")

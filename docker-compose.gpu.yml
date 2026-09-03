@@ -1,0 +1,13 @@
+services:
+  punditrag:
+    build:
+      args:
+        PUNDITRAG_TORCH_INDEX_URL: ${PUNDITRAG_TORCH_GPU_INDEX_URL:-https://download.pytorch.org/whl/cu128}
+    gpus: all
+    environment:
+      BGE_DEVICE: cuda:0
+      BGE_FP16: "1"
+      BGE_RERANKER_DEVICE: cuda:0
+      BGE_RERANKER_FP16: "1"
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility

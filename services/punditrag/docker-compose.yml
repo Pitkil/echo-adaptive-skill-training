@@ -1,0 +1,176 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: punditrag-app
+    env_file:
+      - .env.docker
+    environment:
+      PROJECT_ROOT: /app
+      MONGO_URL: "mongodb://${MONGO_ROOT_USERNAME:-punditrag}:${MONGO_ROOT_PASSWORD:-punditrag}@mongo:27017/kb002?authSource=admin"
+      MINIO_ACCESS_KEY: "${MINIO_ROOT_USER:-punditrag}"
+      MINIO_SECRET_KEY: "${MINIO_ROOT_PASSWORD:-punditrag}"
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    gpus: all
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+    command:
+      - sh
+      - -c
+      - |
+        uvicorn app.import_process.agent.api.server:app --host 0.0.0.0 --port 8000 &
+        import_pid=$$!
+        uvicorn app.query_process.api.server:app --host 0.0.0.0 --port 8001 &
+        query_pid=$$!
+        trap 'kill "$$import_pid" "$$query_pid" 2>/dev/null || true' TERM INT
+        while kill -0 "$$import_pid" 2>/dev/null && kill -0 "$$query_pid" 2>/dev/null; do
+          sleep 2
+        done
+        kill "$$import_pid" "$$query_pid" 2>/dev/null || true
+        wait "$$import_pid" 2>/dev/null || true
+        wait "$$query_pid" 2>/dev/null || true
+        exit 1
+    volumes:
+      - ./app:/app/app:ro
+      - ./prompts:/app/prompts:ro
+      - ./temp-files:/app/temp-files
+      - ./models:/app/models
+      - ./cache/huggingface:/app/.cache/huggingface
+    depends_on:
+      milvus:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      create-minio-bucket:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; [urllib.request.urlopen(f'http://127.0.0.1:{port}/health', timeout=3).read() for port in (8000, 8001)]"]
+      interval: 15s
+      timeout: 8s
+      retries: 4
+      start_period: 30s
+    restart: unless-stopped
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: punditrag-etcd
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls=http://0.0.0.0:2379 --data-dir=/etcd
+    volumes:
+      - etcd-data:/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  milvus-minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    container_name: punditrag-milvus-minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: minio server /minio_data
+    volumes:
+      - milvus-minio-data:/minio_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  milvus:
+    image: milvusdb/milvus:v2.4.5
+    container_name: punditrag-milvus
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: milvus-minio:9000
+      MINIO_ACCESS_KEY_ID: minioadmin
+      MINIO_SECRET_ACCESS_KEY: minioadmin
+    ports:
+      - "19630:19530"
+      - "9191:9091"
+    volumes:
+      - milvus-data:/var/lib/milvus
+    depends_on:
+      etcd:
+        condition: service_healthy
+      milvus-minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 5
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    container_name: punditrag-mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "${MONGO_ROOT_USERNAME:-punditrag}"
+      MONGO_INITDB_ROOT_PASSWORD: "${MONGO_ROOT_PASSWORD:-123123123}"
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand('ping').ok\" -u \"$$MONGO_INITDB_ROOT_USERNAME\" -p \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin"]
+      interval: 30s
+      start_period: 30s
+      timeout: 20s
+      retries: 5
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    container_name: punditrag-minio
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-minioadmin}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-minioadmin}"
+    command: minio server /data --console-address ":9001"
+    ports:
+      - "9100:9000"
+      - "9101:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  create-minio-bucket:
+    image: minio/mc:RELEASE.2023-03-20T17-17-53Z
+    container_name: punditrag-create-minio-bucket
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-minioadmin}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-minioadmin}"
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 \"$$MINIO_ROOT_USER\" \"$$MINIO_ROOT_PASSWORD\"; do sleep 2; done;
+      mc mb --ignore-existing local/knowledge-base-files;
+      exit 0;
+      "
+
+volumes:
+  etcd-data:
+  milvus-data:
+  milvus-minio-data:
+  mongo-data:
+  minio-data:

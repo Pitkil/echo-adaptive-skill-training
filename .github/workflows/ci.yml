@@ -30,3 +30,36 @@ jobs:
           RAG_PROVIDER: punditrag
           RAG_FALLBACK_TO_CHROMA: "false"
         run: python -m pytest
+
+  punditrag-offline-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: services/punditrag
+    env:
+      UV_DEFAULT_INDEX: https://pypi.org/simple
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.5"
+          enable-cache: true
+      - name: Install locked PunditRAG dependencies
+        run: uv sync --frozen --no-dev --no-install-project
+      - name: Compile PunditRAG
+        run: uv run --no-sync python -m compileall -q app eval test
+      - name: Run deterministic PunditRAG regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          for test_file in \
+            test/16_node_rerank.py \
+            test/17_text_compress_utils.py \
+            test/18_node_answer_output.py \
+            test/19_workspace_features.py \
+            test/20_rag_reliability.py \
+            test/21_reliability_hardening.py
+          do
+            uv run --no-sync python "$test_file"
+          done
