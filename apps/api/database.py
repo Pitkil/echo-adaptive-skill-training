@@ -544,6 +544,10 @@ class GeneratedResource(Base):
     content = Column(Text, nullable=False)
     personalization_reason = Column(Text, nullable=False)
     evidence_sources = Column(JSON, nullable=False, default=list)
+    # Keep learner-facing structure (especially generated practice questions)
+    # alongside the rendered text.  Answers and grading rules are deliberately
+    # not stored here: generated practice is not a replacement for fixed tests.
+    learning_payload = Column(JSON, nullable=False, default=dict)
     status = Column(String(20), nullable=False, default="draft")
     created_at = Column(DateTime, nullable=False, default=datetime.now)
 
@@ -625,6 +629,7 @@ def init_db() -> None:
     _ensure_micro_event_columns()
     _ensure_upload_rag_columns()
     _ensure_verification_result_columns()
+    _ensure_generated_resource_columns()
 
 
 def _ensure_quiz_metadata_columns() -> None:
@@ -829,4 +834,18 @@ def _ensure_verification_result_columns() -> None:
         with engine.begin() as connection:
             connection.execute(
                 text("ALTER TABLE verification_results ADD COLUMN details JSON")
+            )
+
+
+def _ensure_generated_resource_columns() -> None:
+    """Preserve generated learner activities on databases created before v0.6.12."""
+
+    inspector = inspect(engine)
+    if "generated_resources" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("generated_resources")}
+    if "learning_payload" not in existing:
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE generated_resources ADD COLUMN learning_payload JSON DEFAULT '{}'")
             )

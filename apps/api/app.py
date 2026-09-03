@@ -4738,6 +4738,26 @@ def submit_video_oral_attempt(
     )
 
 
+def _legacy_staged_resource_questions(content: str) -> list[dict[str, str]]:
+    """Read the three visible questions from resources made before structured payloads.
+
+    This compatibility path only exposes the learner-facing prompt already
+    saved in the resource; it does not infer an answer or a scoring rule.
+    """
+
+    labels = ("understanding", "application", "reasoning")
+    matches = re.findall(
+        r"(?:^|\n)\s*([123])\.\s*(?:理解|应用|推理)题：\s*(.+?)(?=\n\s*[123]\.\s*(?:理解|应用|推理)题：|\n\s*评分标准：|$)",
+        content,
+        flags=re.DOTALL,
+    )
+    return [
+        {"dimension": labels[int(number) - 1], "question": question.strip()}
+        for number, question in matches
+        if number in {"1", "2", "3"} and question.strip()
+    ]
+
+
 @app.get("/v1/resources")
 def list_resources(
     module_id: int | None = None,
@@ -4757,6 +4777,16 @@ def list_resources(
             .all()
         )
         latest_verification = verification_rows[-1] if verification_rows else None
+        learning_payload = row.learning_payload or {}
+        if row.resource_type == "staged_test" and not learning_payload.get("questions"):
+            learning_payload = {
+                **learning_payload,
+                "questions": _legacy_staged_resource_questions(row.content),
+                "activity_note": (
+                    "这是根据当前学习情况生成的练习，不计入 U/A/R；"
+                    "正式阶段测试由系统从固定题库安排并在服务端判分。"
+                ),
+            }
         items.append(
             {
                 "resource_id": row.id,
@@ -4768,6 +4798,7 @@ def list_resources(
                 "content": row.content,
                 "personalization_reason": row.personalization_reason,
                 "evidence_sources": row.evidence_sources,
+                "learning_payload": learning_payload,
                 "status": row.status,
                 "verification_passed": (
                     bool(latest_verification.passed) if latest_verification else None
@@ -4967,6 +4998,15 @@ def generate_resources(
             content=item["content"],
             personalization_reason=plan.reason,
             evidence_sources=sources,
+            learning_payload={
+                "questions": item.get("questions") or [],
+                "activity_note": (
+                    "这是根据当前学习情况生成的练习，不计入 U/A/R；"
+                    "正式阶段测试由系统从固定题库安排并在服务端判分。"
+                    if item["resource_type"] == "staged_test"
+                    else ""
+                ),
+            },
         )
         db.add(resource)
         db.flush()
@@ -5042,8 +5082,9 @@ def generate_resources(
                     )
                 )
         if final_result.passed:
-            # Automated verification is not the publication gate. A mentor or
-            # administrator must explicitly publish the resource.
+            # The learner may immediately use their own verified resource.
+            # A later mentor action only governs whether it is catalogued as a
+            # reusable course resource; it must not block personal learning.
             resource.status = "pending_review"
         verification_details.append(
             {
@@ -5075,7 +5116,7 @@ def generate_resources(
     validation_finished_at = datetime.now(UTC)
     next_action_started_at = datetime.now(UTC)
     next_action_reason = (
-        "资源已通过自动内容检查，等待讲师或管理员人工发布。"
+        "资源已通过自动内容检查，学习者现在即可学习、下载或开始练习。"
         if all(item["verification_passed"] for item in resources)
         else "存在未通过检查的资源，保持草稿并等待补充证据或再次修复。"
     )
@@ -5193,10 +5234,10 @@ def publish_resource(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):
-    """Publish an automatically verified resource after an explicit human gate."""
+    """Mark a verified personal resource as approved for instructor management."""
 
     if user.role not in {UserRole.MENTOR.value, UserRole.SYSTEM_ADMIN.value}:
-        raise HTTPException(status_code=403, detail="仅讲师、导师或系统管理员可发布资源")
+        raise HTTPException(status_code=403, detail="仅讲师、导师或系统管理员可将资源归入课程资源管理")
     resource = (
         db.query(GeneratedResource)
         .join(TrainingModule, TrainingModule.id == GeneratedResource.module_id)
@@ -5236,7 +5277,7 @@ def publish_resource(
                 module_id=resource.module_id,
                 knowledge_point_id=resource.knowledge_point_id,
                 action="PUBLISH_RESOURCE",
-                reason=f"{user.username} 完成人工发布门禁",
+                reason=f"{user.username} 确认资源可纳入课程资源管理",
                 evidence_refs=[resource.id],
             )
         )

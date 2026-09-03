@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import app as app_module
 import resource_generation as resource_generation_module
-from app import app, create_access_token, ensure_catalog, get_db
+from app import _legacy_staged_resource_questions, app, create_access_token, ensure_catalog, get_db
 from catalog import PROGRAM_CODE
 from coverage_rubrics import request_coverage_issues
 from database import (
@@ -125,6 +125,20 @@ def test_model_payload_parser_rejects_incomplete_json() -> None:
         assert "JSON" in str(exc)
     else:
         raise AssertionError("incomplete model JSON must be rejected")
+
+
+def test_legacy_staged_resource_questions_remain_usable() -> None:
+    questions = _legacy_staged_resource_questions(
+        "1. 理解题：说明 Kernel 的作用。\n"
+        "2. 应用题：写出输入和输出。\n"
+        "3. 推理题：比较两种实现。\n\n评分标准：按覆盖项累计。"
+    )
+
+    assert questions == [
+        {"dimension": "understanding", "question": "说明 Kernel 的作用。"},
+        {"dimension": "application", "question": "写出输入和输出。"},
+        {"dimension": "reasoning", "question": "比较两种实现。"},
+    ]
 
 
 def test_model_resource_exposes_claim_references_in_learner_content() -> None:

@@ -94,6 +94,21 @@ def test_chat_submission_exposes_pending_feedback() -> None:
     assert 'max-height: 76px; overflow-y: auto; resize: none;' in STYLES
 
 
+def test_resource_generation_exposes_progress_and_failure_feedback() -> None:
+    assert 'id="generate-resources-label"' in INDEX
+    assert 'label.textContent = "正在生成，请稍候"' in SCRIPT
+    assert 'item.setAttribute("aria-busy", "true")' in SCRIPT
+    assert 'class="resource-generation-state" role="status"' in SCRIPT
+    assert "资源列表暂时无法读取" in SCRIPT
+    assert '.resource-generation-state {' in STYLES
+    assert 'data-resource-type="practice_guide"' in INDEX
+    assert 'data-resource-type="staged_test"' in INDEX
+    assert '下载${item.resource_type' in SCRIPT
+    assert '开始阶段练习' in SCRIPT
+    assert '待人工发布' not in SCRIPT
+    assert '.button.is-loading > svg { animation: none; }' in STYLES
+
+
 def test_auth_layout_scales_with_short_desktop_viewports() -> None:
     assert 'min(6.1vw, 9.5vh)' in STYLES
     assert '.auth-visual img {' in STYLES
