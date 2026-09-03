@@ -34,6 +34,10 @@ def test_workspace_has_accessible_and_actionable_start_state() -> None:
     assert INDEX.count("data-chat-prompt=") == 3
     assert "button.dataset.chatPrompt" in SCRIPT
     assert "测验阶段由 ECHO 自动安排" in INDEX
+    assert '.assessment-next {' in STYLES
+    assert 'align-items: end;' in STYLES
+    assert '.assessment-next .button {' in STYLES
+    assert 'min-height: 36px;\n    align-self: end;' in STYLES
 
 
 def test_visual_system_has_desktop_and_mobile_layout_contracts() -> None:
@@ -156,13 +160,24 @@ def test_video_learning_never_starts_microphone_implicitly() -> None:
     assert 'id="video-start-evidence"' in INDEX
     assert 'id="video-knowledge-point"' in INDEX
     assert 'id="video-evidence-context"' in INDEX
+    assert 'id="video-inline-recorder"' in INDEX
+    assert 'id="video-inline-recorder-content"' in INDEX
+    assert 'id="learner-audio-panel"' in INDEX
     assert "startVideoEvidence" in SCRIPT
+    inline_flow = SCRIPT.split("function startVideoEvidence()", 1)[1].split(
+        "function mountVideoEvidenceRecorder()", 1
+    )[0]
+    assert 'mountVideoEvidenceRecorder();' in inline_flow
+    assert 'showView("evidence")' not in inline_flow
+    assert '$("#video-inline-recorder").scrollIntoView' in inline_flow
+    assert "function restoreEvidenceRecorder()" in SCRIPT
     assert 'data.append("knowledge_point_id"' in SCRIPT
     assert "getUserMedia({audio: true})" in SCRIPT
     assert 'addEventListener("play", startOrStopRecording)' not in SCRIPT
     assert 'addEventListener("timeupdate", startOrStopRecording)' not in SCRIPT
     assert '.video-learning-grid' in STYLES
     assert '.video-evidence-context' in STYLES
+    assert '.video-inline-recorder {' in STYLES
 
 
 def test_course_and_video_views_have_mobile_collapse_rules() -> None:

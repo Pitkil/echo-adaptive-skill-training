@@ -443,6 +443,23 @@ label { display: grid; gap: 7px; color: var(--ink-soft); font-size: 13px; font-w
 .video-evidence-action strong, .video-evidence-action small { display: block; }
 .video-evidence-action strong { font-size: 11px; }
 .video-evidence-action small { margin-top: 4px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.video-inline-recorder { display: grid; gap: 12px; padding-top: 2px; }
+.video-inline-recorder .video-evidence-context { max-width: none; grid-template-columns: 34px minmax(0, 1fr) 34px; margin: 0; padding: 12px; }
+.video-inline-recorder .video-evidence-context > svg { width: 34px; height: 34px; padding: 8px; }
+.video-inline-recorder .learner-audio-panel { gap: 14px; padding: 18px; border-radius: 15px; background: rgba(255,255,255,.72); }
+.video-inline-recorder .learner-audio-panel::before { left: 18px; width: 58px; }
+.video-inline-recorder .audio-panel-heading h2 { font-size: 18px; }
+.video-inline-recorder .audio-panel-heading span:not(.audio-icon) { font-size: 10px; }
+.video-inline-recorder .audio-icon { width: 40px; height: 40px; flex-basis: 40px; border-radius: 12px; }
+.video-inline-recorder .audio-guidance { margin: 0; font-size: 11px; line-height: 1.6; }
+.video-inline-recorder .consent-card { min-height: 0; padding: 12px 13px; }
+.video-inline-recorder .consent-card strong { font-size: 11px; }
+.video-inline-recorder .consent-card small { font-size: 9px; }
+.video-inline-recorder .audio-input-grid { grid-template-columns: minmax(0, 1fr); }
+.video-inline-recorder .audio-input-button { min-height: 66px; padding: 11px 12px; }
+.video-inline-recorder .audio-submit { min-height: 44px; }
+.video-inline-recorder .audio-status { min-height: 44px; font-size: 10px; }
+.video-inline-recorder .oral-transcript-confirmation { margin-top: 0; padding: 14px; }
 .video-evidence-context { max-width: 760px; display: grid; grid-template-columns: 38px minmax(0, 1fr) 40px; align-items: center; gap: 13px; margin-bottom: 18px; padding: 15px 16px; border: 1px solid rgba(70,98,112,.16); border-radius: 15px; background: rgba(229,240,244,.82); }
 .video-evidence-context > svg { width: 38px; height: 38px; padding: 9px; border-radius: 12px; background: white; color: var(--primary); stroke-width: 1.55; }
 .video-evidence-context strong, .video-evidence-context span { display: block; }
@@ -528,7 +545,7 @@ label { display: grid; gap: 7px; color: var(--ink-soft); font-size: 13px; font-w
 .assessment-next {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
+    align-items: end;
     gap: 18px;
     padding: 9px 13px 10px;
     border: 0;
@@ -544,9 +561,7 @@ label { display: grid; gap: 7px; color: var(--ink-soft); font-size: 13px; font-w
 .assessment-next .button {
     min-width: 118px;
     min-height: 36px;
-    /* Keep the primary action visually closer to the task description's
-       completion line instead of floating at the card's vertical midpoint. */
-    transform: translateY(8px);
+    align-self: end;
 }
 .assessment-next[data-state="completed"] { border-left-color: rgba(66,111,98,.46); background: rgba(229,239,235,.62); }
 .assessment-next[data-state="content_missing"], .assessment-next[data-state="unavailable"] { border-left-color: rgba(138,101,45,.46); background: rgba(248,241,225,.64); }

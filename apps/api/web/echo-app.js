@@ -558,11 +558,30 @@
                 : null,
         };
         $("#learner-consent").checked = false;
+        mountVideoEvidenceRecorder();
         renderVideoEvidenceContext();
-        showView("evidence");
         setLearnerJobStatus("等待你授权并开始录音", "idle");
         resetOralConfirmation();
-        $("#video-evidence-context").scrollIntoView({block: "start"});
+        $("#video-inline-recorder").scrollIntoView({block: "nearest", behavior: "smooth"});
+    }
+
+    function mountVideoEvidenceRecorder() {
+        const host = $("#video-inline-recorder-content");
+        const panel = $("#learner-audio-panel");
+        host.append($("#video-evidence-context"), panel);
+        panel.classList.add("is-video-inline");
+        $("#video-inline-recorder").classList.remove("hidden");
+    }
+
+    function restoreEvidenceRecorder() {
+        const contextSlot = $("#evidence-context-slot");
+        const learnerSlot = $("#learner-audio-slot");
+        const context = $("#video-evidence-context");
+        const panel = $("#learner-audio-panel");
+        contextSlot.parentNode.insertBefore(context, contextSlot.nextSibling);
+        learnerSlot.parentNode.insertBefore(panel, learnerSlot.nextSibling);
+        panel.classList.remove("is-video-inline");
+        $("#video-inline-recorder").classList.add("hidden");
     }
 
     function renderVideoEvidenceContext() {
@@ -582,6 +601,7 @@
         state.videoEvidenceContext = null;
         resetOralConfirmation();
         renderVideoEvidenceContext();
+        restoreEvidenceRecorder();
     }
 
     function formatVideoTime(value) {
@@ -645,6 +665,7 @@
     }
 
     function showView(viewName) {
+        if (viewName === "evidence") restoreEvidenceRecorder();
         $$(".nav-item").forEach((button) => button.classList.toggle(
             "active",
             button.dataset.view === viewName || (viewName === "video" && button.dataset.view === "courses"),
