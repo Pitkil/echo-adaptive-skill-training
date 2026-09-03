@@ -1082,26 +1082,58 @@
         return {misconception: "稳定误区", learning_preference: "学习偏好", intervention_outcome: "历史干预效果"}[type] || "长期记忆";
     }
 
-    async function generateResources() {
-        const button = $("#generate-resources");
-        button.disabled = true;
+    const RESOURCE_ACTIONS = {
+        custom_note: {label: "学习资料", progress: "正在整理学习资料"},
+        practice_guide: {label: "实操指南", progress: "正在编排实操步骤"},
+        staged_test: {label: "阶段练习", progress: "正在生成练习题"},
+    };
+
+    async function generateResources(resourceType = "custom_note", triggerButton = null) {
+        const button = triggerButton || $("#generate-resources");
+        const label = $("#generate-resources-label");
+        const resourceList = $("#resource-list");
+        const action = RESOURCE_ACTIONS[resourceType] || RESOURCE_ACTIONS.custom_note;
+        $$("[data-resource-type]").forEach((item) => {
+            item.disabled = true;
+            item.classList.add("is-loading");
+            item.setAttribute("aria-busy", "true");
+        });
+        if (label) label.textContent = "正在生成，请稍候";
+        resourceList.innerHTML = `<div class="resource-generation-state" role="status">
+            <i data-lucide="loader-circle"></i>
+            <strong>${action.progress}</strong>
+            <p>系统正在检索课程依据、生成内容并完成学习前校验。</p>
+        </div>`;
+        iconRefresh();
         try {
             const response = await api("/v1/resources/generate", {
                 method: "POST",
                 body: JSON.stringify({
                     user_id: state.userId,
                     module_id: state.moduleId,
+                    resource_type: resourceType,
                 }),
             });
             const payload = await response.json();
             renderResourcePlan(payload.plan);
             const verified = (payload.items || []).filter((item) => item.verification_passed).length;
-            toast(payload.degradation?.length ? `已生成 ${payload.items?.length || 0} 项资源，其中 ${verified} 项通过校验` : "个性化资源已生成并进入人工发布门禁");
+            toast(payload.degradation?.length ? `已生成 ${payload.items?.length || 0} 项${action.label}，其中 ${verified} 项通过校验` : `${action.label}已生成，可以直接开始学习`);
             await loadResources();
         } catch (error) {
-            toast(error.message);
+            resourceList.innerHTML = `<div class="resource-generation-state is-error" role="alert">
+                <i data-lucide="circle-alert"></i>
+                <strong>本次生成未完成</strong>
+                <p>${escapeHtml(error.message)}</p>
+            </div>`;
+            iconRefresh();
+            toast(`生成失败：${error.message}`);
         } finally {
-            button.disabled = false;
+            $$("[data-resource-type]").forEach((item) => {
+                item.disabled = false;
+                item.classList.remove("is-loading");
+                item.removeAttribute("aria-busy");
+            });
+            if (label) label.textContent = "生成学习资料";
         }
     }
 
@@ -1132,14 +1164,23 @@
             node.innerHTML = payload.items?.length
                 ? payload.items.map(resourceCard).join("")
                 : `<div class="empty-state"><strong>尚无个性化资源</strong><p>系统将根据当前画像确定知识点与难度。</p></div>`;
-        } catch (_) {
-            // The resource view remains usable for the first generation request.
+        } catch (error) {
+            $("#resource-list").innerHTML = `<div class="resource-generation-state is-error" role="alert">
+                <i data-lucide="circle-alert"></i>
+                <strong>资源列表暂时无法读取</strong>
+                <p>${escapeHtml(error.message)}</p>
+            </div>`;
+            iconRefresh();
         }
     }
 
     function resourceCard(item) {
         const typeLabel = {custom_note: "定制学习资料", practice_guide: "实操指南", staged_test: "阶段练习"}[item.resource_type] || item.resource_type;
-        const statusLabel = {verified: "已发布", pending_review: "待人工发布", draft: "草稿"}[item.status] || item.status;
+        const statusLabel = item.status === "draft"
+            ? "草稿，暂不可学习"
+            : item.status === "verified"
+                ? "已归入课程资源"
+                : "已完成校验，可学习";
         const sources = (item.evidence_sources || []).map((source) => {
             const title = source.source_title || source.title || source.document_title || "官方资料";
             const section = source.source_section || source.section || source.chapter || "未标注章节";
@@ -1147,28 +1188,59 @@
             const link = url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">打开出处</a>` : "无可打开链接";
             return `<li><strong>${escapeHtml(title)}</strong><span>${escapeHtml(section)} · ${link}</span></li>`;
         }).join("") || `<li class="muted">没有官方证据，资源只能保留为草稿。</li>`;
-        const details = item.verification_details && Object.keys(item.verification_details).length
-            ? `<pre>${escapeHtml(prettyJson(item.verification_details, 2200))}</pre>`
-            : "暂无校验明细";
-        const history = (item.verification_history || []).map((entry) => `<li>第 ${Number(entry.retry_count || 0) + 1} 次：${entry.passed ? "通过" : "未通过"}${entry.issues?.length ? ` · ${escapeHtml(entry.issues.join("；"))}` : ""}</li>`).join("") || "暂无重做记录";
+        const questions = item.resource_type === "staged_test" ? (item.learning_payload?.questions || []) : [];
+        const questionsPanel = questions.length ? `<section class="resource-questions"><div><span class="eyebrow">本次练习</span><h3>按顺序完成三道题</h3></div><ol>${questions.map((question) => `<li><strong>${escapeHtml({understanding: "理解", application: "应用", reasoning: "推理"}[question.dimension] || "练习")}</strong><p>${escapeHtml(question.question || "")}</p></li>`).join("")}</ol><p class="muted">${escapeHtml(item.learning_payload?.activity_note || "完成后可在 ECHO 对话中提交作答。")}</p></section>` : "";
+        const canUse = item.status !== "draft" && item.verification_passed !== false;
+        const learningAction = item.resource_type === "staged_test"
+            ? `<button class="button primary compact-button" type="button" data-start-stage-practice="${escapeHtml(item.resource_id)}">开始阶段练习</button>`
+            : `<button class="button secondary compact-button" type="button" data-download-resource="${escapeHtml(item.resource_id)}">下载${item.resource_type === "practice_guide" ? "指南" : "资料"}</button>`;
         const publish = state.role === "mentor" || state.role === "system_admin"
-            ? (item.status === "pending_review" && item.verification_passed ? `<button class="button secondary compact-button" type="button" data-publish-resource="${escapeHtml(item.resource_id)}"><i data-lucide="send"></i>人工发布</button>` : "")
+            ? (item.status === "pending_review" && item.verification_passed ? `<button class="text-button compact-button" type="button" data-publish-resource="${escapeHtml(item.resource_id)}">归入课程资源管理</button>` : "")
             : "";
         return `<article class="resource-card">
             <header><span class="eyebrow">${escapeHtml(typeLabel)}</span><span class="resource-status ${item.status}">${escapeHtml(statusLabel)}</span></header>
             <h2>${escapeHtml(item.title)}</h2>
             <p class="resource-content">${escapeHtml(item.content)}</p>
+            ${questionsPanel}
             <p><strong>个性化理由：</strong>${escapeHtml(item.personalization_reason)}</p>
-            <details class="resource-proof"><summary>查看官方引用与校验明细</summary><section><h3>官方引用（${item.evidence_sources?.length || 0}）</h3><ul>${sources}</ul><h3>校验结果</h3><div class="verification-detail">${details}</div><h3>重做历史（${item.retry_count || 0} 次）</h3><ul>${history}</ul></section></details>
-            <footer><span>难度：${escapeHtml(difficultyLabel(item.difficulty))} · 证据来源：${item.evidence_sources?.length || 0}</span>${publish}</footer>
+            <details class="resource-proof"><summary>查看官方出处</summary><section><h3>官方引用（${item.evidence_sources?.length || 0}）</h3><ul>${sources}</ul></section></details>
+            <footer><span>难度：${escapeHtml(difficultyLabel(item.difficulty))} · 证据来源：${item.evidence_sources?.length || 0}</span><span class="resource-card-actions">${canUse ? learningAction : ""}${publish}</span></footer>
         </article>`;
+    }
+
+    function findLoadedResource(resourceId) {
+        return Array.from(document.querySelectorAll(".resource-card")).find((node) => node.querySelector(`[data-download-resource="${CSS.escape(resourceId)}"], [data-start-stage-practice="${CSS.escape(resourceId)}"]`));
+    }
+
+    function downloadResource(resourceId) {
+        const card = findLoadedResource(resourceId);
+        if (!card) return;
+        const title = card.querySelector("h2")?.textContent?.trim() || "ECHO 学习资源";
+        const content = card.querySelector(".resource-content")?.textContent?.trim() || "";
+        const sources = Array.from(card.querySelectorAll(".resource-proof li")).map((item) => item.textContent.trim()).join("\n");
+        const file = new Blob([`${title}\n\n${content}\n\n官方出处\n${sources}\n`], {type: "text/markdown;charset=utf-8"});
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(file);
+        link.download = `${title.replaceAll(/[\\/:*?\"<>|]/g, "_")}.md`;
+        link.click();
+        URL.revokeObjectURL(link.href);
+    }
+
+    function startStagePractice(resourceId) {
+        const card = findLoadedResource(resourceId);
+        if (!card) return;
+        const questions = Array.from(card.querySelectorAll(".resource-questions li p")).map((item, index) => `${index + 1}. ${item.textContent.trim()}\n答：`).join("\n\n");
+        showView("workspace");
+        $("#chat-input").value = `我正在完成“${card.querySelector("h2")?.textContent?.trim() || "阶段练习"}”。请根据以下作答给我学习反馈，不要将其作为正式测评或更新能力画像：\n\n${questions}`;
+        $("#chat-input").focus();
+        toast("请完成作答后发送给 ECHO 获取学习反馈");
     }
 
     async function publishResource(resourceId, button) {
         button.disabled = true;
         try {
             await api(`/v1/resources/${encodeURIComponent(resourceId)}/publish`, {method: "POST"});
-            toast("资源已完成人工发布");
+            toast("资源已归入课程资源管理");
             await loadResources();
         } catch (error) {
             toast(`发布失败：${error.message}`);
@@ -1974,10 +2046,15 @@
         $("#workspace-path-report").addEventListener("click", () => showView("insight"));
         $("#course-path-report").addEventListener("click", () => showView("insight"));
         $("#refresh-demo-trace").addEventListener("click", loadDemoTrace);
-        $("#generate-resources").addEventListener("click", generateResources);
+        $("#generate-resources").addEventListener("click", (event) => generateResources("custom_note", event.currentTarget));
+        $$(".resource-action").forEach((button) => button.addEventListener("click", (event) => generateResources(button.dataset.resourceType, event.currentTarget)));
         $("#resource-list").addEventListener("click", (event) => {
             const button = event.target.closest("[data-publish-resource]");
-            if (button) publishResource(button.dataset.publishResource, button);
+            if (button) return publishResource(button.dataset.publishResource, button);
+            const downloadButton = event.target.closest("[data-download-resource]");
+            if (downloadButton) return downloadResource(downloadButton.dataset.downloadResource);
+            const practiceButton = event.target.closest("[data-start-stage-practice]");
+            if (practiceButton) startStagePractice(practiceButton.dataset.startStagePractice);
         });
         $("#refresh-members").addEventListener("click", loadMembers);
         $("#record-button").addEventListener("click", startOrStopRecording);
