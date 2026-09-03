@@ -167,12 +167,17 @@ MICRO_SUBMISSION_LEASE_SECONDS = max(
     int(float(os.getenv("MICRO_REPRESENTATION_TIMEOUT_SECONDS", "30"))) + 30,
 )
 MICRO_AUDIO_CONTENT_TYPES = {
+    "audio/aac",
     "audio/flac",
+    "audio/mp3",
     "audio/mp4",
     "audio/mpeg",
     "audio/ogg",
     "audio/wav",
+    "audio/wave",
     "audio/webm",
+    "audio/x-m4a",
+    "audio/x-wav",
     "video/webm",
 }
 pwd_context = CryptContext(schemes=Config.security.PWD_SCHEMES, deprecated="auto")
@@ -3085,7 +3090,8 @@ def save_audio_file(job_id: str, audio: UploadFile) -> tuple[Path, str, int]:
     suffix = Path(audio.filename or "").suffix.lower()
     if suffix not in MICRO_AUDIO_EXTENSIONS:
         raise HTTPException(status_code=415, detail="unsupported audio file extension")
-    if (audio.content_type or "").lower() not in MICRO_AUDIO_CONTENT_TYPES:
+    content_type = (audio.content_type or "").lower().split(";", 1)[0].strip()
+    if content_type not in MICRO_AUDIO_CONTENT_TYPES:
         raise HTTPException(status_code=415, detail="unsupported audio content type")
     destination_dir = UPLOAD_DIR / "micro"
     destination_dir.mkdir(parents=True, exist_ok=True)

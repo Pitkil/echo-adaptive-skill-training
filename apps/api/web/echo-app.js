@@ -499,12 +499,13 @@
         saveVideoProgress();
         if (!Number.isFinite(player.duration)) return;
         if (state.activeCheckpoints.length) {
-            const pending = state.activeCheckpoints.find(
+            const reached = state.activeCheckpoints.filter(
                 (item) => player.currentTime >= item.time_offset_seconds
                     && !state.triggeredCheckpointIds.has(item.id)
             );
+            const pending = reached.at(-1);
             if (!pending) return;
-            state.triggeredCheckpointIds.add(pending.id);
+            reached.forEach((item) => state.triggeredCheckpointIds.add(item.id));
             player.pause();
             showVideoCheckpoint(pending);
             return;
@@ -558,11 +559,30 @@
                 : null,
         };
         $("#learner-consent").checked = false;
+        mountVideoEvidenceRecorder();
         renderVideoEvidenceContext();
-        showView("evidence");
         setLearnerJobStatus("等待你授权并开始录音", "idle");
         resetOralConfirmation();
-        $("#video-evidence-context").scrollIntoView({block: "start"});
+        $("#video-inline-recorder").scrollIntoView({block: "nearest", behavior: "smooth"});
+    }
+
+    function mountVideoEvidenceRecorder() {
+        const host = $("#video-inline-recorder-content");
+        const panel = $("#learner-audio-panel");
+        host.append($("#video-evidence-context"), panel);
+        panel.classList.add("is-video-inline");
+        $("#video-inline-recorder").classList.remove("hidden");
+    }
+
+    function restoreEvidenceRecorder() {
+        const contextSlot = $("#evidence-context-slot");
+        const learnerSlot = $("#learner-audio-slot");
+        const context = $("#video-evidence-context");
+        const panel = $("#learner-audio-panel");
+        contextSlot.parentNode.insertBefore(context, contextSlot.nextSibling);
+        learnerSlot.parentNode.insertBefore(panel, learnerSlot.nextSibling);
+        panel.classList.remove("is-video-inline");
+        $("#video-inline-recorder").classList.add("hidden");
     }
 
     function renderVideoEvidenceContext() {
@@ -582,6 +602,7 @@
         state.videoEvidenceContext = null;
         resetOralConfirmation();
         renderVideoEvidenceContext();
+        restoreEvidenceRecorder();
     }
 
     function formatVideoTime(value) {
@@ -645,6 +666,7 @@
     }
 
     function showView(viewName) {
+        if (viewName === "evidence") restoreEvidenceRecorder();
         $$(".nav-item").forEach((button) => button.classList.toggle(
             "active",
             button.dataset.view === viewName || (viewName === "video" && button.dataset.view === "courses"),
@@ -690,6 +712,71 @@
         if (!container) return;
         container.scrollTo({top: container.scrollHeight, behavior: "smooth"});
         window.setTimeout(syncChatScrollControl, 260);
+    }
+
+    function toggleVideoEchoPanel(forceOpen = null) {
+        const panel = $("#video-echo-panel");
+        const trigger = $("#video-echo-float");
+        const shouldOpen = forceOpen === null ? panel.classList.contains("hidden") : forceOpen;
+        panel.classList.toggle("hidden", !shouldOpen);
+        trigger.setAttribute("aria-expanded", String(shouldOpen));
+        if (shouldOpen) {
+            $("#video-echo-input").focus();
+        }
+    }
+
+    function appendVideoEchoMessage(role, content, extraClass = "") {
+        const container = $("#video-echo-messages");
+        container.querySelector(".video-echo-empty")?.remove();
+        const message = document.createElement("div");
+        message.className = `message ${role} ${extraClass}`.trim();
+        message.textContent = content;
+        container.appendChild(message);
+        container.scrollTop = container.scrollHeight;
+        return message;
+    }
+
+    async function sendVideoEchoMessage(text) {
+        const input = $("#video-echo-input");
+        const submit = $("#video-echo-form button[type='submit']");
+        const userInput = text.trim();
+        if (!userInput || state.isSending) return;
+        setChatSending(true);
+        submit.disabled = true;
+        input.value = "";
+        appendVideoEchoMessage("user", userInput);
+        const pending = appendVideoEchoMessage("assistant", "正在结合当前课程与学习记录整理回答…", "pending");
+        const body = {
+            user_input: userInput,
+            user_id: state.userId,
+            session_id: state.sessionId,
+            program_id: state.program.id,
+            module_id: state.moduleId,
+            request_id: crypto.randomUUID().replaceAll("-", ""),
+            requested_module_id: null,
+        };
+        try {
+            const response = await api("/chat", {method: "POST", body: JSON.stringify(body)});
+            const result = await parseNdjson(response);
+            state.sessionId = result.meta?.session_id || state.sessionId;
+            pending.remove();
+            appendVideoEchoMessage("assistant", result.content || "本轮已完成。");
+            renderTrace(result.meta || {});
+            renderQuiz(result.meta?.quiz);
+            if (result.meta?.assessment_progress) {
+                renderAssessmentProgress(result.meta.assessment_progress);
+            } else {
+                await loadAssessmentProgress();
+            }
+            setEchoStage(result.meta?.echo_state || "E");
+        } catch (error) {
+            pending.remove();
+            appendVideoEchoMessage("assistant", `本轮执行失败：${error.message}`);
+        } finally {
+            setChatSending(false);
+            submit.disabled = false;
+            input.focus();
+        }
     }
 
     async function parseNdjson(response) {
@@ -1435,6 +1522,9 @@
             setLearnerJobStatus("正在提交并创建检测任务", "processing");
             const response = await api("/v1/micro/detection-jobs", {method: "POST", body: data});
             const payload = await response.json();
+            if (state.videoEvidenceContext?.checkpointId) {
+                $("#video-checkpoint").classList.add("hidden");
+            }
             setLearnerJobStatus(`任务 ${payload.job_id} 已提交，状态：${payload.status}`, "submitted");
             resetOralConfirmation();
             pollLearnerTranscription(payload.job_id);
@@ -1483,6 +1573,8 @@
                 <p>${escapeHtml(result.feedback)}</p>
                 <em>U ${result.ability.U.toFixed(2)} · A ${result.ability.A.toFixed(2)} · R ${result.ability.R.toFixed(2)}；${escapeHtml(result.microrepresentation_note)}</em>`;
             panel.classList.remove("hidden");
+            $("#video-checkpoint").classList.add("hidden");
+            state.activeCheckpoint = null;
             setLearnerJobStatus("口述答案已评分并记录；能力值仅依据评分结果更新。", "completed");
             await Promise.all([loadInsight(), loadAssessmentProgress()]);
         } catch (error) {
@@ -2012,6 +2104,12 @@
             showVideoCheckpoint();
         });
         $("#video-skip-checkpoint").addEventListener("click", skipVideoCheckpoint);
+        $("#video-echo-float").addEventListener("click", () => toggleVideoEchoPanel());
+        $("#video-echo-close").addEventListener("click", () => toggleVideoEchoPanel(false));
+        $("#video-echo-form").addEventListener("submit", (event) => {
+            event.preventDefault();
+            sendVideoEchoMessage($("#video-echo-input").value);
+        });
         $("#clear-video-evidence").addEventListener("click", clearVideoEvidenceContext);
         $("#module-select").addEventListener("change", changeModule);
         $$(".nav-item").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));

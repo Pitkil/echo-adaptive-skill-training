@@ -215,6 +215,15 @@ def test_audio_extension_and_content_type_are_validated(
         save_audio_file("invalid", make_audio(b"audio", filename="turn.exe"))
     assert exc_info.value.status_code == 415
 
+    browser_recording = UploadFile(
+        filename="turn.webm",
+        file=BytesIO(b"audio"),
+        headers=Headers({"content-type": "audio/webm;codecs=opus"}),
+    )
+    path, _, size = save_audio_file("browser-recording", browser_recording)
+    assert size == 5
+    assert path.read_bytes() == b"audio"
+
 
 def test_micro_job_migration_is_repeatable_for_legacy_database(
     monkeypatch: pytest.MonkeyPatch,

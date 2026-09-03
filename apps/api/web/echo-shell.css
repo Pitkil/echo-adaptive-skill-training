@@ -418,6 +418,87 @@ label { display: grid; gap: 7px; color: var(--ink-soft); font-size: 13px; font-w
 .checkpoint-item .checkpoint-head strong { font-size: 12px; font-weight: 600; color: var(--blue); }
 .checkpoint-item textarea { width: 100%; min-height: 64px; resize: vertical; font: inherit; font-size: 12px; }
 .video-companion-panel { align-self: start; display: grid; gap: 18px; padding: 24px; }
+.video-echo-float {
+    position: fixed;
+    right: 18px;
+    bottom: 56px;
+    z-index: 70;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--line);
+    background: var(--primary);
+    color: #fff;
+    box-shadow: 0 14px 38px rgba(29, 50, 70, .26);
+    transition: transform .18s ease, box-shadow .18s ease;
+}
+.video-echo-float:hover { transform: translateY(-2px) scale(1.05); box-shadow: 0 18px 44px rgba(29, 50, 70, .3); }
+.video-echo-float svg { width: 22px; height: 22px; }
+.video-echo-panel {
+    position: fixed;
+    right: 18px;
+    bottom: 118px;
+    z-index: 71;
+    width: min(360px, calc(100vw - 36px));
+    max-height: min(520px, calc(100vh - 150px));
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, .96);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+}
+.video-echo-panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line);
+}
+.video-echo-panel-head > div { display: flex; align-items: center; gap: 8px; color: var(--primary); font-size: 14px; }
+.video-echo-panel-head svg { width: 17px; height: 17px; }
+.video-echo-messages {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 16px;
+    scrollbar-color: var(--line-strong) transparent;
+}
+.video-echo-empty {
+    margin: auto;
+    text-align: center;
+    color: var(--muted);
+    max-width: 230px;
+}
+.video-echo-empty svg { width: 28px; height: 28px; margin-bottom: 8px; color: var(--blue); }
+.video-echo-empty p { margin: 0; font-size: 12px; line-height: 1.6; }
+.video-echo-messages .message { max-width: 92%; font-size: 13px; line-height: 1.6; }
+.video-echo-messages .message.user { padding: 9px 12px; }
+.video-echo-messages .message.assistant { padding: 5px 12px 5px 12px; }
+.video-echo-messages .message.assistant::before { font-size: 9px; }
+.video-echo-form {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    padding: 12px;
+    border-top: 1px solid var(--line);
+}
+.video-echo-form textarea {
+    min-height: 44px;
+    max-height: 96px;
+    resize: none;
+    padding: 10px 12px;
+    line-height: 1.5;
+}
+.video-echo-form .button { height: 44px; padding: 0 14px; }
+.video-echo-form .button svg { width: 17px; height: 17px; }
 .video-companion-intro { display: flex; align-items: flex-start; gap: 12px; }
 .video-companion-intro > svg { width: 37px; height: 37px; flex: 0 0 37px; padding: 8px; border-radius: 11px; background: var(--surface-low); color: var(--primary); stroke-width: 1.55; }
 .video-companion-intro h2, .video-companion-intro p { margin: 0; }
@@ -443,6 +524,23 @@ label { display: grid; gap: 7px; color: var(--ink-soft); font-size: 13px; font-w
 .video-evidence-action strong, .video-evidence-action small { display: block; }
 .video-evidence-action strong { font-size: 11px; }
 .video-evidence-action small { margin-top: 4px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.video-inline-recorder { display: grid; gap: 12px; padding-top: 2px; }
+.video-inline-recorder .video-evidence-context { max-width: none; grid-template-columns: 34px minmax(0, 1fr) 34px; margin: 0; padding: 12px; }
+.video-inline-recorder .video-evidence-context > svg { width: 34px; height: 34px; padding: 8px; }
+.video-inline-recorder .learner-audio-panel { gap: 14px; padding: 18px; border-radius: 15px; background: rgba(255,255,255,.72); }
+.video-inline-recorder .learner-audio-panel::before { left: 18px; width: 58px; }
+.video-inline-recorder .audio-panel-heading h2 { font-size: 18px; }
+.video-inline-recorder .audio-panel-heading span:not(.audio-icon) { font-size: 10px; }
+.video-inline-recorder .audio-icon { width: 40px; height: 40px; flex-basis: 40px; border-radius: 12px; }
+.video-inline-recorder .audio-guidance { margin: 0; font-size: 11px; line-height: 1.6; }
+.video-inline-recorder .consent-card { min-height: 0; padding: 12px 13px; }
+.video-inline-recorder .consent-card strong { font-size: 11px; }
+.video-inline-recorder .consent-card small { font-size: 9px; }
+.video-inline-recorder .audio-input-grid { grid-template-columns: minmax(0, 1fr); }
+.video-inline-recorder .audio-input-button { min-height: 66px; padding: 11px 12px; }
+.video-inline-recorder .audio-submit { min-height: 44px; }
+.video-inline-recorder .audio-status { min-height: 44px; font-size: 10px; }
+.video-inline-recorder .oral-transcript-confirmation { margin-top: 0; padding: 14px; }
 .video-evidence-context { max-width: 760px; display: grid; grid-template-columns: 38px minmax(0, 1fr) 40px; align-items: center; gap: 13px; margin-bottom: 18px; padding: 15px 16px; border: 1px solid rgba(70,98,112,.16); border-radius: 15px; background: rgba(229,240,244,.82); }
 .video-evidence-context > svg { width: 38px; height: 38px; padding: 9px; border-radius: 12px; background: white; color: var(--primary); stroke-width: 1.55; }
 .video-evidence-context strong, .video-evidence-context span { display: block; }
@@ -528,7 +626,7 @@ label { display: grid; gap: 7px; color: var(--ink-soft); font-size: 13px; font-w
 .assessment-next {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
+    align-items: end;
     gap: 18px;
     padding: 9px 13px 10px;
     border: 0;
@@ -544,9 +642,7 @@ label { display: grid; gap: 7px; color: var(--ink-soft); font-size: 13px; font-w
 .assessment-next .button {
     min-width: 118px;
     min-height: 36px;
-    /* Keep the primary action visually closer to the task description's
-       completion line instead of floating at the card's vertical midpoint. */
-    transform: translateY(8px);
+    align-self: end;
 }
 .assessment-next[data-state="completed"] { border-left-color: rgba(66,111,98,.46); background: rgba(229,239,235,.62); }
 .assessment-next[data-state="content_missing"], .assessment-next[data-state="unavailable"] { border-left-color: rgba(138,101,45,.46); background: rgba(248,241,225,.64); }
@@ -966,6 +1062,9 @@ label { display: grid; gap: 7px; color: var(--ink-soft); font-size: 13px; font-w
     .sample-course-list article > button { grid-column: 3; grid-row: 1 / span 2; }
     .video-learning-grid { grid-template-columns: minmax(0, 1fr); }
     .video-companion-panel { width: 100%; }
+    .video-echo-float { right: 14px; bottom: 84px; width: 46px; height: 46px; }
+    .video-echo-float svg { width: 19px; height: 19px; }
+    .video-echo-panel { right: 14px; bottom: 138px; width: min(340px, calc(100vw - 28px)); }
     .sidebar { position: sticky; height: 68px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; border-right: 0; border-bottom: 1px solid var(--line); }
     .brand { height: 65px; padding: 0 14px; border: 0; }
     .brand .brand-mark { width: 34px; height: 34px; }
