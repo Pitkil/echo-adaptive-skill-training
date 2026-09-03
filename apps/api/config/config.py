@@ -100,8 +100,8 @@ class UploadConfig:
         ".ogv",
         ".ogg",
     }
-    VIDEO_FRAME_INTERVAL_SECONDS = int(os.getenv("VIDEO_FRAME_INTERVAL_SECONDS", "30"))
-    VIDEO_FRAME_MAX_COUNT = int(os.getenv("VIDEO_FRAME_MAX_COUNT", "24"))
+    VIDEO_FRAME_INTERVAL_SECONDS = int(os.getenv("VIDEO_FRAME_INTERVAL_SECONDS", "5"))
+    VIDEO_FRAME_MAX_COUNT = int(os.getenv("VIDEO_FRAME_MAX_COUNT", "240"))
     VIDEO_OCR_BACKEND = os.getenv("VIDEO_OCR_BACKEND", "auto")
     ALLOWED_EXTENSIONS = {
         ".txt",

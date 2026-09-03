@@ -14,6 +14,9 @@ RUN apt-get update \
 WORKDIR /workspace
 
 COPY pyproject.toml README.md ./
+ENV PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn \
+    PIP_DEFAULT_TIMEOUT=180
 RUN pip install --upgrade pip \
     && pip install .
 
