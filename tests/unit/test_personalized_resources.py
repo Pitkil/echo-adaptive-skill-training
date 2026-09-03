@@ -353,7 +353,7 @@ def test_resource_generation_uses_profile_memory_and_blind_spot(monkeypatch) -> 
     assert payload["plan"]["memory_hints"]
     assert len(payload["items"]) == 1
     assert payload["items"][0]["resource_type"] == "practice_guide"
-    assert payload["items"][0]["status"] == "pending_review"
+    assert payload["items"][0]["status"] == "verified"
     assert all(item["verification_passed"] for item in payload["items"])
 
     resources = db.query(GeneratedResource).filter_by(user_id=learner.id).all()

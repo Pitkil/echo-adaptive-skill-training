@@ -96,8 +96,8 @@ def test_chat_submission_exposes_pending_feedback() -> None:
 
 def test_resource_generation_exposes_progress_and_failure_feedback() -> None:
     assert 'id="generate-resources-label"' in INDEX
-    assert 'label.textContent = "正在生成，请稍候"' in SCRIPT
-    assert 'item.setAttribute("aria-busy", "true")' in SCRIPT
+    assert 'label.textContent = "正在生成，请稍候"' not in SCRIPT
+    assert 'button.setAttribute("aria-busy", "true")' in SCRIPT
     assert 'class="resource-generation-state" role="status"' in SCRIPT
     assert "资源列表暂时无法读取" in SCRIPT
     assert '.resource-generation-state {' in STYLES
@@ -107,6 +107,11 @@ def test_resource_generation_exposes_progress_and_failure_feedback() -> None:
     assert '开始阶段练习' in SCRIPT
     assert '待人工发布' not in SCRIPT
     assert '.button.is-loading > svg { animation: none; }' in STYLES
+    assert 'class="resource-toolbar"' in INDEX
+    assert 'grid-template-columns: repeat(3, minmax(0, 1fr))' in STYLES
+    assert '草稿，可预览' not in SCRIPT
+    assert '下载${isDraft' not in SCRIPT
+    assert 'data-publish-resource' not in SCRIPT
 
 
 def test_auth_layout_scales_with_short_desktop_viewports() -> None:

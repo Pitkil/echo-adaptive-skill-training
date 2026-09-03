@@ -48,7 +48,7 @@ document_id 三重映射，未登记或已移除向量不会进入正式证据�
 | M3-KP4 | 已通过 | Observability/Process Overview 来源可映射 |
 
 M1-KP4 已由 Chat History 材料覆盖；M3-KP1 已由 Process First 和 Process Overview 覆盖。
-检索覆盖已达到 12/12，但这不替代资源事实声明、50 组案例和比赛指标的人工发布门禁。
+检索覆盖已达到 12/12，但这不替代资源事实声明检查、50 组案例和比赛指标的人工复核。
 
 ## 交付门禁
 

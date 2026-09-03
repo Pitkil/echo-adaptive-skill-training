@@ -1090,15 +1090,13 @@
 
     async function generateResources(resourceType = "custom_note", triggerButton = null) {
         const button = triggerButton || $("#generate-resources");
-        const label = $("#generate-resources-label");
         const resourceList = $("#resource-list");
         const action = RESOURCE_ACTIONS[resourceType] || RESOURCE_ACTIONS.custom_note;
         $$("[data-resource-type]").forEach((item) => {
             item.disabled = true;
-            item.classList.add("is-loading");
-            item.setAttribute("aria-busy", "true");
         });
-        if (label) label.textContent = "正在生成，请稍候";
+        button.classList.add("is-loading");
+        button.setAttribute("aria-busy", "true");
         resourceList.innerHTML = `<div class="resource-generation-state" role="status">
             <i data-lucide="loader-circle"></i>
             <strong>${action.progress}</strong>
@@ -1133,7 +1131,6 @@
                 item.classList.remove("is-loading");
                 item.removeAttribute("aria-busy");
             });
-            if (label) label.textContent = "生成学习资料";
         }
     }
 
@@ -1176,27 +1173,19 @@
 
     function resourceCard(item) {
         const typeLabel = {custom_note: "定制学习资料", practice_guide: "实操指南", staged_test: "阶段练习"}[item.resource_type] || item.resource_type;
-        const statusLabel = item.status === "draft"
-            ? "草稿，暂不可学习"
-            : item.status === "verified"
-                ? "已归入课程资源"
-                : "已完成校验，可学习";
+        const statusLabel = item.verification_passed ? "已校验，可学习" : "已生成，可学习";
         const sources = (item.evidence_sources || []).map((source) => {
             const title = source.source_title || source.title || source.document_title || "官方资料";
             const section = source.source_section || source.section || source.chapter || "未标注章节";
             const url = source.source_url || source.url || source.link;
             const link = url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">打开出处</a>` : "无可打开链接";
             return `<li><strong>${escapeHtml(title)}</strong><span>${escapeHtml(section)} · ${link}</span></li>`;
-        }).join("") || `<li class="muted">没有官方证据，资源只能保留为草稿。</li>`;
+        }).join("") || `<li class="muted">暂未取得可追溯的官方依据，后续补充后会更新校验结果。</li>`;
         const questions = item.resource_type === "staged_test" ? (item.learning_payload?.questions || []) : [];
         const questionsPanel = questions.length ? `<section class="resource-questions"><div><span class="eyebrow">本次练习</span><h3>按顺序完成三道题</h3></div><ol>${questions.map((question) => `<li><strong>${escapeHtml({understanding: "理解", application: "应用", reasoning: "推理"}[question.dimension] || "练习")}</strong><p>${escapeHtml(question.question || "")}</p></li>`).join("")}</ol><p class="muted">${escapeHtml(item.learning_payload?.activity_note || "完成后可在 ECHO 对话中提交作答。")}</p></section>` : "";
-        const canUse = item.status !== "draft" && item.verification_passed !== false;
         const learningAction = item.resource_type === "staged_test"
-            ? `<button class="button primary compact-button" type="button" data-start-stage-practice="${escapeHtml(item.resource_id)}">开始阶段练习</button>`
+            ? (questions.length ? `<button class="button primary compact-button" type="button" data-start-stage-practice="${escapeHtml(item.resource_id)}">开始阶段练习</button>` : "")
             : `<button class="button secondary compact-button" type="button" data-download-resource="${escapeHtml(item.resource_id)}">下载${item.resource_type === "practice_guide" ? "指南" : "资料"}</button>`;
-        const publish = state.role === "mentor" || state.role === "system_admin"
-            ? (item.status === "pending_review" && item.verification_passed ? `<button class="text-button compact-button" type="button" data-publish-resource="${escapeHtml(item.resource_id)}">归入课程资源管理</button>` : "")
-            : "";
         return `<article class="resource-card">
             <header><span class="eyebrow">${escapeHtml(typeLabel)}</span><span class="resource-status ${item.status}">${escapeHtml(statusLabel)}</span></header>
             <h2>${escapeHtml(item.title)}</h2>
@@ -1204,7 +1193,7 @@
             ${questionsPanel}
             <p><strong>个性化理由：</strong>${escapeHtml(item.personalization_reason)}</p>
             <details class="resource-proof"><summary>查看官方出处</summary><section><h3>官方引用（${item.evidence_sources?.length || 0}）</h3><ul>${sources}</ul></section></details>
-            <footer><span>难度：${escapeHtml(difficultyLabel(item.difficulty))} · 证据来源：${item.evidence_sources?.length || 0}</span><span class="resource-card-actions">${canUse ? learningAction : ""}${publish}</span></footer>
+            <footer><span>难度：${escapeHtml(difficultyLabel(item.difficulty))} · 证据来源：${item.evidence_sources?.length || 0}</span><span class="resource-card-actions">${learningAction}</span></footer>
         </article>`;
     }
 
@@ -1234,18 +1223,6 @@
         $("#chat-input").value = `我正在完成“${card.querySelector("h2")?.textContent?.trim() || "阶段练习"}”。请根据以下作答给我学习反馈，不要将其作为正式测评或更新能力画像：\n\n${questions}`;
         $("#chat-input").focus();
         toast("请完成作答后发送给 ECHO 获取学习反馈");
-    }
-
-    async function publishResource(resourceId, button) {
-        button.disabled = true;
-        try {
-            await api(`/v1/resources/${encodeURIComponent(resourceId)}/publish`, {method: "POST"});
-            toast("资源已归入课程资源管理");
-            await loadResources();
-        } catch (error) {
-            toast(`发布失败：${error.message}`);
-            button.disabled = false;
-        }
     }
 
     function openDeletionPanel() {
@@ -2049,8 +2026,6 @@
         $("#generate-resources").addEventListener("click", (event) => generateResources("custom_note", event.currentTarget));
         $$(".resource-action").forEach((button) => button.addEventListener("click", (event) => generateResources(button.dataset.resourceType, event.currentTarget)));
         $("#resource-list").addEventListener("click", (event) => {
-            const button = event.target.closest("[data-publish-resource]");
-            if (button) return publishResource(button.dataset.publishResource, button);
             const downloadButton = event.target.closest("[data-download-resource]");
             if (downloadButton) return downloadResource(downloadButton.dataset.downloadResource);
             const practiceButton = event.target.closest("[data-start-stage-practice]");

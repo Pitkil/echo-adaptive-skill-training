@@ -5082,10 +5082,7 @@ def generate_resources(
                     )
                 )
         if final_result.passed:
-            # The learner may immediately use their own verified resource.
-            # A later mentor action only governs whether it is catalogued as a
-            # reusable course resource; it must not block personal learning.
-            resource.status = "pending_review"
+            resource.status = "verified"
         verification_details.append(
             {
                 "resource_id": resource.id,
@@ -5118,7 +5115,7 @@ def generate_resources(
     next_action_reason = (
         "资源已通过自动内容检查，学习者现在即可学习、下载或开始练习。"
         if all(item["verification_passed"] for item in resources)
-        else "存在未通过检查的资源，保持草稿并等待补充证据或再次修复。"
+        else "资源已保存供学习者使用，同时明确提示尚待补充的官方依据或检查项。"
     )
     execution.result = {
         "session_id": session.id,
@@ -5181,9 +5178,9 @@ def generate_resources(
                 "output": {
                     "primary_action": "GENERATE_RESOURCE",
                     "reason": next_action_reason,
-                    "published_resource_count": 0,
-                    "pending_review_count": sum(
-                        1 for item in resources if item["status"] == "pending_review"
+                    "usable_resource_count": len(resources),
+                    "verified_resource_count": sum(
+                        1 for item in resources if item["status"] == "verified"
                     ),
                 },
                 "failure_reason": None,
@@ -5226,60 +5223,3 @@ def generate_resources(
         "primary_action": "GENERATE_RESOURCE",
         "resource_type": selected_resource_type,
     }
-
-
-@app.post("/v1/resources/{resource_id}/publish")
-def publish_resource(
-    resource_id: str,
-    db: Session = Depends(get_db),
-    user: User = Depends(current_user),
-):
-    """Mark a verified personal resource as approved for instructor management."""
-
-    if user.role not in {UserRole.MENTOR.value, UserRole.SYSTEM_ADMIN.value}:
-        raise HTTPException(status_code=403, detail="仅讲师、导师或系统管理员可将资源归入课程资源管理")
-    resource = (
-        db.query(GeneratedResource)
-        .join(TrainingModule, TrainingModule.id == GeneratedResource.module_id)
-        .join(TrainingProgram, TrainingProgram.id == TrainingModule.program_id)
-        .filter(
-            GeneratedResource.id == resource_id,
-            TrainingProgram.organization_id == user.organization_id,
-        )
-        .first()
-    )
-    if resource is None:
-        raise HTTPException(status_code=404, detail="资源不存在")
-    latest = (
-        db.query(VerificationResult)
-        .filter_by(resource_id=resource.id)
-        .order_by(VerificationResult.created_at.desc())
-        .first()
-    )
-    if latest is None or not latest.passed:
-        raise HTTPException(status_code=409, detail="资源未通过自动校验，不能发布")
-    if resource.status == "verified":
-        return {"status": "already_published", "resource_id": resource.id}
-    resource.status = "verified"
-    publish_session = (
-        db.query(ChatSession)
-        .filter_by(user_id=resource.user_id, module_id=resource.module_id)
-        .order_by(ChatSession.updated_at.desc())
-        .first()
-    )
-    if publish_session is not None:
-        db.add(
-            LearningDecision(
-                id=uuid4().hex,
-                trace_id=uuid4().hex,
-                user_id=resource.user_id,
-                session_id=publish_session.id,
-                module_id=resource.module_id,
-                knowledge_point_id=resource.knowledge_point_id,
-                action="PUBLISH_RESOURCE",
-                reason=f"{user.username} 确认资源可纳入课程资源管理",
-                evidence_refs=[resource.id],
-            )
-        )
-    db.commit()
-    return {"status": "published", "resource_id": resource.id}
