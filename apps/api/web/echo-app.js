@@ -220,7 +220,6 @@
         const programs = await programsResponse.json();
         state.program = programs[0];
         if (!state.program) throw new Error("尚未配置培训项目");
-        $("#program-name").textContent = state.program.name;
         const modulesResponse = await api(`/v1/catalog/programs/${state.program.id}/modules`);
         state.modules = await modulesResponse.json();
         state.moduleId = state.moduleId || state.modules[0]?.id;

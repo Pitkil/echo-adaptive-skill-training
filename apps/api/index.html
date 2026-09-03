@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="ECHO 以对话为入口，根据真实作答与学习进度安排 Semantic Kernel 技能训练。">
+    <meta name="description" content="ECHO 以对话为入口，根据真实作答与学习进度安排个性化技能训练。">
     <title>ECHO 企业技能训练系统</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -27,7 +27,7 @@
             <div class="auth-box">
                 <div class="auth-brand"><div class="brand-mark">E</div><strong>ECHO</strong></div>
                 <h2 id="auth-title">欢迎回来</h2>
-                <p class="muted">继续你的 Semantic Kernel 学习进度</p>
+                <p class="muted">继续你的个性化学习进度</p>
                 <form id="auth-form">
                     <label>账号<input id="auth-username" autocomplete="username" required minlength="2"></label>
                     <label>密码<input id="auth-password" type="password" autocomplete="current-password" required minlength="6"></label>
@@ -68,11 +68,11 @@
         <main id="main-content" class="main">
             <header class="topbar">
                 <div>
-                    <p class="eyebrow">培训计划</p>
-                    <h2 id="program-name">Microsoft Semantic Kernel 企业级智能体应用开发</h2>
+                    <p class="eyebrow">学习空间</p>
+                    <h2 id="program-name">ECHO 个性化技能训练</h2>
                 </div>
                 <div class="topbar-actions">
-                    <label class="module-picker"><span>培训模块</span><select id="module-select"></select></label>
+                    <label class="module-picker"><span>当前模块</span><select id="module-select"></select></label>
                     <span id="service-status" class="status-pill"><span class="status-dot"></span>系统在线</span>
                 </div>
             </header>
@@ -544,6 +544,6 @@
         </section>
     </div>
     <div id="toast" class="toast" role="status"></div>
-    <script src="/web/echo-app.js?v=0.6.5"></script>
+    <script src="/web/echo-app.js?v=0.6.6"></script>
 </body>
 </html>
