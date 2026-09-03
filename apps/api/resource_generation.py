@@ -525,7 +525,7 @@ class ResourceGenerationAgent:
         source_excerpt = (
             str(evidence[0].get("text") or "")[:500].strip()
             if evidence
-            else "当前没有可引用的官方材料，资源只能保存为草稿。"
+            else "当前没有可引用的官方材料，以下内容会明确标注官方依据待补充。"
         )
         memory_note = "；".join(plan.memory_hints) or "暂无长期记忆提示"
         point = plan.knowledge_point_name
@@ -580,7 +580,7 @@ class ResourceGenerationAgent:
         staged_test_scope = (
             f"练习范围：{point}；推荐难度：{difficulty}；范围依据官方材料。[1]\n\n"
             if evidence
-            else f"练习范围：{point}；推荐难度：{difficulty}；当前缺少官方材料，仅保存为草稿。\n\n"
+            else f"练习范围：{point}；推荐难度：{difficulty}；当前缺少官方材料，官方依据待补充。\n\n"
         )
         resources = {
             "custom_note": {

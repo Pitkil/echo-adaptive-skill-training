@@ -297,12 +297,12 @@ AI 只返回匹配的冻结要点编号，分数与是否通过由服务端计�
 `resource_type`、`resource_count=1` 和 `selection_policy=single_most_needed`。三种资源是系统能力
 范围，不表示每次同时生成三份。成员 A 的生成编排必须按该唯一决定生成和校验当前资源。
 
-### 个性化资源与发布门禁
+### 个性化资源与内容校验
 
 `POST /v1/resources/generate` 每次只生成一个 `resource_type`（`custom_note`、`practice_guide`
 或 `staged_test`），并保存 `TurnExecution` 中四个后台 Agent 的输入摘要、输出、失败原因和
-`persisted_in_system`。资源状态枚举为 `draft`、`pending_review`、`verified`；自动检查通过后
-只能进入 `pending_review`，不得直接发布。
+`persisted_in_system`。资源状态使用 `draft` 和 `verified` 记录内容校验结果；这是内部校验状态，
+不是学习权限。学习者生成的资源只属于本人，通过 `GET /v1/resources` 查看后可直接阅读、下载或练习。
 
 请求可带 `user_input`（最长 4000 字）描述学习目标、场景或约束。它是学习数据而不是系统指令：
 系统会将其限制在当前课程、模块、知识点和已登记的官方材料范围内，用于检索查询、个性化生成
@@ -320,9 +320,8 @@ rubric，课程负责人应在启用专项检查前配置本课程要求。
 检查失败时优先根据失败原因进行一次定向模型重生成并增加 `retry_count`；模型不可用时才使用
 保守的确定性修复，并在检查记录中保留原因。每次结果独立保存。
 
-讲师或系统管理员调用 `POST /v1/resources/{resource_id}/publish` 执行人工发布门禁；只有最近一次
-自动检查通过的资源允许变为 `verified`。学习者无权发布。没有官方证据的资源保持 `draft`，不得伪造
-引用或发布。
+没有官方证据的资源保持 `draft`，页面明确提示依据待补充且不得伪造引用，但仍允许学习者查看本人
+生成的内容。个人资源不会自动进入课程材料或 RAG 知识库，导师和管理员也无需代为发布。
 
 ### 学习反馈与用户级删除
 
