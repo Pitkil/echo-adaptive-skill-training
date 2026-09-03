@@ -14,9 +14,8 @@
 | 磁盘 | 10 GiB 可用 | 30 GiB以上，用于镜像、模型、材料和运行数据 |
 | Git | 支持 Git LFS | 拉取真实微表征模型前执行 `git lfs install` |
 
-PunditRAG 不包含在基础 `docker-compose.yml` 中，必须另行启动其导入服务和查询服务，或把
-ECHO 配置为访问已经部署的实例。模型接口同样是外部依赖，不能因为 ECHO `/health` 在线就认为
-整套系统已经可用。
+PunditRAG 源码与运行依赖已包含在根 `docker-compose.yml` 中；模型接口仍是外部依赖。不能因为
+ECHO `/health` 在线就认为整套系统已经可用，还要分别验证导入 API、查询 API 和正式知识库索引。
 
 ## 组件和端口
 
@@ -51,7 +50,7 @@ Copy-Item .env.example .env
 | 初始管理员 | `BOOTSTRAP_ADMIN_USERNAME`、`BOOTSTRAP_ADMIN_PASSWORD` | 可选；只在初始化阶段短暂使用，随后删除环境值 |
 | 模型 | `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL` | 使用生成能力时必填；禁止在日志和报告中输出密钥 |
 | 视觉模型 | `VISION_API_KEY`、`VISION_BASE_URL`、`VISION_MODEL` | 使用视频抽帧/OCR相关外部视觉能力时填写 |
-| PunditRAG | `PUNDITRAG_IMPORT_BASE_URL`、`PUNDITRAG_QUERY_BASE_URL`、Docker地址、超时、Top K | 真实知识库入库和检索时必填；导入与查询是两个独立服务 |
+| PunditRAG | Docker地址、模型名、Mongo/MinIO凭据、BGE设备、超时、Top K | 根Compose内置双API；默认CPU，GPU使用单独覆盖文件 |
 | SimpleMem | `SIMPLEMEM_BASE_URL`、Docker地址、超时、路径、`SIMPLEMEM_API_KEY` | 正常启动必须使用ECHO与SimpleMem一致且至少32字节的密钥 |
 | 微表征 | `MICRO_REPRESENTATION_BASE_URL`、Docker地址、超时、端口、上传上限、回调密钥 | 回调启用时两端必须配置相同 `MICRO_CALLBACK_SECRET` |
 | 文件 | `UPLOAD_DIR`、`MAX_FILE_SIZE`、`VIDEO_MAX_FILE_SIZE`、抽帧/OCR配置 | 路径必须位于受控运行目录；上传限制按字节配置 |
@@ -66,8 +65,8 @@ powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
 powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
 ```
 
-`setup.ps1` 创建 `.venv`、安装开发依赖，并仅在缺少时复制 `.env.example`。`dev.ps1` 不会启动
-PunditRAG、SimpleMem或微表征；这些服务需要分别启动。使用仓库内SimpleMem联调：
+`setup.ps1` 创建 `.venv`、安装开发依赖，并仅在缺少时复制 `.env.example`。`dev.ps1` 只启动
+ECHO 进程；PunditRAG、SimpleMem等依赖可用根Compose启动，或按需单独启动SimpleMem联调：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\start_simplemem.ps1 -AllowInsecureDevelopment
@@ -75,17 +74,23 @@ powershell -ExecutionPolicy Bypass -File scripts\start_simplemem.ps1 -AllowInsec
 
 无鉴权模式只允许回环开发环境。共享或比赛环境必须配置 `SIMPLEMEM_API_KEY`。
 
-### 基础 Docker
+### 完整 Docker
 
 ```powershell
 Copy-Item .env.example .env
-# 为 SIMPLEMEM_API_KEY 生成并填写至少 32 字节的随机密钥
-docker compose up --build
+# 填写模型配置、三个应用密钥，以及 PunditRAG Mongo/MinIO 的两个独立密码
+docker compose up --build -d
 ```
 
-基础Compose启动ECHO和SimpleMem。它不会启动PunditRAG双服务、外部模型或真实微表征服务。
-容器内ECHO通过 `host.docker.internal` 访问另行运行在宿主机的PunditRAG和微表征服务；Linux环境
-若不支持该名称，需要显式配置可达地址或Compose网络，不得照抄地址后假定可用。
+根Compose启动ECHO、PunditRAG双API及其Mongo/Milvus/Etcd/MinIO、SimpleMem和ASR。
+ECHO通过容器内部地址 `http://punditrag:8000/8001` 访问RAG。真实微表征服务仍需单独启用；
+默认Compose不把Mock结果冒充真实检测。
+
+Windows/macOS默认使用CPU。只有Docker NVIDIA验证通过时才叠加GPU覆盖：
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d
+```
 
 首次启动后创建管理员：
 
@@ -95,7 +100,7 @@ docker compose exec echo-api python /workspace/scripts/bootstrap_admin.py --user
 
 命令交互式读取密码，不把密码写入命令历史。已有账号提升时追加 `--promote-existing`。
 
-上述命令只启动 ECHO。需要联调微表征接口时，显式启动不含模型的 Mock 8030 服务：
+需要联调微表征接口时，显式启动不含模型的 Mock 8030 服务：
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.micro-mock.yml --profile micro-mock up --build

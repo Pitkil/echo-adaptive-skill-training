@@ -9,6 +9,9 @@ python -m compileall -q apps/api services
 docker compose config
 ```
 
+`services/punditrag/` 保留上游项目的代码风格，不纳入根 Ruff 自动改写；CI 使用其锁定依赖单独执行
+6 个离线确定性回归脚本，并与根项目一起进行 Python 编译和 Compose 校验。
+
 ## 必测边界
 
 - 问候和结束只匹配独立短句。

@@ -57,35 +57,18 @@ powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
 .\.venv\Scripts\python.exe scripts\bootstrap_admin.py --username admin
 ```
 
-推荐顺序：数据库 → PunditRAG 导入/查询 → SimpleMem → 微表征 → ECHO。已有账号需要提升时显式
+Compose 自动按依赖顺序启动 PunditRAG 数据服务 → PunditRAG 双 API → SimpleMem/ASR → ECHO。已有账号需要提升时显式
 追加 `--promote-existing`；不要把管理员密码放进脚本、截图或报告。
 
-## 先启动 PunditRAG（正式知识检索必需）
+## 内置 PunditRAG（正式知识检索必需）
 
-PunditRAG 是独立私有仓库，不以源代码、镜像或索引数据的形式复制进 ECHO 仓库。每位需要运行
-正式检索链路的成员必须同时拥有 `Pitkil/PunditRAG` 的访问权限，并把两个仓库克隆在非桌面的
-工作目录中，例如 `D:\\workspaces\\PunditRAG` 与 `D:\\workspaces\\echo-adaptive-skill-training`。
+PunditRAG 源码位于 `services/punditrag/`，根 `docker-compose.yml` 同时管理其导入 API、查询 API、
+MongoDB、Milvus、Etcd 和 MinIO。队员不需要第二个仓库或第二份环境文件。默认 CPU；只有验证过
+Docker NVIDIA 支持的电脑才叠加 `docker-compose.gpu.yml`。
 
-首次准备 PunditRAG 时，先运行 `Copy-Item .env.docker.example .env.docker`，再按其仓库 README
-填写模型配置，并替换 MongoDB 和 MinIO 的示例密码；没有 CUDA 时按 PunditRAG README 切换 CPU 运行参数。
-不得把该文件、模型缓存、Mongo/Milvus/MinIO 数据或材料索引提交到 Git。
-然后从 ECHO 仓库执行：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\start_punditrag.ps1 `
-  -PunditRAGRoot D:\workspaces\PunditRAG -Build
-```
-
-脚本只启动 PunditRAG 自己的 Compose 项目，并等待 `8000/health` 与 `8001/health` 同时返回
-`status: ok`；不会删除 Docker volume 或导入任何知识库数据。后续日常启动可省略 `-Build`。如果成员已设置
-环境变量 `PUNDITRAG_ROOT`，则可省略 `-PunditRAGRoot`。
-
-首次初始化后，不要随意改动 PunditRAG 的 MongoDB/MinIO 凭据；它们必须与已持久化的 Docker
-volume 一致。日常启动脚本默认使用 `--no-recreate`，避免本机环境变量改动意外重建已有引擎；确需
-更新 PunditRAG 镜像或源码时才使用 `-Build`，并先按 PunditRAG 自身的迁移说明备份数据。
-
-ECHO Docker 容器通过 `host.docker.internal:8000/8001` 访问本机 PunditRAG；因此先确认 PunditRAG
-健康，再启动 ECHO。Linux 环境需要将这两个地址改为宿主机可达地址或使用明确的 Compose 网络。
+模型、缓存、Mongo/Milvus/MinIO 数据和材料索引使用命名 volume，不进入 Git。首次初始化后不得
+随意修改 `PUNDITRAG_MONGO_PASSWORD` 和 `PUNDITRAG_MINIO_PASSWORD`，否则现有 volume 会鉴权失败。
+ECHO 容器通过 `http://punditrag:8000/8001` 访问双 API，不经过宿主机回环地址。
 
 ## Docker 启动
 
@@ -97,8 +80,13 @@ docker compose ps
 docker compose exec echo-api python /workspace/scripts/bootstrap_admin.py --username admin
 ```
 
-容器通过 `host.docker.internal:8000/8001` 访问前一步已启动的宿主机 PunditRAG。Linux Engine 若不自动解析该
-名称，应配置明确的 host-gateway 并记录修改。基础 Compose 使用命名 volume；本机联调 SimpleMem：
+根 Compose 已包含 PunditRAG 与全部依赖，并使用命名 volume。NVIDIA 启动命令：
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d
+```
+
+本机联调 SimpleMem：
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.simplemem-dev.yml up --build -d
@@ -122,6 +110,13 @@ Mock 结果不能作为诊断或比赛评测。真实检测先拉取并校验 Gi
 5. 以讲师/管理员身份通过 ECHO 内容导入入口上传，禁止直接写业务数据库。
 6. 保存 ECHO `knowledge_base_id` 及 PunditRAG `kb_id/document_id/task_id`，轮询至终态。
 7. 只有外部完成且 ECHO 同步为 `indexed` 才算成功；`pending/processing` 均不算。
+
+推荐的可重复导入和验证命令：
+
+```powershell
+docker compose exec echo-api python /workspace/scripts/import_official_materials.py --apply --username admin
+docker compose exec echo-api python /workspace/scripts/verify_official_retrieval.py --query-base-url http://punditrag:8001
+```
 
 ## 健康检查
 

@@ -203,153 +203,99 @@ README 只描述代码已经提供的能力，不把样例数据或适配器写�
 ### 环境要求
 
 - Git
-- Python 3.11、3.12 或 3.13
-- Docker Desktop 与 Docker Compose v2，完整部署时需要
-- 完整 RAG 需要同时拥有私有 `Pitkil/PunditRAG` 仓库权限
-- 建议 16 GB 内存、25 GB 可用磁盘空间
+- Docker Desktop 与 Docker Compose v2
+- 建议 16 GB 内存、30 GB 可用磁盘空间
+- 一个可用的 OpenAI-compatible 模型接口
 
-> 每位成员电脑上的 `127.0.0.1` 都只指向自己的电脑。克隆 ECHO 不会自动得到负责人电脑里的
-> PunditRAG 服务、模型缓存和知识库索引。第一次部署请按
-> [Windows / macOS 团队本地部署指南](docs/team-setup-windows-macos.md) 完成权限、模型和正式材料配置。
+PunditRAG 源码已放在 `services/punditrag/`，无需克隆第二个仓库。模型缓存、MongoDB、Milvus、
+MinIO、业务数据库和上传文件使用 Docker volume，不进入 Git；因此首次启动后仍要在本机导入正式材料。
 
-### Windows 本地开发
+### Windows Docker
 
 ```powershell
 git clone https://github.com/Pitkil/echo-adaptive-skill-training.git
 cd echo-adaptive-skill-training
-powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
+Copy-Item .env.example .env
 ```
 
-在自动生成的 `.env` 中配置模型接口；至少填写：
+先在 Docker Desktop 中把磁盘映像位置设置到 `D:\DockerDesktopData`，再编辑 `.env`。至少替换：
 
 ```dotenv
 OPENAI_API_KEY=your-key
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=your-model
+PUNDITRAG_LLM_MODEL=your-model
+JWT_SECRET_KEY=独立随机值
+SECRET_KEY=另一个独立随机值
+SIMPLEMEM_API_KEY=第三个独立随机值
+PUNDITRAG_MONGO_PASSWORD=MongoDB独立强密码
+PUNDITRAG_MINIO_PASSWORD=MinIO独立强密码
 ```
 
-启动主系统：
+默认是 Windows/macOS 都能运行的 CPU 模式：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
-```
-
-访问 `http://127.0.0.1:8010`。公开注册账号始终是学习者；首次部署使用脚本创建管理员：
-
-```powershell
-.\.venv\Scripts\python.exe scripts\bootstrap_admin.py --username admin
-```
-
-### Windows Docker
-
-正式 RAG 需要先在独立的 PunditRAG 仓库启动导入与查询服务；团队成员需同时拥有该私有仓库权限。
-以下步骤足以从零启动两套服务，建议将两个仓库放在 `D:\\workspaces` 等非桌面目录：
-
-```powershell
-# 1. 在有 PunditRAG 权限的前提下获取引擎本体
-Set-Location D:\workspaces
-git clone https://github.com/Pitkil/PunditRAG.git
-Copy-Item .\PunditRAG\.env.docker.example .\PunditRAG\.env.docker
-
-# 2. 编辑 .\PunditRAG\.env.docker：至少替换模型 API Key、
-#    MONGO_ROOT_PASSWORD 和 MINIO_ROOT_PASSWORD；首次启动保持两类凭据一致。
-#    没有 NVIDIA CUDA 时，将 BGE_DEVICE / BGE_RERANKER_DEVICE 改为 cpu，
-#    将 BGE_FP16 / BGE_RERANKER_FP16 改为 0，并删除 PunditRAG
-#    docker-compose.yml 中 app 服务的 `gpus: all`。只改 .env 仍会启动失败。
-
-# 3. 从 ECHO 仓库启动并等待两个 RAG 健康检查
-Set-Location D:\workspaces\echo-adaptive-skill-training
-powershell -ExecutionPolicy Bypass -File scripts\start_punditrag.ps1 `
-  -PunditRAGRoot D:\workspaces\PunditRAG -Build
-```
-
-脚本会等待 `8000/health` 和 `8001/health` 同时通过；完整的双仓库配置、团队权限和故障排查见
-[部署运行手册](docs/deployment/runbook.md)。随后按下方命令配置并启动 ECHO。`.env.docker`、数据库、
-模型缓存和知识库索引均为本机运行数据，禁止提交。
-
-```powershell
-Copy-Item .env.example .env
-# 填写模型配置，并为 SIMPLEMEM_API_KEY 设置至少 32 字节的随机密钥
-# ASR 默认使用 CPU int8 的 faster-whisper tiny；首次转写会下载模型到 Docker 卷
+docker compose config
 docker compose up --build -d
+docker compose ps
+```
+
+两个 RAG 健康检查和 ECHO 健康检查通过后，创建管理员：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/health
+Invoke-RestMethod http://127.0.0.1:8001/health
+Invoke-RestMethod http://127.0.0.1:8010/health
 docker compose exec echo-api python /workspace/scripts/bootstrap_admin.py --username admin
 ```
 
-基础 Compose 不向宿主机公开 SimpleMem 的 `8020`，ECHO 通过容器内部网络访问它。代码、Dockerfile 或依赖变更后使用以下命令重建本地环境：
+有 NVIDIA 且 `docker run --rm --gpus all ... nvidia-smi` 能通过时，才启用 GPU 覆盖：
 
 ```powershell
-docker compose down
-docker compose build --no-cache
-docker compose up -d
-docker compose ps
-Invoke-WebRequest http://127.0.0.1:8010/health
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d
 ```
-
-Docker Desktop 的 WSL 数据根目录应保持在专用磁盘（当前维护记录为 `D:\DockerDesktopData`），不要执行
-“Reset to factory defaults”；重装或升级时同时指定 `--installation-dir` 和 `--wsl-default-data-root`。
 
 ### macOS Docker
 
-macOS 不能使用 PunditRAG 默认的 CUDA 配置。Apple Silicon 与 Intel Mac 都必须使用 CPU 模式。
+Apple Silicon 与 Intel Mac 均使用根 Compose 的默认 CPU 模式，不需要修改 YAML：
 
 ```bash
-mkdir -p ~/workspaces
-cd ~/workspaces
-git clone https://github.com/Pitkil/PunditRAG.git
 git clone https://github.com/Pitkil/echo-adaptive-skill-training.git
-
-cd ~/workspaces/PunditRAG
-cp .env.docker.example .env.docker
-```
-
-在 `PunditRAG/.env.docker` 中填写模型 API、模型名、MongoDB 与 MinIO 密码，并设置：
-
-```dotenv
-BGE_DEVICE=cpu
-BGE_FP16=0
-BGE_RERANKER_DEVICE=cpu
-BGE_RERANKER_FP16=0
-```
-
-随后删除 `PunditRAG/docker-compose.yml` 中 `app` 服务的 `gpus: all`；NVIDIA 的两个环境变量也可删除。
-先检查配置，再启动 PunditRAG：
-
-```bash
-docker compose --env-file .env.docker config >/dev/null
-docker compose --env-file .env.docker up -d --build
-curl -fsS http://127.0.0.1:8000/health
-curl -fsS http://127.0.0.1:8001/health
-```
-
-两个接口均返回 `status: ok` 后配置 ECHO：
-
-```bash
-cd ~/workspaces/echo-adaptive-skill-training
+cd echo-adaptive-skill-training
 cp .env.example .env
 ```
 
-在 `.env` 中填写 `OPENAI_*`，并为 `JWT_SECRET_KEY`、`SECRET_KEY`、`SIMPLEMEM_API_KEY`
-设置三个不同的高强度随机值。Docker Desktop for Mac 支持 `host.docker.internal`，因此 PunditRAG
-Docker 地址保持模板默认值即可。最后执行：
+按 Windows 同一字段填写 `.env`；可用 `openssl rand -base64 48` 分别生成随机值。然后执行：
 
 ```bash
 docker compose up --build -d
-docker compose exec echo-api python /workspace/scripts/bootstrap_admin.py --username admin
+curl -fsS http://127.0.0.1:8000/health
+curl -fsS http://127.0.0.1:8001/health
 curl -fsS http://127.0.0.1:8010/health
+docker compose exec echo-api python /workspace/scripts/bootstrap_admin.py --username admin
 ```
 
-访问 <http://127.0.0.1:8010>。首次真实查询会下载并加载 BGE Reranker；下载期间不要并发发起多个查询，
-也不要反复重启容器。代码克隆完成不代表已有正式知识库，每位成员仍需在本机重新导入材料并等待
-状态变为 `indexed`。完整命令和验收清单见
-[团队本地部署指南](docs/team-setup-windows-macos.md#五导入正式课程材料)。
+首次导入/查询会下载 BGE-M3 与 Reranker，CPU 加载可能较慢。下载期间不要并发查询或反复重启。
+
+### 首次导入正式材料
+
+源码内置不等于索引已存在。管理员创建完成后，每台新电脑执行一次：
+
+```powershell
+docker compose exec echo-api python /workspace/scripts/import_official_materials.py --apply --username admin
+docker compose exec echo-api python /workspace/scripts/verify_official_retrieval.py --query-base-url http://punditrag:8001
+```
+
+只有导入任务到达 `indexed` 且固定检索验证通过，才能把该环境用于正式演示。完整的 Windows/macOS
+逐步说明、首次模型下载和故障排查见 [团队本地部署指南](docs/team-setup-windows-macos.md)。
 
 ## 部署与服务
 
 | 服务 | 默认地址 | 仓库关系 | 作用 |
 | --- | --- | --- | --- |
 | ECHO API 与 Web | `http://127.0.0.1:8010` | 本仓库 | 认证、会话、Quiz、MIRT、资源、管理端与前端 |
-| PunditRAG Import | `http://127.0.0.1:8000` | 外部服务 | 材料导入、切片和索引任务 |
-| PunditRAG Query | `http://127.0.0.1:8001` | 外部服务 | 多路召回、重排、证据与引用 |
+| PunditRAG Import | `http://127.0.0.1:8000` | 本仓库内置服务 | 材料导入、切片和索引任务 |
+| PunditRAG Query | `http://127.0.0.1:8001` | 本仓库内置服务 | 多路召回、RRF、重排、证据与引用 |
 | SimpleMem | `http://127.0.0.1:8020` | 本仓库独立服务 | 跨会话语义记忆与变更审计 |
 | Micro Detector | `http://127.0.0.1:8030` | Mock 与真实服务均在本仓库 | 授权语音的停顿、犹豫和自我修正信号 |
 | ASR | `http://127.0.0.1:8040` | 本仓库独立服务 | faster-whisper tiny 语音转文字；权重缓存于 `asr-model-cache` Docker volume |
@@ -400,6 +346,7 @@ apps/api/                     FastAPI 主系统、业务模型与 Web 前端
   MIRT/                       U/A/R 能力估计、学情分析与记忆协调
   Quiz/                       选题、判分、阶段流程与题库导入
   integrations/               PunditRAG、SimpleMem、微表征适配器
+services/punditrag/           内置多路召回、RRF、重排与可追溯引用服务
 services/simplemem/           可独立运行的长期记忆服务
 services/asr/                 faster-whisper tiny 语音转写服务
 services/micro_detector/      接口联调用 Mock 服务

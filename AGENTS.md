@@ -201,8 +201,9 @@ Copy-Item .env.example .env
 docker compose up --build
 ```
 
-Docker 中 ECHO 通过内部容器网络访问 SimpleMem；基础配置不向宿主机发布 `8020`。
-PunditRAG 与真实微表征服务仍通过配置的外部地址接入。
+Docker 中 ECHO 通过内部容器网络访问内置 PunditRAG 与 SimpleMem；基础配置不向宿主机发布
+SimpleMem 的 `8020`。真实微表征服务仍通过配置的外部地址接入。PunditRAG 默认 CPU，只有
+验证过 Docker NVIDIA 支持的电脑才叠加 `docker-compose.gpu.yml`。
 
 ## 七、编码规范
 
@@ -335,7 +336,7 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8010/api/health -TimeoutSec 
 | --- | --- | --- |
 | `docker ps` 报 pipe 找不到、daemon 未运行 | Docker 引擎未启动 | `ensure_docker.ps1 -Force`；仍失败则 `wsl --shutdown` 后重启 Docker Desktop |
 | `wsl -l -v` 中 docker-desktop 为 Stopped | WSL VM 未启动 | 启动 Docker Desktop 并等待，必要时 `wsl --shutdown` 后再启动 |
-| 8000/8001/8030/8010 端口不通 | 外部服务或容器未起 | 先确认第 2 节通过，再 `docker compose up -d` 并复查 `/health` |
+| 8000/8001/8030/8010 端口不通 | 内置服务、外部微表征或容器未起 | 先确认第 2 节通过，再 `docker compose up -d` 并复查 `/health` |
 | 直连 `127.0.0.1:8020` 失败 | 正常现象 | SimpleMem 默认不发布到宿主机，只在容器内部网络可达；以 ECHO `/health` 中 simplemem 状态为准 |
 
 ### 4. 恢复判定与红线
