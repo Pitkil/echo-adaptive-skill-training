@@ -34,6 +34,7 @@
         pendingOralJobId: null,
         pendingOralAttemptId: null,
         lastVideoProgressSave: 0,
+        lastVideoProgressSnapshot: "",
         isSending: false,
         isGeneratingResources: false,
         resourceLoadRequestId: 0,
@@ -388,8 +389,12 @@
             const response = await api(`/v1/catalog/modules/${state.moduleId}/knowledge-points`);
             const items = await response.json();
             select.innerHTML = items.length
-                ? items.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")
+                ? items.map((item) => `<option value="${item.id}">${escapeHtml(item.code)} · ${escapeHtml(item.name)}</option>`).join("")
                 : '<option value="">本模块暂无知识点</option>';
+            if (state.activeVideoKnowledgePointId
+                && items.some((item) => Number(item.id) === state.activeVideoKnowledgePointId)) {
+                select.value = String(state.activeVideoKnowledgePointId);
+            }
             select.disabled = !items.length;
         } catch (error) {
             select.innerHTML = '<option value="">知识点加载失败</option>';
@@ -461,6 +466,13 @@
         player.src = video.stream_url;
         state.activeVideoId = video.id;
         state.activeVideoKnowledgePointId = Number(video.knowledge_point_id) || null;
+        const knowledgeSelect = $("#video-knowledge-point");
+        if (state.activeVideoKnowledgePointId
+            && Array.from(knowledgeSelect.options).some(
+                (option) => Number(option.value) === state.activeVideoKnowledgePointId
+            )) {
+            knowledgeSelect.value = String(state.activeVideoKnowledgePointId);
+        }
         state.activeVideoProgress = video.progress;
         state.videoCheckpoints = new Set();
         state.activeCheckpoints = [];
@@ -469,6 +481,7 @@
         state.isLoadingVideoCheckpoints = true;
         state.activeCheckpoint = null;
         state.lastVideoProgressSave = 0;
+        state.lastVideoProgressSnapshot = "";
         $("#video-controls").classList.remove("hidden");
         $("#video-lesson-title").textContent = video.title;
         $("#video-progress-label").textContent = "读取视频信息";
@@ -545,16 +558,28 @@
         const player = $("#course-video-player");
         if (!state.activeVideoId || !Number.isFinite(player.duration) || !player.duration) return;
         const now = Date.now();
-        if (!force && now - state.lastVideoProgressSave < 5000) return;
+        // Resume updates should not compete with media range requests. Fifteen
+        // seconds still preserves useful progress while reducing I/O pressure.
+        if (!force && now - state.lastVideoProgressSave < 15000) return;
+        const currentTime = Math.round(player.currentTime * 10) / 10;
+        const duration = Math.round(player.duration * 10) / 10;
+        const completed = player.ended;
+        const snapshot = `${currentTime}|${duration}|${completed}`;
+        if (snapshot === state.lastVideoProgressSnapshot) return;
         state.lastVideoProgressSave = now;
+        state.lastVideoProgressSnapshot = snapshot;
         api(`/v1/videos/${state.activeVideoId}/progress`, {
             method: "PUT",
             body: JSON.stringify({
-                current_time: Math.round(player.currentTime * 10) / 10,
-                duration: Math.round(player.duration * 10) / 10,
-                completed: player.ended,
+                current_time: currentTime,
+                duration,
+                completed,
             }),
-        }).catch(() => undefined);
+        }).catch(() => {
+            if (state.lastVideoProgressSnapshot === snapshot) {
+                state.lastVideoProgressSnapshot = "";
+            }
+        });
     }
 
     function updateVideoProgressLabel() {
@@ -668,6 +693,7 @@
         state.activeCheckpoint = checkpoint;
         const panel = $("#video-checkpoint");
         panel.classList.remove("hidden");
+        $("#video-progress-label").textContent = "已暂停，等待口述练习";
         if (checkpoint) {
             $("#video-checkpoint-title").textContent = "完成这道口述练习";
             $("#video-checkpoint-prompt").textContent = checkpoint.question;
@@ -2014,13 +2040,13 @@
         if (tabName === "materials") loadKnowledgeDocuments();
         if (tabName === "quizzes") loadQuizKnowledgePoints();
         if (tabName === "videos") {
-            loadVideoKnowledgePoints();
+            loadAdminVideoKnowledgePoints();
             loadAdminVideos();
         }
         iconRefresh();
     }
 
-    async function loadVideoKnowledgePoints() {
+    async function loadAdminVideoKnowledgePoints() {
         const module = moduleFromSelect("#video-module-select");
         const select = $("#video-knowledge-point-select");
         if (!module || !select) return;
@@ -2415,6 +2441,12 @@
         $("#course-video-player").addEventListener("loadedmetadata", restoreVideoProgress);
         $("#course-video-player").addEventListener("loadeddata", () => setVideoLoadingState("ready"));
         $("#course-video-player").addEventListener("canplay", () => setVideoLoadingState("ready"));
+        $("#course-video-player").addEventListener("waiting", () => {
+            $("#video-progress-label").textContent = "正在缓冲…";
+        });
+        $("#course-video-player").addEventListener("stalled", () => {
+            $("#video-progress-label").textContent = "网络较慢，正在继续加载…";
+        });
         $("#course-video-player").addEventListener("error", () => {
             setVideoLoadingState("error", "视频文件读取失败，请稍后重试。");
         });
@@ -2429,6 +2461,7 @@
         });
         $("#course-video-player").addEventListener("play", () => {
             if (!state.activeCheckpoint?.id) $("#video-checkpoint").classList.add("hidden");
+            updateVideoProgressLabel();
             syncVideoControls();
             revealVideoControls();
         });
@@ -2521,7 +2554,7 @@
             $("#generate-checkpoints").disabled = true;
             $("#freeze-checkpoints").disabled = true;
             $("#admin-checkpoint-list").innerHTML = "";
-            loadVideoKnowledgePoints();
+            loadAdminVideoKnowledgePoints();
             loadAdminVideos();
         });
         $("#upload-videos").addEventListener("click", uploadVideos);

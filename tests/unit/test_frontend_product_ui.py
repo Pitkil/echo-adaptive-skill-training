@@ -288,6 +288,30 @@ def test_video_learning_has_an_in_page_echo_companion() -> None:
     assert '.video-echo-float.is-dragging' in STYLES
 
 
+def test_learner_and_admin_video_knowledge_points_have_separate_loaders() -> None:
+    assert SCRIPT.count("async function loadVideoKnowledgePoints()") == 1
+    assert SCRIPT.count("async function loadAdminVideoKnowledgePoints()") == 1
+    learner_loader = SCRIPT.split("async function loadVideoKnowledgePoints()", 1)[1].split(
+        "function releaseVideoObjectUrl", 1
+    )[0]
+    admin_loader = SCRIPT.split("async function loadAdminVideoKnowledgePoints()", 1)[1].split(
+        "async function loadAdminVideos", 1
+    )[0]
+    assert '$("#video-knowledge-point")' in learner_loader
+    assert '$("#video-knowledge-point-select")' in admin_loader
+    assert 'if (viewName === "video") loadVideoKnowledgePoints();' in SCRIPT
+    assert "loadAdminVideoKnowledgePoints();" in SCRIPT
+
+
+def test_video_player_uses_lightweight_preload_and_throttled_progress() -> None:
+    assert 'id="course-video-player" preload="metadata" playsinline' in INDEX
+    assert "now - state.lastVideoProgressSave < 15000" in SCRIPT
+    assert 'lastVideoProgressSnapshot: ""' in SCRIPT
+    assert 'addEventListener("waiting"' in SCRIPT
+    assert 'addEventListener("stalled"' in SCRIPT
+    assert 'textContent = "已暂停，等待口述练习"' in SCRIPT
+
+
 def test_video_oral_flow_has_compact_visible_progress_and_toast() -> None:
     assert '$("#video-checkpoint").classList.add("hidden");' in SCRIPT
     assert 'requestAnimationFrame(() => {' in SCRIPT
@@ -326,7 +350,7 @@ def test_video_checkpoint_advances_and_closes_after_audio_submission() -> None:
 
 
 def test_video_uses_zoom_safe_synchronized_controls() -> None:
-    assert '<video id="course-video-player" preload="auto"' in INDEX
+    assert '<video id="course-video-player" preload="metadata" playsinline' in INDEX
     assert 'id="video-seek" type="range"' in INDEX
     assert "function syncVideoControls()" in SCRIPT
     assert "function seekCourseVideo(event)" in SCRIPT

@@ -4095,10 +4095,19 @@ def _course_video_payload(
 
 def _range_video_response(path: Path, media_type: str, request: Request):
     file_size = path.stat().st_size
+    common_headers = {
+        "Accept-Ranges": "bytes",
+        # Stream URLs are user-specific and short-lived. Browser-private cache
+        # avoids downloading the same ranges again without exposing media to a
+        # shared proxy.
+        "Cache-Control": "private, max-age=3600",
+        "Content-Disposition": f'inline; filename="{path.name}"',
+        "X-Content-Type-Options": "nosniff",
+    }
     range_header = (request.headers.get("range") or "").strip()
     match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header)
     if not match:
-        return FileResponse(path, media_type=media_type)
+        return FileResponse(path, media_type=media_type, headers=common_headers)
 
     start_raw, end_raw = match.groups()
     if not start_raw and end_raw:
@@ -4127,8 +4136,8 @@ def _range_video_response(path: Path, media_type: str, request: Request):
         status_code=206,
         media_type=media_type,
         headers={
+            **common_headers,
             "Content-Range": f"bytes {start}-{end}/{file_size}",
-            "Accept-Ranges": "bytes",
             "Content-Length": str(end - start + 1),
         },
     )
