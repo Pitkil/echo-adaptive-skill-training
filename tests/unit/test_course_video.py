@@ -135,4 +135,7 @@ def test_video_stream_supports_range_requests(monkeypatch, tmp_path) -> None:
     assert ranged.status_code == 206
     assert ranged.content == b"2345"
     assert ranged.headers["content-range"] == "bytes 2-5/10"
+    assert ranged.headers["accept-ranges"] == "bytes"
+    assert ranged.headers["cache-control"] == "private, max-age=3600"
+    assert ranged.headers["content-disposition"].startswith("inline;")
     app.dependency_overrides.clear()
