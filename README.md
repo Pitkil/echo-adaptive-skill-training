@@ -1,10 +1,14 @@
 <div align="center">
 
+<a href="README_EN.md">English README</a> · <a href="LICENSE">MIT License</a>
+
 <img src="docs/assets/readme/echo-hero.png" alt="ECHO 以对话串联学习证据、知识检索、内容校验与下一步决策" width="100%">
 
 # ECHO Adaptive Skill Training
 
 **以对话为入口，把真实作答、官方证据、能力变化与下一步训练组织成一条可追溯的学习路径。**
+
+开源仓库：<https://github.com/Pitkil/echo-adaptive-skill-training>
 
 [![CI](https://github.com/Pitkil/echo-adaptive-skill-training/actions/workflows/ci.yml/badge.svg)](https://github.com/Pitkil/echo-adaptive-skill-training/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.11--3.13-1d3246?logo=python&logoColor=white)
@@ -14,6 +18,8 @@
 [产品全景](#产品全景) · [学习闭环](#学习闭环) · [语音链路](#语音链路) · [快速开始](#快速开始) · [Windows](#windows-docker) · [macOS](#macos-docker) · [开发文档](#开发文档)
 
 </div>
+
+> ECHO 当前以 Microsoft Semantic Kernel 企业级智能体开发为示范课程，同时保留了多项目、多模块和多角色的数据模型。课程材料、题库和运行数据与源码分离，便于替换为你自己的培训领域。
 
 ## 产品全景
 
@@ -28,6 +34,15 @@ ECHO 是面向企业技能培训的多智能体学习系统。学习者始终只
 | M3 · 流程、部署与质量评测 | Process Framework、部署、安全、可观测、评测 | 可部署、可诊断、可验证的智能体应用 |
 
 > 仓库的数据模型支持多个培训项目，但当前只有这一门课程具备正式目录。界面中的其他课程方向是扩展示例，不会产生虚假课时或进度。
+
+### 为什么值得开源
+
+- **以学习证据为中心**：把提问、作答、视频口述、服务端判分和能力变化串成可复盘记录，而不是只展示一个聊天窗口。
+- **检索与生成分层**：PunditRAG 负责多路召回、RRF、重排和引用；ECHO 负责把证据转成当前学习动作，知识库可以独立更新。
+- **能力与行为信号分开**：可评分答案才更新 U/A/R；ASR、停顿和犹豫等信号只调整诊断置信度与辅导方式。
+- **后台协作可审计**：四个后台 Agent 的输入、输出、失败原因和下一步决定都可在 Demo Trace 中查看，学习者仍只面对 ECHO。
+- **失败关闭而不是伪成功**：检索、记忆、转写或模型不可用时明确返回降级原因，不写入虚假的引用、分数或能力变化。
+- **一仓部署**：PunditRAG、SimpleMem、ASR 和业务 API 都在本仓库的 Docker 编排中，Windows 与 macOS 使用同一套 CPU 启动方式。
 
 ### 设计原则
 
@@ -64,6 +79,8 @@ flowchart LR
     class D decision;
 ```
 
+图中的关键边界：生成内容必须经过内容检查；检查不通过只允许局部重做；没有官方证据时资源保持草稿状态。
+
 四个后台 Agent 分别保存输入、结果、失败原因和最终决定。PunditRAG 是知识检索与证据服务，不是第五个课程专家 Agent；SimpleMem 只保存跨会话语义记忆，不替代业务数据库。
 
 ## 核心能力
@@ -96,6 +113,8 @@ flowchart LR
 </p>
 
 <p align="center"><sub>导学工作台把自由对话与服务端安排的测评阶段放在同一入口；外部服务状态在顶部显式呈现。</sub></p>
+
+> 流程图使用 Mermaid 编写，GitHub 会直接渲染；如果你的 Markdown 阅读器不支持 Mermaid，仍可按同一顺序阅读下面的“用户路径”和“部署与服务”表。
 
 ## 用户路径
 
@@ -186,7 +205,7 @@ AI 不可用或返回无效结构时失败关闭，不写入作答或 MIRT。
 
 ## 实现边界
 
-README 只描述代码已经提供的能力，不把样例数据或适配器写成正式比赛结果。
+README 只描述代码已经提供的能力，不把样例数据或适配器写成正式比赛结果。正式比赛评测副本不随开源仓库发布；请使用自己的授权材料和测试数据复现流程。
 
 | 范围 | 当前仓库状态 | 正式演示前仍需完成 |
 | --- | --- | --- |
@@ -196,7 +215,7 @@ README 只描述代码已经提供的能力，不把样例数据或适配器写�
 | 个性化资源 | 规划、生成、校验、依据不足降级和持久化入口已实现 | 用正式证据运行三类资源并保存检查与重做记录 |
 | 微表征 | Mock 联调服务与真实 WavLM 推理服务均有独立实现 | 使用授权标注音频完成正式准确率、召回率与 F1 评测 |
 | 语音转写与口述评分 | 内置 faster-whisper tiny；视频检查点支持转写确认、AI 语义评分、服务端计分、幂等作答与 MIRT 更新 | 用授权语音核对中文专有名词转写质量并完成演示走查 |
-| 竞赛评测 | 50 组冻结案例、真实环境运行、双人独立复核与正式计分均已完成；运行数据按规定保存在 Git 外 | 最终提交使用冻结的 `real-model-full-20260831-01-reviewed` 交付副本，不覆盖原始运行 |
+| 竞赛评测 | 仓库包含运行器、计分器、复核导入器和结构规范 | 使用你自己的冻结案例与授权材料运行；不要把比赛交付数据当作通用基准 |
 
 ## 快速开始
 
@@ -302,6 +321,18 @@ docker compose exec echo-api python /workspace/scripts/verify_official_retrieval
 
 外部依赖不可用时，`GET /health` 与前端状态栏会报告具体降级项；业务数据库中的会话、答题和能力记录仍可使用。进入管理端“决策演示”可以查看当前会话的 Agent 输入、输出、证据、校验明细和重做记录。完整生产配置、比赛覆盖、模型校验和导出流程见 [部署与安全说明](docs/deployment-and-security.md)。
 
+### 常用 API
+
+| 请求 | 用途 |
+| --- | --- |
+| `GET /health` 或 `GET /api/health` | 查看 ECHO、RAG、SimpleMem、微表征、ASR 和数据库状态 |
+| `POST /auth/register`、`POST /auth/login` | 创建学习者账号或登录 |
+| `GET /v1/catalog/programs` | 读取培训项目与模块 |
+| `POST /chat` | 进入 ECHO 对话入口 |
+| `GET /v1/resources?module_id=<id>` | 查看当前模块的个性化资源 |
+
+完整请求模型和权限约束以 [跨服务接口契约](docs/service-contracts.md) 与 FastAPI OpenAPI 页面为准。
+
 ASR 容器的 `/health` 只检查服务进程，不会主动下载模型；模型在首次调用 `/v1/asr/transcribe` 时懒加载。
 如果首次转写返回 503，先查看 `docker compose logs asr`，确认容器可以访问模型仓库；重启容器不会丢失
 已下载权重，删除 `asr-model-cache` 卷则会触发重新下载。
@@ -326,6 +357,8 @@ ASR 容器的 `/health` 只检查服务进程，不会主动下载模型；模�
 - 业务数据、上传材料、视频、音频、SQLite 数据库、密钥和评测运行输出不进入 Git。
 - SimpleMem 查询包含组织与用户作用域，身份切换和退出登录会清理无权限页面状态。
 - Mock 微表征服务只用于接口联调，不能用于宣称真实检测准确率。
+
+开源部署前请自行更换所有密钥和数据库密码，并确认视频、音频、学习记录和知识库材料拥有合法授权。仓库中的 `.env.example` 只包含占位符；不要提交 `.env`、数据库、上传文件、模型权重或真实个人信息。
 
 ## 质量门禁
 
@@ -369,7 +402,7 @@ tests/                        单元测试与跨服务契约测试
 
 ## 许可证
 
-本仓库当前按私有竞赛项目管理，根目录尚未声明统一的开源许可证，请勿据此推定代码可自由复制或再分发。微表征模型相关第三方许可单独记录在 [`models/micro_detector/LICENSE-WAVLM.txt`](models/micro_detector/LICENSE-WAVLM.txt)。
+本项目采用 [MIT License](LICENSE)。MIT 许可适用于本仓库自有代码与文档；第三方依赖、模型权重、Microsoft 内容和用户上传材料仍受各自许可证、服务条款和授权范围约束。微表征模型相关第三方许可单独记录在 [`models/micro_detector/LICENSE-WAVLM.txt`](models/micro_detector/LICENSE-WAVLM.txt)。
 
 ---
 
