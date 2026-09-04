@@ -47,6 +47,18 @@
     const $$ = (selector) => Array.from(document.querySelectorAll(selector));
     const VIDEO_CHECKPOINT_TOLERANCE_SECONDS = 0.75;
 
+    function createRequestId() {
+        if (window.crypto?.randomUUID) {
+            return window.crypto.randomUUID().replaceAll("-", "");
+        }
+        if (window.crypto?.getRandomValues) {
+            const bytes = new Uint8Array(16);
+            window.crypto.getRandomValues(bytes);
+            return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+        }
+        return `${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
+    }
+
     function iconRefresh() {
         if (window.lucide) window.lucide.createIcons();
     }
@@ -167,18 +179,24 @@
 
     async function enterApp() {
         resetPrivilegedViews();
-        showView("courses");
         $("#auth-screen").classList.add("hidden");
         $("#app-shell").classList.remove("hidden");
         $("#user-name").textContent = state.username || `学习者 ${state.userId}`;
         $("#user-role").textContent = roleLabel(state.role);
+        $$(".learner-only").forEach((node) => {
+            node.classList.toggle("hidden", state.role !== "learner");
+        });
         $$(".manager-only").forEach((node) => {
             node.classList.toggle("hidden", !["mentor", "system_admin"].includes(state.role));
+        });
+        $$(".mentor-only").forEach((node) => {
+            node.classList.toggle("hidden", state.role !== "mentor");
         });
         $$(".system-admin-only").forEach((node) => {
             node.classList.toggle("hidden", state.role !== "system_admin");
         });
         await loadCatalog();
+        showView({mentor: "content", system_admin: "members"}[state.role] || "courses");
         await loadMicroLearners();
         await Promise.all([restoreLatestSession(), checkHealth()]);
         await Promise.all([loadInsight(), loadResources(), loadAssessmentProgress()]);
@@ -999,7 +1017,7 @@
             session_id: state.sessionId,
             program_id: state.program.id,
             module_id: state.moduleId,
-            request_id: crypto.randomUUID().replaceAll("-", ""),
+            request_id: createRequestId(),
             requested_module_id: null,
         };
         try {
@@ -1064,7 +1082,7 @@
             session_id: state.sessionId,
             program_id: state.program.id,
             module_id: state.moduleId,
-            request_id: crypto.randomUUID().replaceAll("-", ""),
+            request_id: createRequestId(),
             requested_module_id: requestedModuleId,
         };
         try {
@@ -1606,7 +1624,7 @@
         try {
             const response = await api("/v1/users/me/data-deletion", {
                 method: "POST",
-                body: JSON.stringify({request_id: crypto.randomUUID().replaceAll("-", ""), confirm: true}),
+                body: JSON.stringify({request_id: createRequestId(), confirm: true}),
             });
             const payload = await response.json();
             const result = payload.result || {};
@@ -1759,8 +1777,7 @@
                         panel.classList.remove("hidden");
                         panel.dataset.audioState = "awaiting_confirmation";
                         state.pendingOralJobId = jobId;
-                        state.pendingOralAttemptId = window.crypto?.randomUUID?.()
-                            || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+                        state.pendingOralAttemptId = createRequestId();
                         $("#oral-confirmed-transcript").value = transcript;
                         $("#oral-transcript-confirmed").checked = false;
                         $("#oral-transcript-confirmation").classList.remove("hidden");

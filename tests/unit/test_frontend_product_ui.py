@@ -28,6 +28,17 @@ def test_demo_uses_product_roles_instead_of_team_ownership() -> None:
         assert role_name in INDEX
 
 
+def test_each_role_gets_a_focused_navigation_and_manager_preview() -> None:
+    assert INDEX.count('class="nav-item learner-only') == 5
+    assert 'class="nav-item manager-only" data-view="courses"' in INDEX
+    assert "学习者视角预览" in INDEX
+    assert 'class="nav-item mentor-only" data-view="content"' in INDEX
+    assert INDEX.count('class="nav-item system-admin-only"') == 2
+    assert '$$(".learner-only")' in SCRIPT
+    assert '$$(".mentor-only")' in SCRIPT
+    assert 'showView({mentor: "content", system_admin: "members"}[state.role] || "courses")' in SCRIPT
+
+
 def test_workspace_has_accessible_and_actionable_start_state() -> None:
     assert 'class="skip-link" href="#main-content"' in INDEX
     assert 'id="main-content"' in INDEX
@@ -100,6 +111,13 @@ def test_chat_submission_exposes_pending_feedback() -> None:
     assert 'aria-busy' in SCRIPT
     assert '.message.pending' in STYLES
     assert 'max-height: 76px; overflow-y: auto; resize: none;' in STYLES
+
+
+def test_request_ids_work_without_browser_random_uuid_support() -> None:
+    assert "function createRequestId()" in SCRIPT
+    assert "window.crypto?.getRandomValues" in SCRIPT
+    assert "request_id: createRequestId()" in SCRIPT
+    assert "request_id: crypto.randomUUID" not in SCRIPT
 
 
 def test_assistant_messages_render_safe_inline_markdown() -> None:
