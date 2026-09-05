@@ -20,6 +20,14 @@ ECHO is an open-source, conversation-first adaptive skill-training platform. Lea
 
 The current demonstration course is **enterprise agent development with Microsoft Semantic Kernel**. The data model supports multiple programs and modules, so course materials can be replaced with your own authorised domain content.
 
+<table align="center"><tr>
+<td align="center"><strong>1</strong><br><sub>conversation entry</sub></td>
+<td align="center"><strong>3</strong><br><sub>learning modules</sub></td>
+<td align="center"><strong>4</strong><br><sub>background agents</sub></td>
+<td align="center"><strong>U / A / R</strong><br><sub>ability model</sub></td>
+<td align="center"><strong>Docker</strong><br><sub>single-repository stack</sub></td>
+</tr></table>
+
 ## Why ECHO is different
 
 - **Evidence-centred learning** — questions, answers, video speech, server-side grading and ability changes form a reviewable learning trail.
@@ -92,7 +100,7 @@ docker compose ps
 
 ### Windows
 
-Use Docker Desktop with the project's fixed storage policy: installation at `D:\Docker\Docker` and WSL data at `D:\DockerDesktopData`. Do not reset Docker Desktop or move the data VHDX. If the daemon is unavailable, run:
+Use Docker Desktop with the project's fixed storage policy: installation at `D:\Docker\Docker` and WSL/disk-image data at `D:\DockerDesktopData`. Do not reset Docker Desktop or move the data VHDX back to C:. If the daemon is unavailable, run:
 
 ```powershell
 Copy-Item .env.example .env
@@ -100,6 +108,20 @@ Copy-Item .env.example .env
 powershell -ExecutionPolicy Bypass -File scripts\ensure_docker.ps1
 docker compose up --build -d
 ```
+
+The base Compose file intentionally does not start the micro-signal container. Enable the integration Mock explicitly when needed:
+
+```powershell
+docker compose --profile micro-mock up --build -d
+```
+
+For formal or production use, start the real WavLM deployment with its licensed local model files:
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.micro-real.yml --profile micro-real up --build -d
+```
+
+Without either profile, a degraded micro-signal status is expected; ECHO, PunditRAG, SimpleMem and ASR can still be healthy.
 
 ### macOS
 
@@ -113,8 +135,9 @@ Install Docker Desktop, clone the repository, copy `.env.example` to `.env`, the
 | PunditRAG import | `8000` | Import authorised documents and create chunks |
 | PunditRAG query | `8001` | Multi-route retrieval and evidence |
 | SimpleMem | internal `8020` | Scoped long-term semantic memory; not published by default |
-| Micro-signal service | `8030` | Hesitation/pause signal adapter; verify whether the deployment is Mock or real |
+| Micro-signal service | `8030` (profile required) | Hesitation/pause signal adapter; verify whether the deployment is Mock or real |
 | ASR | `8040` | faster-whisper transcription, loaded on first use |
+| MinIO API / console | `9100` / `9101` | PunditRAG object storage API and console |
 
 Useful endpoints include `GET /health`, `GET /api/health`, `POST /auth/register`, `POST /auth/login`, `GET /v1/catalog/programs`, `POST /chat` and `GET /v1/resources?module_id=<id>`. The FastAPI OpenAPI page and `docs/service-contracts.md` define the complete contracts.
 

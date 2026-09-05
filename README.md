@@ -15,11 +15,19 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-API-426f62?logo=fastapi&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-ready-466270?logo=docker&logoColor=white)
 
-[产品全景](#产品全景) · [学习闭环](#学习闭环) · [语音链路](#语音链路) · [快速开始](#快速开始) · [Windows](#windows-docker) · [macOS](#macos-docker) · [开发文档](#开发文档)
+<a href="#产品全景">产品全景</a> · <a href="#学习闭环">学习闭环</a> · <a href="#核心能力">核心能力</a> · <a href="#界面预览">界面预览</a> · <a href="#快速开始">快速开始</a> · <a href="#部署与服务">部署与服务</a> · <a href="#开发文档">开发文档</a>
 
 </div>
 
 > ECHO 当前以 Microsoft Semantic Kernel 企业级智能体开发为示范课程，同时保留了多项目、多模块和多角色的数据模型。课程材料、题库和运行数据与源码分离，便于替换为你自己的培训领域。
+
+<table align="center"><tr>
+<td align="center"><strong>1 个</strong><br><sub>对话入口</sub></td>
+<td align="center"><strong>3 个</strong><br><sub>学习模块</sub></td>
+<td align="center"><strong>4 个</strong><br><sub>后台 Agent</sub></td>
+<td align="center"><strong>U / A / R</strong><br><sub>能力画像</sub></td>
+<td align="center"><strong>Docker</strong><br><sub>一仓部署</sub></td>
+</tr></table>
 
 ## 产品全景
 
@@ -243,7 +251,7 @@ cd echo-adaptive-skill-training
 Copy-Item .env.example .env
 ```
 
-先在 Docker Desktop 中把磁盘映像位置设置到 `D:\DockerDesktopData`，再编辑 `.env`。至少替换：
+先在 Docker Desktop 中确认安装目录为 `D:\Docker\Docker`，磁盘映像/WSL 数据根为 `D:\DockerDesktopData`，再编辑 `.env`。不要使用 Reset to factory defaults，也不要把 Docker 虚拟磁盘迁回 C 盘。至少替换：
 
 ```dotenv
 OPENAI_API_KEY=your-key
@@ -273,6 +281,22 @@ Invoke-RestMethod http://127.0.0.1:8001/health
 Invoke-RestMethod http://127.0.0.1:8010/health
 docker compose exec echo-api python /workspace/scripts/bootstrap_admin.py --username admin
 ```
+
+根 Compose 默认不启动微表征容器。只做接口联调时显式启用 Mock：
+
+```powershell
+docker compose --profile micro-mock up --build -d
+Invoke-RestMethod http://127.0.0.1:8030/health
+```
+
+正式演示或真实评测使用本地模型制品和真实覆盖配置：
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.micro-real.yml `
+  --profile micro-real up --build -d
+```
+
+未启用该 profile 时，ECHO 健康状态中微表征显示降级是预期现象，不代表 ECHO、RAG、SimpleMem 或 ASR 未启动。
 
 有 NVIDIA 且 `docker run --rm --gpus all ... nvidia-smi` 能通过时，才启用 GPU 覆盖：
 
@@ -321,9 +345,10 @@ docker compose exec echo-api python /workspace/scripts/verify_official_retrieval
 | ECHO API 与 Web | `http://127.0.0.1:8010` | 本仓库 | 认证、会话、Quiz、MIRT、资源、管理端与前端 |
 | PunditRAG Import | `http://127.0.0.1:8000` | 本仓库内置服务 | 材料导入、切片和索引任务 |
 | PunditRAG Query | `http://127.0.0.1:8001` | 本仓库内置服务 | 多路召回、RRF、重排、证据与引用 |
-| SimpleMem | `http://127.0.0.1:8020` | 本仓库独立服务 | 跨会话语义记忆与变更审计 |
-| Micro Detector | `http://127.0.0.1:8030` | Mock 与真实服务均在本仓库 | 授权语音的停顿、犹豫和自我修正信号 |
+| SimpleMem | 仅容器网络 `http://simplemem:8020` | 本仓库独立服务 | 跨会话语义记忆与变更审计；开发覆盖才绑定宿主机 8020 |
+| Micro Detector | `http://127.0.0.1:8030`（启用 profile 后） | Mock 与真实服务均在本仓库 | 授权语音的停顿、犹豫和自我修正信号 |
 | ASR | `http://127.0.0.1:8040` | 本仓库独立服务 | faster-whisper tiny 语音转文字；权重缓存于 `asr-model-cache` Docker volume |
+| MinIO API / 控制台 | `http://127.0.0.1:9100` / `http://127.0.0.1:9101` | PunditRAG 依赖 | 对象存储 API 与管理控制台 |
 
 外部依赖不可用时，`GET /health` 与前端状态栏会报告具体降级项；业务数据库中的会话、答题和能力记录仍可使用。进入管理端“决策演示”可以查看当前会话的 Agent 输入、输出、证据、校验明细和重做记录。完整生产配置、比赛覆盖、模型校验和导出流程见 [部署与安全说明](docs/deployment-and-security.md)。
 
