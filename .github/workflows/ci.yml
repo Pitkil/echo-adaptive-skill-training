@@ -23,6 +23,7 @@ jobs:
         run: |
           docker compose config --quiet
           docker compose -f docker-compose.yml -f docker-compose.micro-mock.yml --profile micro-mock config --quiet
+          docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.micro-real.yml --profile micro-real config --quiet
       - name: Test
         env:
           DB_TYPE: sqlite

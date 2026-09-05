@@ -5122,6 +5122,7 @@ def generate_resources(
                 )
         db.add(initial_record)
         final_result = initial_result
+        final_item = item
         retry_count = 0
         repair_note = None
         if not initial_result.passed and evidence:
@@ -5135,6 +5136,7 @@ def generate_resources(
             )
             resource.title = repaired["title"]
             resource.content = repaired["content"]
+            final_item = repaired
             final_result = verifier.verify(repaired, plan, evidence)
             retry_count = 1
             db.add(
@@ -5163,6 +5165,7 @@ def generate_resources(
                 )
                 resource.title = repaired["title"]
                 resource.content = repaired["content"]
+                final_item = repaired
                 final_result = verifier.verify(repaired, plan, evidence)
                 retry_count = 2
                 repair_note = "模型定向重生成仍未通过，已执行确定性结构修复。"
@@ -5179,6 +5182,12 @@ def generate_resources(
                         retry_count=retry_count,
                     )
                 )
+        # Persist the same questions that were inspected with the final content.
+        # Assign a new JSON value so SQLAlchemy tracks the replacement.
+        resource.learning_payload = {
+            **resource.learning_payload,
+            "questions": final_item.get("questions") or [],
+        }
         if final_result.passed:
             resource.status = "verified"
         verification_details.append(

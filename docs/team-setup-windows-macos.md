@@ -13,7 +13,7 @@ ECHO 一个仓库、填写一份 `.env`、执行一条 Compose 启动命令。
 ## 一、先理解三件事
 
 - `127.0.0.1` 只代表当前电脑，不会连接负责人电脑。
-- Git 保存源码，不保存 API Key、模型、MongoDB、Milvus、MinIO、上传材料或业务数据库。
+- Git 保存源码；冻结微表征制品使用 Git LFS 单独管理。API Key、数据库和上传材料不进入 Git。
 - `docker compose down` 保留 volume；`docker compose down -v` 会删除数据，不用于日常操作。
 
 建议 8 核 CPU、16 GB 内存、30 GB 可用磁盘和稳定网络。首次会下载 Docker 镜像、BGE-M3、
@@ -73,7 +73,9 @@ PUNDITRAG_MINIO_PASSWORD=随机值5
 
 ```powershell
 $randomBytes = New-Object byte[] 48
-[Security.Cryptography.RandomNumberGenerator]::Fill($randomBytes)
+$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+$rng.GetBytes($randomBytes)
+$rng.Dispose()
 [Convert]::ToBase64String($randomBytes)
 ```
 
@@ -81,8 +83,10 @@ MongoDB/MinIO 密码使用不含 URI 特殊字符的十六进制值：
 
 ```powershell
 $storageBytes = New-Object byte[] 32
-[Security.Cryptography.RandomNumberGenerator]::Fill($storageBytes)
-[Convert]::ToHexString($storageBytes).ToLowerInvariant()
+$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+$rng.GetBytes($storageBytes)
+$rng.Dispose()
+[BitConverter]::ToString($storageBytes).Replace('-', '').ToLowerInvariant()
 ```
 
 不要修改模板中的容器内部地址：
@@ -126,7 +130,8 @@ Invoke-RestMethod http://127.0.0.1:8010/health
 docker compose --profile micro-mock up --build -d
 ```
 
-正式演示或真实评测使用真实模型覆盖配置：
+真实检测需先下载 WavLM 权重和行为原型，并校验 SHA-256。完整步骤、制品授权限制及
+Windows/macOS 路径配置见 [真实微表征部署](micro-real-setup.md)。完成校验后执行：
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.micro-real.yml `
@@ -284,4 +289,5 @@ docker compose up --build -d
 git status --short
 ```
 
-不得提交 `.env`、API Key、密码、模型、cache、数据库、Docker volume、上传材料、音频或评测运行输出。
+不得提交 `.env`、API Key、密码、缓存、数据库、Docker volume、上传材料、音频或评测运行输出。
+冻结微表征模型制品的 Git LFS 管理不代表已获得公开再分发许可，范围以模型卡为准。

@@ -20,9 +20,9 @@ ECHO records answers, official evidence, content checks and ability changes in o
 
 ECHO is an open-source adaptive skill-training platform. Learners interact with one ECHO assistant; the system reads learning records, retrieves authoritative material, checks generated content and returns one next action.
 
-The stack also integrates SimpleMem and a micro-signal service. SimpleMem provides scoped cross-session memory; micro-signals record pauses, hesitation and self-correction. Neither directly changes MIRT U/A/R; both only inform diagnostic confidence and coaching style.
+SimpleMem retrieves learning preferences and prior tutoring records within each user's scope. The real micro-signal detector identifies hesitation, guessing and thinking pauses in authorised audio. These inputs inform explanation style, diagnostic confidence and pacing; only eligible scored answers update MIRT U/A/R.
 
-The repository includes one demonstration course: **enterprise agent development with Microsoft Semantic Kernel**. The data model supports multiple programs and modules, so authorised course material can be replaced without changing the application.
+The repository includes one demonstration course: **enterprise agent development with Microsoft Semantic Kernel**. Additional courses require catalog and knowledge-point configuration, course rubrics, quizzes and source-validation rules; replacing uploaded files alone is insufficient.
 
 <table align="center"><tr>
 <td align="center"><strong>1</strong><br><sub>conversation entry</sub></td>
@@ -43,27 +43,16 @@ The repository includes one demonstration course: **enterprise agent development
 
 ## Learning loop
 
-```mermaid
-flowchart LR
-    Q[Question, answer or voice] --> C[Read module, history, MIRT and memory]
-    C --> O[TurnOrchestrator: choose one main action]
-    O --> R[PunditRAG: recall official evidence]
-    R --> G[Generate answer, guide, material or test]
-    G --> V[Check knowledge, difficulty, answer and citations]
-    V -->|pass| E[ECHO shows one response]
-    V -->|fail| X[Targeted local regeneration]
-    X --> V
-    E --> S[Server grading and immutable turn record]
-    S --> M[Update MIRT, blind spots and learning path]
-    M --> O
-```
+`TurnOrchestrator` selects one primary action from the learner's intent and reads context as needed.
+Questions follow the explanation and checking path; eligible submitted answers follow server-side
+scoring. The diagram shows responsibilities, not a sequence of services executed on every turn.
 
 <p align="center">
   <img src="docs/assets/readme/echo-learning-loop.png" alt="ECHO learning loop with four stages, traceable RAG and evidence feedback" width="100%">
 </p>
 <p align="center"><sub>System overview: E/C/H/O, RAG retrieval, content checks, SimpleMem, micro-signals and MIRT have separate responsibilities.</sub></p>
 
-Every turn has one primary action. Generated content must pass inspection; without official evidence, a resource remains a draft. PunditRAG is an evidence service, not a fifth learner-facing agent. SimpleMem stores scoped cross-session semantic memory and does not replace the business database.
+Every turn has one primary action. Resources retain their check results; unverified personal resources remain available to their owner with the outstanding issues shown. A verified status does not publish them to the course knowledge base. PunditRAG supplies evidence; SimpleMem stores scoped cross-session semantic memory separately from business records.
 
 ## Features
 
@@ -96,7 +85,29 @@ Requirements: Docker Desktop with Compose, an LLM-compatible API key, and permis
 git clone https://github.com/Pitkil/echo-adaptive-skill-training.git
 cd echo-adaptive-skill-training
 cp .env.example .env
-# Edit .env and set the model endpoint/key and a random SIMPLEMEM_API_KEY (>=32 bytes)
+```
+
+Before starting, edit `.env` and set **all** of the following:
+
+```dotenv
+OPENAI_API_KEY=your-api-key
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=your-model
+PUNDITRAG_LLM_MODEL=your-model
+JWT_SECRET_KEY=independent-random-value-1
+SECRET_KEY=independent-random-value-2
+SIMPLEMEM_API_KEY=independent-random-value-3
+PUNDITRAG_MONGO_PASSWORD=independent-storage-password-1
+PUNDITRAG_MINIO_PASSWORD=independent-storage-password-2
+```
+
+Generate each application secret independently with at least 32 random bytes. On macOS,
+`openssl rand -hex 32` can generate each value. Use URI-safe hexadecimal storage passwords.
+The placeholders above must be replaced: startup rejects the sample storage passwords.
+For PowerShell instructions, see the [setup guide](docs/team-setup-windows-macos.md).
+
+```bash
+docker compose config --quiet
 docker compose up --build -d
 ```
 
@@ -124,7 +135,9 @@ The base Compose file intentionally does not start the micro-signal container. E
 docker compose --profile micro-mock up --build -d
 ```
 
-For formal or production use, start the real WavLM deployment with its licensed local model files:
+Real detection requires WavLM weights **and** the three matching prototypes. Follow the
+[Windows/macOS artifact download and verification guide](docs/micro-real-setup.md) before starting.
+The prototype model card currently limits redistribution; use requires the relevant permission.
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.micro-real.yml --profile micro-real up --build -d
@@ -154,7 +167,7 @@ The micro-signal container is an opt-in profile. Start the integration Mock only
 
 ## Importing your own course
 
-Course materials and fixed quizzes are separate imports. Use authorised Microsoft Learn or repository material for the demonstration course, or replace it with material you have rights to distribute. Do not use model-generated text as the authoritative answer. Import and verify retrieval before publishing generated resources; missing evidence intentionally leaves them as drafts.
+Course materials and fixed quizzes are separate imports. The current application validates Microsoft sources for the demonstration course. Supporting another domain requires updating `apps/api/catalog.py`, course rubrics and source-validation rules, then importing and testing its materials and quizzes. Generated personal resources do not automatically enter the authoritative knowledge base.
 
 The repository includes the import and verification scripts, templates and schemas. Formal competition datasets and personal recordings are not a general benchmark and should be kept in a protected, external delivery folder.
 

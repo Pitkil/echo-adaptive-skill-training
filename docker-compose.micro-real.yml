@@ -8,20 +8,33 @@ services:
 
   micro-detector:
     profiles: ["micro-real"]
+    platform: linux/amd64
     build:
       context: .
-      dockerfile: services/micro_detector_real/Dockerfile.local-cache
+      dockerfile: services/micro_detector_real/Dockerfile
+      args:
+        DEBIAN_MIRROR: ${MICRO_DEBIAN_MIRROR:-https://deb.debian.org}
     environment:
       MICRO_MODEL_ROOT: /models
       MICRO_DETECTOR_JOB_STORE: /data/jobs.json
       MICRO_DETECTOR_OFFLINE_MODE: "true"
       MICRO_DETECTOR_MAX_AUDIO_BYTES: ${MICRO_DETECTOR_MAX_AUDIO_BYTES:-104857600}
     volumes:
-      - ${MICRO_MODEL_WEIGHT_PATH:?set the D-drive WavLM weight path}:/models/wavlm-base-plus/model.safetensors:ro
-      - ${MICRO_MODEL_PROTOTYPE_PATH:?set the D-drive prototype path}:/models/behavior_prototypes.pt:ro
+      - type: bind
+        source: ${MICRO_MODEL_WEIGHT_PATH:-./models/micro_detector/wavlm-base-plus/model.safetensors}
+        target: /models/wavlm-base-plus/model.safetensors
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MICRO_MODEL_PROTOTYPE_PATH:-./models/micro_detector/behavior_prototypes.pt}
+        target: /models/behavior_prototypes.pt
+        read_only: true
+        bind:
+          create_host_path: false
       - ./models/micro_detector/wavlm-base-plus/config.json:/models/wavlm-base-plus/config.json:ro
       - ./models/micro_detector/wavlm-base-plus/preprocessor_config.json:/models/wavlm-base-plus/preprocessor_config.json:ro
-      - ${MICRO_REAL_DATA_DIR:-D:/ECHOData/micro-detector-real}:/data
+      - ${MICRO_REAL_DATA_DIR:-micro-real-data}:/data
     healthcheck:
       test:
         - CMD
@@ -33,8 +46,11 @@ services:
           assert value.get('status')=='ok' and value.get('mode')=='real'
       interval: 20s
       timeout: 8s
-      start_period: 30s
-      retries: 5
+      start_period: 90s
+      retries: 12
     ports:
-      - "${MICRO_DETECTOR_PORT:-8030}:8030"
+      - "127.0.0.1:${MICRO_DETECTOR_PORT:-8030}:8030"
     restart: unless-stopped
+
+volumes:
+  micro-real-data:

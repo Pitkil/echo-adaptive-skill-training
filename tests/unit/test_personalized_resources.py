@@ -3,6 +3,7 @@ from __future__ import annotations
 from io import BytesIO
 
 import app as app_module
+import pytest
 import resource_generation as resource_generation_module
 from app import _legacy_staged_resource_questions, app, create_access_token, ensure_catalog, get_db
 from catalog import PROGRAM_CODE
@@ -27,6 +28,7 @@ from fastapi.testclient import TestClient
 from resource_generation import (
     ContentVerificationAgent,
     ResourceGenerationAgent,
+    Verification,
     build_personalization_plan,
 )
 from semantic_coverage import SemanticCoverageResult
@@ -197,18 +199,24 @@ def test_dialogue_course_rubric_detects_missing_azure_connection_parameters() ->
 
 
 def test_dialogue_course_rubric_accepts_agent_definition_and_process_event() -> None:
-    assert request_coverage_issues(
-        program_code=PROGRAM_CODE,
-        knowledge_point_name="Agent 创建与指令设计",
-        user_input="Agent 是什么？",
-        content="Agent 可以参与对话，并执行有明确目标的任务。",
-    ) == []
-    assert request_coverage_issues(
-        program_code=PROGRAM_CODE,
-        knowledge_point_name="Process Framework 步骤与事件",
-        user_input="请解释 Process Framework 的三个核心概念",
-        content="Process 是流程，Step 是步骤，Event 负责触发和传递结果。",
-    ) == []
+    assert (
+        request_coverage_issues(
+            program_code=PROGRAM_CODE,
+            knowledge_point_name="Agent 创建与指令设计",
+            user_input="Agent 是什么？",
+            content="Agent 可以参与对话，并执行有明确目标的任务。",
+        )
+        == []
+    )
+    assert (
+        request_coverage_issues(
+            program_code=PROGRAM_CODE,
+            knowledge_point_name="Process Framework 步骤与事件",
+            user_input="请解释 Process Framework 的三个核心概念",
+            content="Process 是流程，Step 是步骤，Event 负责触发和传递结果。",
+        )
+        == []
+    )
 
 
 def test_dialogue_course_rubric_rejects_required_term_in_insufficiency_paragraph() -> None:
@@ -217,8 +225,7 @@ def test_dialogue_course_rubric_rejects_required_term_in_insufficiency_paragraph
         knowledge_point_name="Process Framework 步骤与事件",
         user_input="请解释 Process Framework 的三个核心概念",
         content=(
-            "Process 是完整流程，Step 是可执行步骤。\n\n"
-            "关于 Event，当前证据不足，暂不能确认。"
+            "Process 是完整流程，Step 是可执行步骤。\n\n关于 Event，当前证据不足，暂不能确认。"
         ),
     )
 
@@ -329,9 +336,7 @@ def test_resource_generation_uses_profile_memory_and_blind_spot(monkeypatch) -> 
 
     monkeypatch.setattr(app_module, "SimpleMemClient", FakeMemoryClient)
     monkeypatch.setattr(app_module, "PunditRAGClient", FakePunditRAGClient)
-    monkeypatch.setattr(
-        resource_generation_module, "evaluate_semantic_coverage", semantic_pass
-    )
+    monkeypatch.setattr(resource_generation_module, "evaluate_semantic_coverage", semantic_pass)
 
     def override_db():
         yield db
@@ -387,8 +392,7 @@ def test_resource_generation_uses_profile_memory_and_blind_spot(monkeypatch) -> 
         "next_action",
     }
     assert all(
-        item["persisted_in_system"] is True
-        for item in execution.result["agent_records"].values()
+        item["persisted_in_system"] is True for item in execution.result["agent_records"].values()
     )
     memory_request = FakeMemoryClient.requests[-1]
     assert str(point.id) in memory_request.query
@@ -402,10 +406,103 @@ def test_resource_generation_uses_profile_memory_and_blind_spot(monkeypatch) -> 
     db.close()
 
 
-def test_failed_resource_receives_one_auditable_local_repair(monkeypatch) -> None:
-    monkeypatch.setattr(
-        resource_generation_module, "evaluate_semantic_coverage", semantic_pass
+@pytest.mark.parametrize("repair_rounds", [0, 1, 2])
+def test_final_staged_questions_match_verified_content(monkeypatch, repair_rounds) -> None:
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
+    Base.metadata.create_all(engine)
+    with sessionmaker(bind=engine)() as db:
+        ensure_catalog(db)
+        organization = db.query(Organization).filter_by(code="ECHO-DEMO").one()
+        learner = User(
+            organization_id=organization.id,
+            username="repair-question-learner",
+            hashed_password="not-used",
+            role=UserRole.LEARNER.value,
+        )
+        db.add(learner)
+        db.commit()
+        module = db.query(TrainingModule).order_by(TrainingModule.id).first()
+
+        def variant(index):
+            return {
+                "resource_type": "staged_test",
+                "title": f"练习版本{index}",
+                "content": f"正文版本{index}",
+                "questions": [{"dimension": "understanding", "question": f"问题版本{index}"}],
+            }
+
+        inspected = []
+
+        def verify(_self, item, *_args):
+            inspected.append(item)
+            passed = len(inspected) > repair_rounds
+            return Verification(passed, 1.0, 1.0, 1.0, [] if passed else ["覆盖不足"], {})
+
+        monkeypatch.setattr(app_module, "SimpleMemClient", FakeMemoryClient)
+        monkeypatch.setattr(
+            app_module,
+            "search_official_evidence",
+            lambda *_a, **_k: (
+                [
+                    {
+                        "text": "official evidence",
+                        "metadata": {"source_url": "https://learn.microsoft.com/"},
+                    }
+                ],
+                None,
+            ),
+        )
+        monkeypatch.setattr(
+            ResourceGenerationAgent, "generate", lambda *_a, **_k: ([variant(0)], None)
+        )
+        monkeypatch.setattr(
+            ResourceGenerationAgent,
+            "regenerate_after_verification_failure",
+            lambda *_a, **_k: (variant(1), None),
+        )
+        monkeypatch.setattr(
+            ResourceGenerationAgent, "repair_failed_resource", lambda *_a, **_k: variant(2)
+        )
+        monkeypatch.setattr(ContentVerificationAgent, "verify", verify)
+
+        def override_db():
+            yield db
+
+        app.dependency_overrides[get_db] = override_db
+        try:
+            client = TestClient(app)
+            headers = {"Authorization": f"Bearer {create_access_token(learner)}"}
+            response = client.post(
+                "/v1/resources/generate",
+                headers=headers,
+                json={
+                    "user_id": learner.id,
+                    "module_id": module.id,
+                    "resource_type": "staged_test",
+                },
+            )
+            assert response.status_code == 200, response.text
+            resource_id = response.json()["items"][0]["resource_id"]
+            db.expire_all()
+            resource = db.get(GeneratedResource, resource_id)
+            expected = variant(repair_rounds)
+            assert resource.content == expected["content"]
+            assert resource.learning_payload["questions"] == expected["questions"]
+            assert inspected[-1]["questions"] == resource.learning_payload["questions"]
+            listing = client.get(f"/v1/resources?module_id={module.id}", headers=headers)
+            assert listing.status_code == 200
+            item = next(row for row in listing.json()["items"] if row["resource_id"] == resource_id)
+            assert item["learning_payload"]["questions"] == expected["questions"]
+            assert item["verification_passed"] is True
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+    engine.dispose()
+
+
+def test_failed_resource_receives_one_auditable_local_repair(monkeypatch) -> None:
+    monkeypatch.setattr(resource_generation_module, "evaluate_semantic_coverage", semantic_pass)
     plan = build_personalization_plan(
         {"views": {}},
         knowledge_point_id=1,

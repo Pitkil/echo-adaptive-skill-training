@@ -21,7 +21,7 @@ ECHO 将作答、官方资料、内容检查和能力变化记录在同一条学
 
 </div>
 
-> 当前仓库提供 Microsoft Semantic Kernel 企业级智能体开发示范课程。课程材料、题库和运行数据与源码分离，可替换为有授权的其他培训领域。
+> 当前仓库提供 Microsoft Semantic Kernel 企业级智能体开发示范课程。扩展其他领域需要配置课程目录、知识点、判定标准、题库和允许的资料来源，再导入授权材料。
 
 <table align="center"><tr>
 <td align="center"><strong>1 个</strong><br><sub>对话入口</sub></td>
@@ -51,7 +51,7 @@ ECHO 面向企业技能培训。学习者只与 ECHO 对话；系统读取学习
 
 - **可追溯学习记录**：保存提问、作答、口述、服务端判分和能力变化。
 - **检索与生成分离**：PunditRAG 负责召回、RRF 融合、重排和引用；ECHO 负责组织学习动作。
-- **能力与行为信号分离**：只有可评分答案更新 U/A/R；ASR、停顿和犹豫用于调整诊断与辅导。
+- **能力与行为信号分离**：只有允许更新能力的有效作答改变 U/A/R；ASR 提供待确认文本，微表征辅助调整诊断与辅导。
 - **后台过程可审计**：四个后台 Agent 的输入、输出、失败原因和最终决定可在 Demo Trace 中查看。
 - **明确降级**：外部服务不可用时返回原因，不写入虚假引用、分数或能力变化。
 - **统一部署**：业务 API、PunditRAG、SimpleMem 和 ASR 由 Docker Compose 管理。
@@ -68,35 +68,16 @@ ECHO 面向企业技能培训。学习者只与 ECHO 对话；系统读取学习
 
 ## 学习闭环
 
-```mermaid
-flowchart LR
-    L[学习者提问或作答] --> O[TurnOrchestrator<br/>选择本轮唯一动作]
-    O --> A[学习情况分析<br/>U/A/R · 盲区 · 记忆]
-    A --> R[可追溯 RAG<br/>检索 Microsoft 官方资料]
-    R --> G[内容生成<br/>回答 · 资料 · 指南 · 测试]
-    G --> V{内容检查<br/>事实 · 难度 · 引用}
-    V -->|局部重做| G
-    V -->|通过| D[下一步安排<br/>解释 · 提示 · 练习 · 推进]
-    D --> E[ECHO 唯一回复]
-    E --> S[服务端判分与事实记录]
-    S --> L
-
-    classDef human fill:#f4fafd,stroke:#1d3246,color:#161d1f,stroke-width:2px;
-    classDef core fill:#e5f0f4,stroke:#466270,color:#161d1f;
-    classDef verify fill:#e5efeb,stroke:#426f62,color:#161d1f;
-    classDef decision fill:#f4eee7,stroke:#8a652d,color:#161d1f;
-    class L,E human;
-    class O,A,R,G core;
-    class V,S verify;
-    class D decision;
-```
+`TurnOrchestrator` 根据本轮意图选择一个主要动作，按需读取学习记录、记忆和课程证据。
+提问走解释与检查流程；有效作答走服务端判分流程，仅在允许时更新能力。下图展示各类输入的作用，
+并不表示每轮都依次执行所有服务。
 
 <p align="center">
   <img src="docs/assets/readme/echo-learning-loop.png" alt="ECHO 学习闭环：四阶段、可追溯 RAG 与证据回流" width="100%">
 </p>
 <p align="center"><sub>流程总览：E/C/H/O 阶段、RAG 检索、内容检查、SimpleMem、微表征与 MIRT 各自承担明确职责。</sub></p>
 
-关键约束：生成内容必须通过检查；检查失败只做局部重生成；缺少官方证据时资源保持草稿。
+资源保存检查结果，失败后可定向重生成。未通过检查的个人资源仍可由本人学习和下载，同时显示待补充项；通过检查不等于自动发布到课程知识库。
 
 四个后台 Agent 分别记录输入、结果、失败原因和最终决定。PunditRAG 只提供检索与证据；SimpleMem 只保存跨会话语义记忆，不替代业务数据库。
 
@@ -124,7 +105,6 @@ flowchart LR
 <td width="50%" valign="top"><img src="docs/assets/readme/03-learning-workspace.png" alt="ECHO 导学工作台与系统安排的唯一下一步" width="100%"><br><sub>导学工作台：自由对话与系统安排的下一步保持在同一入口。</sub></td>
 </tr></table>
 
-> GitHub 会直接渲染 Mermaid；同时提供一张论文配图式总览，便于在仓库首页快速理解 E/C/H/O、RAG 与证据回流的关系。
 
 ## 使用流程
 
@@ -173,7 +153,7 @@ flowchart LR
     J --> G[服务端计算分数与对错]
     G --> I[attempt_id 幂等留痕]
     I --> U[更新 MIRT U/A/R<br/>形成下一步依据]
-    X --> D[停顿、犹豫、自我修正]
+    X --> D[犹豫、猜测、思考停顿]
     D --> R[只调整提示节奏与辅导方式]
     S -. 不可用或无效 .-> E[明确降级<br/>不写作答、不更新 MIRT]
     J -. 不可用或结构异常 .-> E
@@ -216,13 +196,13 @@ AI 不可用或返回无效结构时失败关闭，不写入作答或 MIRT。
 
 本 README 只列出仓库已提供的能力。样例数据和适配器不代表正式比赛结果；正式评测请使用自有授权材料和测试数据。
 
-| 范围 | 当前仓库状态 | 正式演示前仍需完成 |
+| 范围 | 当前仓库状态 | 新环境验收 |
 | --- | --- | --- |
 | 课程与前端 | 单课程、三模块、三角色工作台已实现 | 用最终账号与真实数据走完演示脚本 |
 | 固定题库 | 63 道正式题已冻结，导入器与运行流程已实现 | 在交付数据库执行正式导入并核对完整前后测 |
 | 官方知识库 | PunditRAG 原生双服务适配、异步状态与引用过滤已实现 | 导入许可确认的 Microsoft 原文并完成真实检索验证 |
 | 个性化资源 | 规划、生成、校验、依据不足降级和持久化入口已实现 | 用正式证据运行三类资源并保存检查与重做记录 |
-| 微表征 | Mock 联调服务与真实 WavLM 推理服务均有独立实现 | 使用授权标注音频完成正式准确率、召回率与 F1 评测 |
+| 微表征 | Mock 与真实 WavLM 服务均已实现；已有历史评测，召回率与 F1 偏低，见 [评测报告](docs/member-b/micro-evaluation-report.md) | 下载并校验授权制品，完成音频推理走查；新版本精度需独立评测 |
 | 语音转写与口述评分 | 内置 faster-whisper tiny；视频检查点支持转写确认、AI 语义评分、服务端计分、幂等作答与 MIRT 更新 | 用授权语音核对中文专有名词转写质量并完成演示走查 |
 | 竞赛评测 | 仓库包含运行器、计分器、复核导入器和结构规范 | 使用你自己的冻结案例与授权材料运行；不要把比赛交付数据当作通用基准 |
 
@@ -284,7 +264,9 @@ docker compose --profile micro-mock up --build -d
 Invoke-RestMethod http://127.0.0.1:8030/health
 ```
 
-正式演示或真实评测使用本地模型制品和真实覆盖配置：
+真实检测需要下载 WavLM 权重和三个行为原型，并校验 SHA-256。先完成
+[Windows/macOS 模型下载与部署步骤](docs/micro-real-setup.md)，再使用以下配置。
+原型文件的公开再分发许可尚未确认，使用时需遵守模型卡的授权范围。
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.micro-real.yml `
@@ -341,7 +323,7 @@ docker compose exec echo-api python /workspace/scripts/verify_official_retrieval
 | PunditRAG Import | `http://127.0.0.1:8000` | 本仓库内置服务 | 材料导入、切片和索引任务 |
 | PunditRAG Query | `http://127.0.0.1:8001` | 本仓库内置服务 | 多路召回、RRF、重排、证据与引用 |
 | SimpleMem | 仅容器网络 `http://simplemem:8020` | 本仓库独立服务 | 跨会话语义记忆与变更审计；开发覆盖才绑定宿主机 8020 |
-| Micro Detector | `http://127.0.0.1:8030`（启用 profile 后） | Mock 与真实服务均在本仓库 | 授权语音的停顿、犹豫和自我修正信号 |
+| Micro Detector | `http://127.0.0.1:8030`（启用 profile 后） | Mock 与真实服务均在本仓库 | 真实模型输出犹豫、猜测、思考停顿；自我修正不是当前模型输出类别 |
 | ASR | `http://127.0.0.1:8040` | 本仓库独立服务 | faster-whisper tiny 语音转文字；权重缓存于 `asr-model-cache` Docker volume |
 | MinIO API / 控制台 | `http://127.0.0.1:9100` / `http://127.0.0.1:9101` | PunditRAG 依赖 | 对象存储 API 与管理控制台 |
 
@@ -418,6 +400,7 @@ tests/                        单元测试与跨服务契约测试
 ## 开发文档
 
 - [Windows / macOS 团队本地部署指南](docs/team-setup-windows-macos.md)
+- [真实微表征：模型下载、校验与跨平台部署](docs/micro-real-setup.md)
 - [系统功能与完整流程](docs/system-overview.md)
 - [架构与数据边界](docs/architecture.md)
 - [跨服务接口契约](docs/service-contracts.md)
