@@ -6,7 +6,9 @@
 
 <img src="docs/assets/readme/echo-hero.png" alt="ECHO connects learning evidence, official retrieval and adaptive coaching" width="100%">
 
-**A conversation-first training system that turns learning evidence into an auditable next step.**
+**A conversation-first platform for adaptive skill training.**
+
+ECHO records answers, official evidence, content checks and ability changes in one learning path, then selects the next action.
 
 [![CI](https://github.com/Pitkil/echo-adaptive-skill-training/actions/workflows/ci.yml/badge.svg)](https://github.com/Pitkil/echo-adaptive-skill-training/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.11--3.13-1d3246?logo=python&logoColor=white)
@@ -16,9 +18,11 @@
 
 </div>
 
-ECHO is an open-source, conversation-first adaptive skill-training platform. Learners interact with one ECHO assistant while the system records answers, retrieves authoritative evidence, generates learning resources, checks them, updates ability estimates and chooses the next action.
+ECHO is an open-source adaptive skill-training platform. Learners interact with one ECHO assistant; the system reads learning records, retrieves authoritative material, checks generated content and returns one next action.
 
-The current demonstration course is **enterprise agent development with Microsoft Semantic Kernel**. The data model supports multiple programs and modules, so course materials can be replaced with your own authorised domain content.
+The stack also integrates SimpleMem and a micro-signal service. SimpleMem provides scoped cross-session memory; micro-signals record pauses, hesitation and self-correction. Neither directly changes MIRT U/A/R; both only inform diagnostic confidence and coaching style.
+
+The repository includes one demonstration course: **enterprise agent development with Microsoft Semantic Kernel**. The data model supports multiple programs and modules, so authorised course material can be replaced without changing the application.
 
 <table align="center"><tr>
 <td align="center"><strong>1</strong><br><sub>conversation entry</sub></td>
@@ -28,7 +32,7 @@ The current demonstration course is **enterprise agent development with Microsof
 <td align="center"><strong>Docker</strong><br><sub>single-repository stack</sub></td>
 </tr></table>
 
-## Why ECHO is different
+## Core design
 
 - **Evidence-centred learning** — questions, answers, video speech, server-side grading and ability changes form a reviewable learning trail.
 - **Retrieval is separated from generation** — PunditRAG handles multi-route recall, RRF fusion, reranking and citations; ECHO turns evidence into a learning action.
@@ -54,9 +58,14 @@ flowchart LR
     M --> O
 ```
 
+<p align="center">
+  <img src="docs/assets/readme/echo-learning-loop.png" alt="ECHO learning loop with four stages, traceable RAG and evidence feedback" width="100%">
+</p>
+<p align="center"><sub>System overview: E/C/H/O, RAG retrieval, content checks, SimpleMem, micro-signals and MIRT have separate responsibilities.</sub></p>
+
 Every turn has one primary action. Generated content must pass inspection; without official evidence, a resource remains a draft. PunditRAG is an evidence service, not a fifth learner-facing agent. SimpleMem stores scoped cross-session semantic memory and does not replace the business database.
 
-## Core capabilities
+## Features
 
 | Area | What is implemented |
 | --- | --- |
@@ -72,12 +81,12 @@ Every turn has one primary action. Generated content must pass inspection; witho
 
 ## Interface preview
 
-<p align="center"><img src="docs/assets/readme/01-login-current.png" alt="Current ECHO login screen" width="42%"></p>
-<p align="center"><sub>Current login screen captured from the running frontend.</sub></p>
+<table align="center"><tr>
+<td width="50%" valign="top"><img src="docs/assets/readme/02-course-center.png" alt="Course center" width="100%"><br><sub>Course center: enter ECHO conversation or video learning from an open course.</sub></td>
+<td width="50%" valign="top"><img src="docs/assets/readme/03-learning-workspace.png" alt="Learning workspace" width="100%"><br><sub>Learning workspace: conversation and the system's next action stay in one entry point.</sub></td>
+</tr></table>
 
-<p align="center"><img src="docs/assets/readme/02-course-center.png" alt="Course center" width="49%"> <img src="docs/assets/readme/03-learning-workspace.png" alt="Learning workspace" width="49%"></p>
-
-The learner path is intentionally short: **Course Center → an open course → modular learning → ECHO conversation and an adaptive path**. Instructors maintain authorised materials and fixed questions; administrators manage identities, configuration, service health and audit records.
+Learner flow: **Course Center → open course → module → ECHO conversation and adaptive path**. Instructors manage authorised material and fixed questions; administrators manage identities, configuration, service health and audit records.
 
 ## Quick start with Docker
 
@@ -149,7 +158,7 @@ Course materials and fixed quizzes are separate imports. Use authorised Microsof
 
 The repository includes the import and verification scripts, templates and schemas. Formal competition datasets and personal recordings are not a general benchmark and should be kept in a protected, external delivery folder.
 
-## Privacy and safety
+## Privacy and security
 
 - Never commit `.env`, keys, passwords, databases, uploads, audio/video, model weights or personal information.
 - Video playback does not open the microphone automatically. Voice checkpoints require explicit consent, transcription and learner confirmation before scoring.

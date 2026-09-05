@@ -6,7 +6,9 @@
 
 # ECHO Adaptive Skill Training
 
-**以对话为入口，把真实作答、官方证据、能力变化与下一步训练组织成一条可追溯的学习路径。**
+**对话优先的个性化技能训练系统。**
+
+ECHO 将作答、官方资料、内容检查和能力变化记录在同一条学习路径中，并据此安排下一步训练。
 
 开源仓库：<https://github.com/Pitkil/echo-adaptive-skill-training>
 
@@ -15,11 +17,11 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-API-426f62?logo=fastapi&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-ready-466270?logo=docker&logoColor=white)
 
-<a href="#产品全景">产品全景</a> · <a href="#学习闭环">学习闭环</a> · <a href="#核心能力">核心能力</a> · <a href="#界面预览">界面预览</a> · <a href="#快速开始">快速开始</a> · <a href="#部署与服务">部署与服务</a> · <a href="#开发文档">开发文档</a>
+<a href="#产品全景">产品全景</a> · <a href="#学习闭环">学习闭环</a> · <a href="#功能概览">功能概览</a> · <a href="#界面预览">界面预览</a> · <a href="#快速开始">快速开始</a> · <a href="#部署与服务">部署与服务</a> · <a href="#开发文档">开发文档</a>
 
 </div>
 
-> ECHO 当前以 Microsoft Semantic Kernel 企业级智能体开发为示范课程，同时保留了多项目、多模块和多角色的数据模型。课程材料、题库和运行数据与源码分离，便于替换为你自己的培训领域。
+> 当前仓库提供 Microsoft Semantic Kernel 企业级智能体开发示范课程。课程材料、题库和运行数据与源码分离，可替换为有授权的其他培训领域。
 
 <table align="center"><tr>
 <td align="center"><strong>1 个</strong><br><sub>对话入口</sub></td>
@@ -31,9 +33,11 @@
 
 ## 产品全景
 
-ECHO 是面向企业技能培训的多智能体学习系统。学习者始终只与一个 ECHO 对话；系统在后台读取作答和学习进度，检索 Microsoft 官方资料，生成并检查学习内容，再给出唯一的下一步。
+ECHO 面向企业技能培训。学习者只与 ECHO 对话；系统读取学习记录，检索官方资料，生成并检查内容，然后返回一个明确的下一步。
 
-当前竞赛版本聚焦 **“基于 Microsoft Semantic Kernel 的企业级智能体应用开发”**，包含三个连续模块：
+系统同时接入 SimpleMem 和语音微表征服务：SimpleMem 提供按组织和用户隔离的跨会话记忆；微表征记录停顿、犹豫等行为信号。两者只用于诊断置信度和辅导方式，不直接修改 U/A/R。
+
+示范课程聚焦 **“基于 Microsoft Semantic Kernel 的企业级智能体应用开发”**，包含三个模块：
 
 | 模块 | 训练范围 | 目标产出 |
 | --- | --- | --- |
@@ -41,16 +45,16 @@ ECHO 是面向企业技能培训的多智能体学习系统。学习者始终只
 | M2 · Agent 与多智能体协作 | Agent、线程状态、记忆、协作流程 | 有明确职责与状态传递的智能体流程 |
 | M3 · 流程、部署与质量评测 | Process Framework、部署、安全、可观测、评测 | 可部署、可诊断、可验证的智能体应用 |
 
-> 仓库的数据模型支持多个培训项目，但当前只有这一门课程具备正式目录。界面中的其他课程方向是扩展示例，不会产生虚假课时或进度。
+> 数据模型支持多个培训项目；当前仓库只配置上述一门正式课程，其他方向仅作为扩展占位。
 
-### 为什么值得开源
+### 核心设计
 
-- **以学习证据为中心**：把提问、作答、视频口述、服务端判分和能力变化串成可复盘记录，而不是只展示一个聊天窗口。
-- **检索与生成分层**：PunditRAG 负责多路召回、RRF、重排和引用；ECHO 负责把证据转成当前学习动作，知识库可以独立更新。
-- **能力与行为信号分开**：可评分答案才更新 U/A/R；ASR、停顿和犹豫等信号只调整诊断置信度与辅导方式。
-- **后台协作可审计**：四个后台 Agent 的输入、输出、失败原因和下一步决定都可在 Demo Trace 中查看，学习者仍只面对 ECHO。
-- **失败关闭而不是伪成功**：检索、记忆、转写或模型不可用时明确返回降级原因，不写入虚假的引用、分数或能力变化。
-- **一仓部署**：PunditRAG、SimpleMem、ASR 和业务 API 都在本仓库的 Docker 编排中，Windows 与 macOS 使用同一套 CPU 启动方式。
+- **可追溯学习记录**：保存提问、作答、口述、服务端判分和能力变化。
+- **检索与生成分离**：PunditRAG 负责召回、RRF 融合、重排和引用；ECHO 负责组织学习动作。
+- **能力与行为信号分离**：只有可评分答案更新 U/A/R；ASR、停顿和犹豫用于调整诊断与辅导。
+- **后台过程可审计**：四个后台 Agent 的输入、输出、失败原因和最终决定可在 Demo Trace 中查看。
+- **明确降级**：外部服务不可用时返回原因，不写入虚假引用、分数或能力变化。
+- **统一部署**：业务 API、PunditRAG、SimpleMem 和 ASR 由 Docker Compose 管理。
 
 ### 设计原则
 
@@ -87,11 +91,16 @@ flowchart LR
     class D decision;
 ```
 
-图中的关键边界：生成内容必须经过内容检查；检查不通过只允许局部重做；没有官方证据时资源保持草稿状态。
+<p align="center">
+  <img src="docs/assets/readme/echo-learning-loop.png" alt="ECHO 学习闭环：四阶段、可追溯 RAG 与证据回流" width="100%">
+</p>
+<p align="center"><sub>流程总览：E/C/H/O 阶段、RAG 检索、内容检查、SimpleMem、微表征与 MIRT 各自承担明确职责。</sub></p>
 
-四个后台 Agent 分别保存输入、结果、失败原因和最终决定。PunditRAG 是知识检索与证据服务，不是第五个课程专家 Agent；SimpleMem 只保存跨会话语义记忆，不替代业务数据库。
+关键约束：生成内容必须通过检查；检查失败只做局部重生成；缺少官方证据时资源保持草稿。
 
-## 核心能力
+四个后台 Agent 分别记录输入、结果、失败原因和最终决定。PunditRAG 只提供检索与证据；SimpleMem 只保存跨会话语义记忆，不替代业务数据库。
+
+## 功能概览
 
 | 能力 | 已落地的行为 |
 | --- | --- |
@@ -110,50 +119,36 @@ flowchart LR
 
 ## 界面预览
 
-<p align="center">
-  <img src="docs/assets/readme/01-login-current.png" alt="ECHO 新版登录页" width="42%">
-</p>
+<table align="center"><tr>
+<td width="50%" valign="top"><img src="docs/assets/readme/02-course-center.png" alt="ECHO 课程中心与三个 Semantic Kernel 学习模块" width="100%"><br><sub>课程中心：从真实开放课程进入 ECHO 对话或视频伴学。</sub></td>
+<td width="50%" valign="top"><img src="docs/assets/readme/03-learning-workspace.png" alt="ECHO 导学工作台与系统安排的唯一下一步" width="100%"><br><sub>导学工作台：自由对话与系统安排的下一步保持在同一入口。</sub></td>
+</tr></table>
 
-<p align="center"><sub>登录页为当前前端实机截图：产品说明、学习入口与账号登录保持在同一视图。</sub></p>
+> GitHub 会直接渲染 Mermaid；同时提供一张论文配图式总览，便于在仓库首页快速理解 E/C/H/O、RAG 与证据回流的关系。
 
-<p align="center">
-  <img src="docs/assets/readme/02-course-center.png" alt="ECHO 课程中心与三个 Semantic Kernel 学习模块" width="92%">
-</p>
-
-<p align="center"><sub>课程中心只把真实开放课程标记为可学习，并统一进入 ECHO 对话或视频伴学。</sub></p>
-
-<p align="center">
-  <img src="docs/assets/readme/03-learning-workspace.png" alt="ECHO 导学工作台与系统安排的唯一下一步" width="92%">
-</p>
-
-<p align="center"><sub>导学工作台把自由对话与服务端安排的测评阶段放在同一入口；外部服务状态在顶部显式呈现。</sub></p>
-
-> 流程图使用 Mermaid 编写，GitHub 会直接渲染；如果你的 Markdown 阅读器不支持 Mermaid，仍可按同一顺序阅读下面的“用户路径”和“部署与服务”表。
-
-## 用户路径
+## 使用流程
 
 ### 学习者
 
-1. 从课程中心进入当前模块，或继续上次视频进度。
-2. 在 ECHO 中提问、完成系统安排的前测、练习、阶段测试与后测。
-3. 查看 U/A/R 能力变化、有作答依据的知识盲区和推荐路线。
+1. 从课程中心进入模块，或继续上次的视频进度。
+2. 在 ECHO 中提问并完成系统安排的测评或练习。
+3. 查看 U/A/R 变化、知识盲区和推荐路线。
 4. 获取定制学习资料、实操指南和阶段测试。
-5. 仅在主动授权后提交口述录音；视频检查点需核对转写后明确提交，评分结果进入 MIRT，微表征仍只辅助调整提示节奏。
+5. 主动授权后提交口述录音；视频检查点的转写需确认后才进入评分。
 
 ### 讲师与管理员
 
-1. 分别导入官方课程材料、固定题库与课程视频。
-2. 在预览中核对题目答案、评分方法、用途、难度和官方出处后再确认入库。
+1. 导入课程材料、固定题库和课程视频。
+2. 核对题目答案、评分方法、用途、难度和出处后确认入库。
 3. 查看授权范围内的学习情况、语音任务、服务状态和后台决策记录。
-4. 使用 Demo 模式展示“分析、检索、生成、检查、下一步安排”的完整闭环。
+4. 在 Demo 模式查看分析、检索、生成、检查和下一步安排的记录。
 
-## 语音链路
+## 视频与语音
 
-### 视频伴学不止记录“看过”
+### 视频伴学与口述检查点
 
-传统视频平台通常只保存播放进度。ECHO 在讲师审核的学习节点暂停视频，让学习者用自己的话回答，
-再把“答案内容”和“表达过程”拆成两条证据链：ASR 负责“说了什么”，微表征负责“怎么说的”。
-两者并行处理但不混合计分，避免停顿、口音或犹豫被误当成专业能力不足。
+ECHO 在讲师审核的学习节点暂停视频，让学习者用自己的话回答。ASR 记录“说了什么”，
+微表征记录“怎么说的”；两者并行处理，但不混合计分。
 
 ```mermaid
 flowchart LR
@@ -195,9 +190,9 @@ flowchart LR
     class E fail;
 ```
 
-### 这条链路的优势
+### 处理规则
 
-| 优势 | ECHO 的实现方式 | 避免的问题 |
+| 规则 | 实现方式 | 作用 |
 | --- | --- | --- |
 | 学习证据更真实 | 到达课程内容对应的冻结检查点再口述回答，不用播放时长替代掌握程度 | “视频看完了”不等于“学会了” |
 | 允许自然表达 | AI 按语义匹配讲师批准要点，同义表达无需逐字命中 | 关键词判分误伤正确答案 |
@@ -217,9 +212,9 @@ ASR 和微表征提交；通过 `GET /v1/micro/detection-jobs/{job_id}` 查询�
 `POST /v1/video-checkpoints/{checkpoint_id}/oral-attempts`。接口校验录音归属、转写状态和幂等编号，
 AI 不可用或返回无效结构时失败关闭，不写入作答或 MIRT。
 
-## 实现边界
+## 已实现与限制
 
-README 只描述代码已经提供的能力，不把样例数据或适配器写成正式比赛结果。正式比赛评测副本不随开源仓库发布；请使用自己的授权材料和测试数据复现流程。
+本 README 只列出仓库已提供的能力。样例数据和适配器不代表正式比赛结果；正式评测请使用自有授权材料和测试数据。
 
 | 范围 | 当前仓库状态 | 正式演示前仍需完成 |
 | --- | --- | --- |
@@ -240,8 +235,8 @@ README 只描述代码已经提供的能力，不把样例数据或适配器写�
 - 建议 16 GB 内存、30 GB 可用磁盘空间
 - 一个可用的 OpenAI-compatible 模型接口
 
-PunditRAG 源码已放在 `services/punditrag/`，无需克隆第二个仓库。模型缓存、MongoDB、Milvus、
-MinIO、业务数据库和上传文件使用 Docker volume，不进入 Git；因此首次启动后仍要在本机导入正式材料。
+PunditRAG 源码位于 `services/punditrag/`，无需额外克隆。模型缓存、MongoDB、Milvus、MinIO、
+业务数据库和上传文件使用 Docker volume，不进入 Git。首次启动后仍需导入授权材料。
 
 ### Windows Docker
 
@@ -273,7 +268,7 @@ docker compose up --build -d
 docker compose ps
 ```
 
-两个 RAG 健康检查和 ECHO 健康检查通过后，创建管理员：
+RAG 和 ECHO 健康检查通过后，创建管理员：
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/health
@@ -296,7 +291,7 @@ docker compose -f docker-compose.yml -f docker-compose.micro-real.yml `
   --profile micro-real up --build -d
 ```
 
-未启用该 profile 时，ECHO 健康状态中微表征显示降级是预期现象，不代表 ECHO、RAG、SimpleMem 或 ASR 未启动。
+未启用该 profile 时，微表征显示降级属于预期状态；ECHO、RAG、SimpleMem 和 ASR 仍可运行。
 
 有 NVIDIA 且 `docker run --rm --gpus all ... nvidia-smi` 能通过时，才启用 GPU 覆盖：
 
@@ -324,19 +319,19 @@ curl -fsS http://127.0.0.1:8010/health
 docker compose exec echo-api python /workspace/scripts/bootstrap_admin.py --username admin
 ```
 
-首次导入/查询会下载 BGE-M3 与 Reranker，CPU 加载可能较慢。下载期间不要并发查询或反复重启。
+首次导入或查询会下载 BGE-M3 与 Reranker，CPU 加载可能较慢。下载期间请勿并发查询或反复重启。
 
 ### 首次导入正式材料
 
-源码内置不等于索引已存在。管理员创建完成后，每台新电脑执行一次：
+源码内置不等于索引已存在。创建管理员后，每台新环境执行一次：
 
 ```powershell
 docker compose exec echo-api python /workspace/scripts/import_official_materials.py --apply --username admin
 docker compose exec echo-api python /workspace/scripts/verify_official_retrieval.py --query-base-url http://punditrag:8001
 ```
 
-只有导入任务到达 `indexed` 且固定检索验证通过，才能把该环境用于正式演示。完整的 Windows/macOS
-逐步说明、首次模型下载和故障排查见 [团队本地部署指南](docs/team-setup-windows-macos.md)。
+只有导入任务到达 `indexed` 且固定检索验证通过，环境才可用于正式演示。详见
+[团队本地部署指南](docs/team-setup-windows-macos.md)。
 
 ## 部署与服务
 
