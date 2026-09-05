@@ -103,6 +103,12 @@ flowchart LR
 ## 界面预览
 
 <p align="center">
+  <img src="docs/assets/readme/01-login-current.png" alt="ECHO 新版登录页" width="42%">
+</p>
+
+<p align="center"><sub>登录页为当前前端实机截图：产品说明、学习入口与账号登录保持在同一视图。</sub></p>
+
+<p align="center">
   <img src="docs/assets/readme/02-course-center.png" alt="ECHO 课程中心与三个 Semantic Kernel 学习模块" width="92%">
 </p>
 
