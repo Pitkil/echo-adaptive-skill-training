@@ -64,6 +64,9 @@ Every turn has one primary action. Generated content must pass inspection; witho
 
 ## Interface preview
 
+<p align="center"><img src="docs/assets/readme/01-login-current.png" alt="Current ECHO login screen" width="42%"></p>
+<p align="center"><sub>Current login screen captured from the running frontend.</sub></p>
+
 <p align="center"><img src="docs/assets/readme/02-course-center.png" alt="Course center" width="49%"> <img src="docs/assets/readme/03-learning-workspace.png" alt="Learning workspace" width="49%"></p>
 
 The learner path is intentionally short: **Course Center → an open course → modular learning → ECHO conversation and an adaptive path**. Instructors maintain authorised materials and fixed questions; administrators manage identities, configuration, service health and audit records.
