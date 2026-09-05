@@ -27,8 +27,9 @@ BGE Reranker 与 ASR 模型，CPU 环境第一次导入和查询会较慢。
 
 `Docker Desktop -> Settings -> Resources -> Advanced -> Disk image location`
 
-把 Docker 数据盘设为 `D:\DockerDesktopData`。不要使用 Reset to factory defaults，也不要把
-Docker 虚拟磁盘复制到 C 盘。
+把 Docker 安装目录设为 `D:\Docker\Docker`，把磁盘映像/WSL 数据根设为
+`D:\DockerDesktopData`。不要使用 Reset to factory defaults，也不要把 Docker
+虚拟磁盘复制到 C 盘。
 
 在 PowerShell 执行：
 
@@ -119,6 +120,18 @@ Invoke-RestMethod http://127.0.0.1:8010/health
 ```
 
 第一次构建可能需要较长时间。`echo-api` 会等 PunditRAG、SimpleMem 和 ASR 健康后再启动。
+根 Compose 默认不启动微表征容器。只做接口联调时显式启用 Mock：
+
+```powershell
+docker compose --profile micro-mock up --build -d
+```
+
+正式演示或真实评测使用真实模型覆盖配置：
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.micro-real.yml `
+  --profile micro-real up --build -d
+```
 
 ### 6. 创建管理员
 
@@ -179,6 +192,12 @@ docker compose exec echo-api python /workspace/scripts/bootstrap_admin.py --user
 ```
 
 打开 <http://127.0.0.1:8010>。
+
+默认 CPU 栈不包含微表征容器；未启用 `micro-mock` 或 `micro-real` profile 时，ECHO 健康检查中的微表征降级项属于预期状态。需要联调 Mock 时执行：
+
+```bash
+docker compose --profile micro-mock up --build -d
+```
 
 ## 四、首次导入正式课程材料
 
